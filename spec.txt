@@ -6,18 +6,18 @@ Examples:
 A simple echo server:
 
     0 L1 :7
-    [1 A 2] f {
-        # 0 = on setup: rename 3 to 0
-        0 < 0 2
-    }
-
-or more golfed, including the fork-listen flag:
-
-    0L1:7/f0<0 2
+    :egin
+    A 1 2
+    # Fork: setup: redirect 2 to 0, then loop doing nothing (= cat)
+    f 0 < 0 2
+    # In main, close 2
+    < 2
+    # Loop without waiting for a line on stdin
+    begin
 
 HTTP server:
 
-    0L1:80/f{
+    0L1:1080/f{
         1 {
             /^GET ([^ ]*)/ {
                 s//\1/
@@ -48,66 +48,52 @@ HTTP server:
         Go away.
     }
 
+Using the /f extension which does something like the listen/accept/fork dance
+in the chat server. To be formalized as a desugaring...
+
+Chatroulette? Accepts connections in pairs, copies between them.
+
+    L1:2013
+    :egin
+    A 1 2
+    A 1 3
+    # Each fork takes input from 0 (renamed from either 2 or 3) and prints it
+    # to 1.
+    f {
+        0 < 0 2
+        0 < 1 3
+        p 1
+        d
+    }
+    f {
+        0 < 0 3
+        0 < 1 2
+        p 1
+        d
+    }
+    <2
+    <3
+    begin
 
 Files/streams/channels:
 
 No difference is made between input and output files, and the default file 0
 includes both stdin and stdout. This unifies files/stdio with sockets.
 
-Opening normal files can open them readonly. Lines written to readonly files
-will be silently discarded.
-
 In a fork, you may need to close uninteresting files manually.
 (Maybe it could be statically analyzed and only keep references to used files?)
 
 Maybe: limit files to 0-9, accept single-character files without separators
 
-Event-addressing:
-
-In addition to regexp and line numbers (that keep working only on pattern
-space), addresses can match on events, such as incoming connections.
-
-The file descriptor/socket given to accept is only live for one "cycle", if not
-picked up by a fork (that actually references it), it will be closed before the
-next cycle.
-
-General format of file-related events is [ifd event [data...]], ifd is the file
-descriptor the event relates to and event is the event type. data depends on
-the event.
-
-Events:
-  i A c        Accept on listening TCP socket i, c is client socket
-                (TODO client address might be useful too)
-
-
-Maybe: until closed, an open file descriptor prevents additional events from
-matching with it. The main process can still close it without closing the
-underlying socket/file if any threads have the same file open. File-opening
-events match the lowest-numbered unopen file.
-
-    # Require two incoming connections, copy data between them
-    [1 A 2] b
-    [1 A 3] f {
-        :loop
-        /^/ p 3
-        tloop
-        n 2
-        bloop
-    }
-    # If we got a pair, close both file descriptors to allow progress
-    [1 A 3] <2
-    <3
-
-requires a "[1 A 2]<2" to close accepted connections in the main thread after
-forking.
-
 
 Fork semantics:
 
-fork takes a block (like an address?), within that block n (etc) restart from
-the beginning of the block, quit stops the thread.
-fork can redirect stdin/stdout
-(or more generally, renumber any file descriptors locally)
+fork takes a command including its address (typically a block, but if there's
+only one command in the fork you can specify it directly), within that block
+cycles begin from the beginning of the block, quit stops the thread.
+
+Inside the fork, you can redirect and close files etc. without affecting the
+files outside the fork.
 
 
 Extended cargo hold:
@@ -132,18 +118,17 @@ $
 ! (after address) negate
 
 Extensions:
-[]      event specifier
 0       before beginning
+Maybe: $$ for after eof ($ is run on the last line, not after it)
 
 Addresses match on pattern space, reading from other files happens by using n
-or N with an ifd. Events act as if a special pattern space that matches nothing.
-
-Event specifiers could also match when there is a pattern.
+or N with an ifd.
 
 Normal sed doesn't (generally) accept 0 as a line number (except for 0,/re/
 which is different from 1,/re/ if the first line matches).
 An address 0 here matches *before* the first input line. This lets you run
-commands for setting up. Pattern space will be "abstract" as with events.
+commands for setting up. Pattern space will be "abstract" here and not match
+any regexps (including those for an empty string).
 
 Line numbers are reset within each fork, including the special 0 for setting
 up.
@@ -155,7 +140,9 @@ Unused commands (POSIX): ABCeEfFIjJkKLmMoOQRSTuUvVWXYzZ
 Unused commands (+GNU): ABCEfIjJkKmMoOQSuUVXYzZ
 
 Added:
-        free: AB
+A server client     wait for and accept a client on the server socket, assign
+                    the client to the given file descriptor
+        free: B
 C[fd] host:port     open [fd] and connect to host:port
 E                   eval sed code?
 f [addr] [cmd]      fork the following command. May be/usually a block.

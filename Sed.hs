@@ -98,6 +98,7 @@ run c state = case c of
         return state
     Label l -> return state
     Branch l -> runBranch l (program state) state
+    -- TODO 'n' autoprints if not disabled, *then* reads a new input line
     Next i -> next i state
     Listen i maybeHost port -> do
         let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
@@ -162,9 +163,11 @@ runBranch l [] state = fatal ("Label " ++ show l ++ " not found")
 
 {-
 0 L1:2007
+:egin
 A1 2
 f 0 < 0 2
 < 2
+begin
  -}
 echoServer = [
     Sed (At (Line 0)) (Listen 1 Nothing 2007),
