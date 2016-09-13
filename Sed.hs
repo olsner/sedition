@@ -21,13 +21,12 @@ data MaybeAddress
   = Always
   | At Address
   | Between Address Address
-  | NotAt Address
-  | NotBetween Address Address
   deriving (Show, Ord, Eq)
 data Sed = Sed MaybeAddress Cmd deriving (Show, Ord, Eq)
 data Cmd
   = Block [Sed]
   | Fork Sed
+  | NotAddr Cmd
   | Label Label
   | Branch Label
   -- | Test Label
@@ -80,9 +79,14 @@ check Always _ = True
 check (At (Line expectedLine)) (SedState { lineNumber = actualLine })
     = expectedLine == actualLine
 
+-- Only the first one negates - series of ! don't double-negate.
+-- run will traverse and ignore all NotAddr prefixes.
+applyNot (NotAddr cmd) t = not t
+applyNot cmd t = t
+
 runProgram state = runBlock (program state) state
 runBlock (Sed cond s:ss) state = do
-    state <- if check cond state then run s state else return state
+    state <- if applyNot s $ check cond state then run s state else return state
     runBlock ss state
 runBlock [] state | eof state = debug "Finished program at EOF" >> return state
                   | otherwise = do
@@ -96,6 +100,7 @@ run c state = case c of
         forkIO (runProgram (forkState state [sed]) >> return ())
         debug ("parent is after fork")
         return state
+    NotAddr c -> run c state
     Label l -> return state
     Branch l -> runBranch l (program state) state
     -- TODO 'n' autoprints if not disabled, *then* reads a new input line

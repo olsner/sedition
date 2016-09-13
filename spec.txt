@@ -176,7 +176,22 @@ X [reg]             indirect load: load register (reg) into reg
                     hold space with value of foo.
 
 POSIX: (+ xed reg/ifd/ofd arguments)
+Addresses:
+//              regexp
+\%%             regexp with custom delim
+0-9+            lines...
+$               last-line address
+
+Non-alphabetic:
 {
+=               print line number
+#
+< fd1 fd2       rename fd2 to fd1, closing fd1 if open
+< fd1           close fd1
+![cmd]          unless address (address is applied as usual though)
+:label
+
+alphabetic
 a\ [ofd]
 b               jump to beginning, start next cycle
 b label         jump to label
@@ -190,7 +205,8 @@ H [reg]         "Hold" reg += \n + pattern
 i\ [ofd]        If the first line has i\ (or i whitespace \), it may be followed by output fd
 i\ [ofd]        Otherwise it works as in GNU with the special single-line optimization
 l (silly)
-n [ifd]         replace pattern space with next input line (from ifd)
+n [ifd]         print pattern space (if autoprint), thne replace pattern space
+                with next input line (from ifd)
 N [ifd]         pattern += \n + input(ifd)
 p [ofd]         print pattern space to ofd
 P [ofd]         print first line of pattern space to ofd
@@ -202,11 +218,6 @@ t label         branch if subst (start next cycle if no label)
 w file          write pattern space to file (redundant with pP)
 x [reg]         exchange pattern <-> reg
 y//
-:label
-=
-#
-< fd1 fd2       rename fd2 to fd1, closing fd1 if open
-< fd1           close fd1
 
 GNU:
 e [cmd]         execute
