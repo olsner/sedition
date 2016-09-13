@@ -1,0 +1,236 @@
+xed, e(X)tended sed, pronounced shed
+====================================
+
+Examples:
+
+A simple echo server:
+
+    0 L1 :7
+    [1 A 2] f {
+        # 0 = on setup: rename 3 to 0
+        0 < 0 2
+    }
+
+or more golfed, including the fork-listen flag:
+
+    0L1:7/f0<0 2
+
+HTTP server:
+
+    0L1:80/f{
+        1 {
+            /^GET ([^ ]*)/ {
+                s//\1/
+                hurl
+                behead
+            }
+            broken
+        }
+        n
+
+        :ehead
+        /(.*): (.*)/ n
+        /^$/! behead
+
+        :egin
+        a\
+        HTTP/1.0 200 OK\r\
+        Content-Type: text/plain\r\
+        \r\
+        Hello world!
+
+        q
+
+        :roken
+        a\
+        400 Bad request\r\
+        \r\
+        Go away.
+    }
+
+
+Files/streams/channels:
+
+No difference is made between input and output files, and the default file 0
+includes both stdin and stdout. This unifies files/stdio with sockets.
+
+Opening normal files can open them readonly. Lines written to readonly files
+will be silently discarded.
+
+In a fork, you may need to close uninteresting files manually.
+(Maybe it could be statically analyzed and only keep references to used files?)
+
+Maybe: limit files to 0-9, accept single-character files without separators
+
+Event-addressing:
+
+In addition to regexp and line numbers (that keep working only on pattern
+space), addresses can match on events, such as incoming connections.
+
+The file descriptor/socket given to accept is only live for one "cycle", if not
+picked up by a fork (that actually references it), it will be closed before the
+next cycle.
+
+General format of file-related events is [ifd event [data...]], ifd is the file
+descriptor the event relates to and event is the event type. data depends on
+the event.
+
+Events:
+  i A c        Accept on listening TCP socket i, c is client socket
+                (TODO client address might be useful too)
+
+
+Maybe: until closed, an open file descriptor prevents additional events from
+matching with it. The main process can still close it without closing the
+underlying socket/file if any threads have the same file open. File-opening
+events match the lowest-numbered unopen file.
+
+    # Require two incoming connections, copy data between them
+    [1 A 2] b
+    [1 A 3] f {
+        :loop
+        /^/ p 3
+        tloop
+        n 2
+        bloop
+    }
+    # If we got a pair, close both file descriptors to allow progress
+    [1 A 3] <2
+    <3
+
+requires a "[1 A 2]<2" to close accepted connections in the main thread after
+forking.
+
+
+Fork semantics:
+
+fork takes a block (like an address?), within that block n (etc) restart from
+the beginning of the block, quit stops the thread.
+fork can redirect stdin/stdout
+(or more generally, renumber any file descriptors locally)
+
+
+Extended cargo hold:
+
+Commands using the hold space will take another register id, which is an
+arbitrary string (without whitespace).
+The unnamed register is the normal hold space.
+Registers starting with ! are temporary and will be cleared at forks and at
+each cycle.
+
+TODO: Abstract hold, with e.g. the register in a register
+TODO: ?reg as command argument anywhere replaces it with the register contents
+TODO: Move register to register without touching pattern space
+  (but could be implemented with a temp reg)
+TODO: The register ! is empty (and writes are ignored)? or maybe not useful.
+
+Address syntax:
+n
+$
+//
+\// (custom regexp separator)
+! (after address) negate
+
+Extensions:
+[]      event specifier
+0       before beginning
+
+Addresses match on pattern space, reading from other files happens by using n
+or N with an ifd. Events act as if a special pattern space that matches nothing.
+
+Event specifiers could also match when there is a pattern.
+
+Normal sed doesn't (generally) accept 0 as a line number (except for 0,/re/
+which is different from 1,/re/ if the first line matches).
+An address 0 here matches *before* the first input line. This lets you run
+commands for setting up. Pattern space will be "abstract" as with events.
+
+Line numbers are reset within each fork, including the special 0 for setting
+up.
+
+
+Command space:
+
+Unused commands (POSIX): ABCeEfFIjJkKLmMoOQRSTuUvVWXYzZ
+Unused commands (+GNU): ABCEfIjJkKmMoOQSuUVXYzZ
+
+Added:
+        free: AB
+C[fd] host:port     open [fd] and connect to host:port
+E                   eval sed code?
+f [addr] [cmd]      fork the following command. May be/usually a block.
+                    May have addresses etc before the command, as usual, or
+                    inside a block if the thread needs more commands.
+                    Whitespace after f is optional.
+        free: IjJkK
+
+L[ifd] host:port/flags
+                    open [ifd] and listen to the given host:port (tcp)
+                    :port on its own listens on all interfaces
+                    space between ifd and :port is optional if there is no host.
+
+                    Match [ifd A fd] events to accept connections.
+
+                    Currently defined L flags:
+                    f: fork
+                        The L command is followed by a command (like fork), the
+                        forked program will be run for each incoming connection,
+                        with the client as fd 0.
+
+        free: mM
+
+o[ifd] file         open file for reading
+O[ofd] file         open file for writing
+
+S: send UDP? connect SSL?
+uUvVXYzZ
+X [reg]             indirect load: load register (reg) into reg
+                    e.g. if hold space has "foo", "X" without register replaces
+                    hold space with value of foo.
+
+POSIX: (+ xed reg/ifd/ofd arguments)
+{
+a\ [ofd]
+b               jump to beginning, start next cycle
+b label         jump to label
+c\ [ofd]
+d [ifd]         Starts new cycle, so has input-fd of next cycle
+D [ifd]         Starts new cycle, so has input-fd of next cycle
+g [reg]         "get" pattern <- reg
+G [reg]         "Get" pattern += \n + reg
+h [reg]         "hold" reg <- pattern
+H [reg]         "Hold" reg += \n + pattern
+i\ [ofd]        If the first line has i\ (or i whitespace \), it may be followed by output fd
+i\ [ofd]        Otherwise it works as in GNU with the special single-line optimization
+l (silly)
+n [ifd]         replace pattern space with next input line (from ifd)
+N [ifd]         pattern += \n + input(ifd)
+p [ofd]         print pattern space to ofd
+P [ofd]         print first line of pattern space to ofd
+q [c]           print (if autoprinting) and quit with exit status
+Q               (GNU) quit without autoprinting
+r file          read file into output (before next cycle)
+s///
+t label         branch if subst (start next cycle if no label)
+w file          write pattern space to file (redundant with pP)
+x [reg]         exchange pattern <-> reg
+y//
+:label
+=
+#
+< fd1 fd2       rename fd2 to fd1, closing fd1 if open
+< fd1           close fd1
+
+GNU:
+e [cmd]         execute
+F               print file name
+L n             "This command is considered a failed experiment"
+R file          read one line from file, queue it for processing as input next cycle
+T label         branch if *not* substituted
+v version
+W file          write first line of pattern space to file
+z               clear pattern space
+
+T seems useful, since there's probably no other way to do that
+e is also "nice"
+R is close to n with input file, but does not restart processing.
