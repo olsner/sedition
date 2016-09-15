@@ -17,7 +17,9 @@ A simple echo server:
 
 HTTP server:
 
-    0L1:1080/f{
+    0L1:1080
+    A12
+    f{
         1 {
             /^GET ([^ ]*)/ {
                 s//\1/
@@ -28,6 +30,8 @@ HTTP server:
         }
         n
 
+        # TODO Make better use of address ranges here
+        # 2,/^$/ {} should match the headers
         :ehead
         /(.*): (.*)/ n
         /^$/! behead
