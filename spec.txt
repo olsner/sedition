@@ -116,7 +116,9 @@ TODO: The register ! is empty (and writes are ignored)? or maybe not useful.
 
 Address syntax:
 n
-$
+$       *on* the last line (not after)
+        => lines with $ need to check hIsEOF, but this shouldn't be done
+        otherwise since it might involve waiting for more data and would block.
 //
 \// (custom regexp separator)
 ! (after address) negate
