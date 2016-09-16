@@ -5,7 +5,7 @@ type S = ByteString
 
 -- Compiled regexp
 type RE = String
-type Label = String
+type Label = S
 
 data Address = Line Int | Match RE | EOF | IRQ
     deriving (Show, Ord, Eq)
@@ -20,7 +20,7 @@ data Cmd
   | Fork Sed
   | NotAddr Cmd
   | Label Label
-  | Branch Label
+  | Branch (Maybe Label)
   -- | Test Label
   -- | TestNot Label
   | Next Int

@@ -1,3 +1,4 @@
+{-# LANGUAGE OverloadedStrings #-}
 
 import Control.Applicative
 import Control.Concurrent
@@ -13,6 +14,7 @@ import System.IO
 import System.IO.Unsafe
 
 import AST
+import Parser
 
 data File
   = HandleFile { fileHandle :: Handle }
@@ -134,32 +136,25 @@ next i state = do
         else Just <$> C.hGetLine h
     return state { eof = eof, pattern = l, lineNumber = 1 + lineNumber state }
 
-runBranch l (s:ss) state = case s of
+runBranch Nothing  ss     state = runBlock ss state
+runBranch (Just l) (s:ss) state = case s of
     Sed _ (Label m) | l == m -> runBlock ss state
-    _ -> runBranch l ss state
+    _ -> runBranch (Just l) ss state
 runBranch l [] state = fatal ("Label " ++ show l ++ " not found")
 
-{-
-0 L1:2007
-:egin
-A1 2
-f 0 < 0 2
-< 2
-begin
- -}
-echoServer = [
-    Sed (At (Line 0)) (Listen 1 Nothing 2007),
-    Sed Always (Label "egin"),
-    Sed Always (Accept 1 2),
-    Sed Always (Fork
-            (Sed (At (Line 0)) (Redirect 0 (Just 2)))),
-    Sed Always (Redirect 2 Nothing),
-    Sed Always (Branch "egin") -- begin
-    ]
 -- TODO This single-threaded acceptor probably doesn't scale. What I would like
 -- is to fork one thread per capability, all running accept. A special fork
 -- command for forking "to each cpu"?
+echoServer = C.unlines $
+  [ "0 L1:2007"
+  , ":loop"
+  , "A1 2"
+  , "f 0 < 0 2"
+  , "< 2"
+  , "bloop" ]
 
 cat = []
 
-main = runSed echoServer
+runSedString = runSed . parseString
+
+main = runSedString echoServer
