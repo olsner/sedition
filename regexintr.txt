@@ -1,0 +1,70 @@
+REGEX INTERRUPTS
+
+This is a way for threads in a xed program to communicate between each other
+without adding too un-seddy commands or capabilities.
+
+There's a shared "message bus" that receives strings. Each string is sent to
+every running thread, and then run through one cycle.
+
+The special address I is used to match interrupts instead of normal input
+lines, and as a special case, interrupts are not matched by any commands at
+all, except for commands with I addresses, or commands inside a block with an I
+address.
+
+As an optimization, only threads that have an active I need to bother. As a
+further optimization, addresses in I blocks can be collected into a regexp
+"bag" to match messages to potential recipient.
+
+Threads must make sure to respond in a timely manner and complete the interrupt
+cycle in a bounded time. Message delivery is guaranteed, so absent infinite
+buffering in the system, eventually the system will block if a thread refuses
+to finish message processing.
+
+
+Free commands in gnu/posix sed:
+
+I: Address, matches whenever there are pending interrupts
+   The pending interrupt is put in pattern space and matched as usual, with
+   the exception that only commands inside an I address will match anything on
+   pattern space.
+
+m: message, sends pattern space into the ether as an interrupt
+m [text]: message, sends fixed message into the ether
+
+
+
+
+
+EXAMPLES
+
+Chat server:
+
+L1:6666/f {
+    # first line is the username for each user
+    1 {
+        h
+        b
+    }
+
+    # regexp interrupts are format "user: message" since we have no other
+    # message kinds here.
+    I {
+        G
+        s/([^:]*): (.*)\n\1/\2/p
+        # If there were other messages, you would want to 't' here to skip
+        # once the first message is processed.
+    }
+
+    # commands are "user: message" and get transformed into a regexint
+    # "user: me: message" to include the sender. (This could be made more
+    # strict, but this is a simple example.) The "me: " part is actually
+    # in the message text.
+    G
+    s/([^:]): .*\n(.*)$/\1: \3: \2/
+    # Invalid command if not matched and replaced, since this is an
+    # example we just ignore it.
+    T
+    m
+}
+
+Uses the /f fork extension for laziness.

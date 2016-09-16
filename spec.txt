@@ -107,6 +107,8 @@ arbitrary string (without whitespace).
 The unnamed register is the normal hold space.
 Registers starting with ! are temporary and will be cleared at forks and at
 each cycle.
+A fork keeps register values at the time of the fork, and changes are only
+visible inside the thread.
 
 TODO: Abstract hold, with e.g. the register in a register
 TODO: ?reg as command argument anywhere replaces it with the register contents
@@ -155,7 +157,8 @@ f [addr] [cmd]      fork the following command. May be/usually a block.
                     May have addresses etc before the command, as usual, or
                     inside a block if the thread needs more commands.
                     Whitespace after f is optional.
-        free: IjJkK
+        free: I (regex interrupt address)
+        free: jJkK
 
 L[ifd] host:port/flags
                     open [ifd] and listen to the given host:port (tcp)
@@ -170,7 +173,7 @@ L[ifd] host:port/flags
                         forked program will be run for each incoming connection,
                         with the client as fd 0.
 
-        free: mM
+        free: mM (regex interrupts)
 
 o[ifd] file         open file for reading
 O[ofd] file         open file for writing
