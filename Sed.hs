@@ -2,6 +2,7 @@
 import Control.Applicative
 import Control.Concurrent
 
+import Data.ByteString.Char8 as C
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
@@ -11,36 +12,7 @@ import Network.Socket
 import System.IO
 import System.IO.Unsafe
 
--- Compiled regexp
-type RE = String
-type Label = String
-
-data Address = Line Int | Match RE
-    deriving (Show, Ord, Eq)
-data MaybeAddress
-  = Always
-  | At Address
-  | Between Address Address
-  deriving (Show, Ord, Eq)
-data Sed = Sed MaybeAddress Cmd deriving (Show, Ord, Eq)
-data Cmd
-  = Block [Sed]
-  | Fork Sed
-  | NotAddr Cmd
-  | Label Label
-  | Branch Label
-  -- | Test Label
-  -- | TestNot Label
-  | Next Int
-  -- nextappend
-  | Print Int
-  -- printfirstline
-  -- fork flags are parsed separately to an event address with fork
-  | Listen Int (Maybe String) Int
-  | Accept Int Int
-  | Redirect Int (Maybe Int)
-  | Subst RE RE
-  deriving (Show, Ord, Eq)
+import AST
 
 data File
   = HandleFile { fileHandle :: Handle }
@@ -50,10 +22,10 @@ data SedState = SedState {
   program :: [Sed],
   files :: Map Int File,
   lineNumber :: Int,
-  pattern :: Maybe String,
+  pattern :: Maybe S,
   eof :: Bool,
   -- hold "" is classic hold space
-  hold :: Map String String,
+  hold :: Map S S,
   -- Probably the wrong model for these.
   -- Consider one /foo/,/bar/ address and one /foo/,/baz/ address - pretty much
   -- each line should have its own state for whether it's still triggered.
@@ -107,7 +79,8 @@ run c state = case c of
     Next i -> next i state
     Listen i maybeHost port -> do
         let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
-        addr:_ <- getAddrInfo (Just hints) maybeHost (Just (show port))
+        let maybeHost' = fmap C.unpack maybeHost
+        addr:_ <- getAddrInfo (Just hints) maybeHost' (Just (show port))
         s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
         setSocketOption s ReuseAddr 1
         bind s (addrAddress addr)
@@ -149,7 +122,7 @@ ofile i state = fileHandle (M.findWithDefault (HandleFile stdout) i (files state
 
 next i state = do
     case pattern state of
-        Just t | autoprint state -> hPutStrLn (ofile 0 state) t
+        Just t | autoprint state -> C.hPutStrLn (ofile 0 state) t
         _ -> return ()
     let h = ifile i state
     eof <- hIsEOF h
@@ -158,7 +131,7 @@ next i state = do
     -- Also check exactly how the $ address works in sed.
     l <- if eof
         then hClose h >> return Nothing
-        else Just <$> hGetLine h
+        else Just <$> C.hGetLine h
     return state { eof = eof, pattern = l, lineNumber = 1 + lineNumber state }
 
 runBranch l (s:ss) state = case s of
