@@ -1,0 +1,21 @@
+L1:2013
+:egin
+A 1 2
+A 1 3
+# Each fork takes input from 0 (renamed from either 2 or 3) and prints it
+# to 1.
+f {
+	0 < 0 2
+	0 < 1 3
+	p 1
+	d
+}
+f {
+	0 < 0 3
+	0 < 1 2
+	p 1
+	d
+}
+<2
+<3
+begin

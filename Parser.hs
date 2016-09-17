@@ -1,6 +1,7 @@
 module Parser where
 
 import Control.Applicative
+import Control.Monad
 
 import Data.Attoparsec.ByteString.Char8 as A
 import Data.ByteString.Char8 (ByteString)
@@ -21,17 +22,20 @@ manyMaybe p = catMaybes <$> many p
 maybeLine = choice [Just <$> pLine, Nothing <$ pComment]
 maybeP p = option Nothing (Just <$> p)
 
+pBlock = manyMaybe maybeLine <* char '}'
+
 pCommand :: Parser Cmd
 pCommand = choice
   [ Hold <$> (char 'h' *> maybeP pRegister)
   , Listen <$> (char 'L' *> int) <*> maybeP pHostName <*> (char ':' *> int)
   , Label <$> (char ':' *> pLabel)
   , Branch <$> (char 'b' *> maybeP pLabel)
-  , Accept <$> (char 'A' *> int) <*> (whiteSpace1 *> int)
+  , Accept <$> (char 'A' *> whiteSpace *> int) <*> (whiteSpace1 *> int)
   , Redirect <$> (char '<' *> whiteSpace *> int) <*> (whiteSpace1 *> maybeP int)
   , Fork <$> (char 'f' *> pLine)
   , NotAddr <$> (char '!' *> pCommand)
-  , (\c -> error ("Unrecognized command " ++ show c)) <$> anyChar <* A.takeWhile (const True)
+  , Block <$> (char '{' *> pBlock)
+  --, (\c -> error ("Unrecognized command " ++ show c)) <$> satisfy (/= '#') <* A.takeWhile (const True)
   ]
 
 int :: Parser Int
@@ -73,3 +77,4 @@ parseString input = case parseOnly pFile input of
     Left e -> error e
 
 testParseString input = print (parseOnly pFile input)
+testParseFile = print . parseOnly pFile <=< BS.readFile

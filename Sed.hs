@@ -2,6 +2,7 @@
 
 import Control.Applicative
 import Control.Concurrent
+import Control.Monad
 
 import Data.ByteString.Char8 as C
 import Data.Map (Map)
@@ -163,4 +164,10 @@ cat = ""
 
 runSedString = runSed . parseString
 
-main = runSedString echoServer
+runSedFile f = do
+    pgm <- parseString <$> C.readFile f
+    print pgm
+    runSed pgm
+
+--main = runSedString echoServer
+main = runSedFile "examples/chatroulette.xed"
