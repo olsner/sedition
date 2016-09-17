@@ -3,83 +3,84 @@ module Parser where
 import Control.Applicative
 import Control.Monad
 
-import Data.Attoparsec.ByteString.Char8 as A
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BS
 
 import Data.Maybe
 
+import Text.Trifecta
+import Text.Trifecta.Delta
+
 import AST
 
-pFile = manyMaybe maybeLine <* endOfInput
-pLine = whiteSpace *>
-    (Sed <$> option Always pMaybeAddress <*> (whiteSpace *> pCommand)) <*
-    eol
+pFile = pCommandsThen eof
+pBlock = pCommandsThen (char '}')
 
-manyMaybe :: Parser (Maybe a) -> Parser [a]
 manyMaybe p = catMaybes <$> many p
+pCommandsThen :: Parser a -> Parser [Sed]
+pCommandsThen p = manyMaybe (try $ wsThen lineOrComment) <* (wsThen p)
+  where wsThen p = skipMany (oneOf "; \t\n\f\t\v\r") *> p
 
-maybeLine = choice [Just <$> pLine, Nothing <$ pComment]
-maybeP p = option Nothing (Just <$> p)
+lineOrComment = Just <$> pLine <|> Nothing <$ pComment
 
-pBlock = eol *> manyMaybe maybeLine <* char '}'
-
-($>) = flip (<$)
-
-pCommand :: Parser Cmd
-pCommand = choice
-  [ Hold <$> (char 'h' *> maybeP pRegister)
-  , Listen <$> (char 'L' *> int) <*> maybeP pHostName <*> (char ':' *> int)
-  , Label <$> (char ':' *> pLabel)
-  , Branch <$> (char 'b' *> maybeP pLabel)
-  , Accept <$> (char 'A' *> whiteSpace *> int) <*> (whiteSpace1 *> int)
-  , Redirect <$> (char '<' *> whiteSpace *> int) <*> maybeP (whiteSpace1 *> int)
-  , Fork <$> (char 'f' *> pLine)
-  , NotAddr <$> (char '!' *> pCommand)
-  , Block <$> (char '{' *> pBlock)
-  , char 'p' *> (Print <$> option 0 (whiteSpace *> int))
-  , char 'd' $> Delete
-  --, (\c -> error ("Unrecognized command " ++ show c)) <$> satisfy (/= '#') <* A.takeWhile (const True)
-  ]
-
-int :: Parser Int
-int = read <$> many1 digit
-
-identifier = takeTill (inClass " \t\n#")
-pLabel = whiteSpace *> identifier
-pRegister = whiteSpace *> identifier
-pHostName = A.takeWhile1 (\c -> c /= ':')
+-- TODO Special case, when the *first* line is #n autoprint is disabled.
+-- Maybe should be in pFile (can be in the AST as a disable-autoprint command).
+pComment = char '#' *> skipMany (notChar '\n')
+pLine = Sed <$> option Always pMaybeAddress <*> wsThen pCommand
 
 pMaybeAddress = choice $
   [ At <$> pAddress
-  , Between <$> pAddress <* comma <*> pAddress ]
+  -- FIXME whitespace is accepted and ignored around the ,
+  , Between <$> pAddress <* char ',' <*> pAddress
+  ]
 pAddress :: Parser Address
 pAddress = choice
   [ Line <$> int
   , EOF <$ char '$'
   ]
 
-comma = () <$ whiteSpace <* char ',' <* whiteSpace
+-- not eof, blank, }, ; or #
+pLabel = BS.pack <$> wsThen (some (noneOf "; \t\n\f\t\v\r#"))
+pRegister = pLabel
+-- Same but also delimited by : (for :port)
+pHostName = BS.pack <$> wsThen (some (noneOf ":; \t\n\f\t\v\r#"))
 
-pComment :: Parser ()
-pComment = char '#' *> skipRestOfLine
-whiteSpace = skipWhile isspace
-whiteSpace1 = satisfy isspace *> whiteSpace
-isspace c = c == ' ' || c == '\t'
-nonWhiteSpace = takeTill isspace
+int :: Parser Int
+int = fromInteger <$> decimal
 
-eol = takeTill (inClass "\n#") <* newlineOrComment
+wsThen p = blanks *> p
+ws1Then p = blanks1 *> p
+wsInt = wsThen int
 
--- TODO Escaped newlines in comments?
-skipRestOfLine = () <$ takeTill (== '\n') <* A.takeWhile (== '\n')
-newline = () <$ takeWhile1 (== '\n') <|> endOfInput
-newlineOrComment = (newline <|> pComment) <?> "newlineOrComment"
+blank = oneOf " \t"
+blanks = skipMany blank
+blanks1 = skipSome blank
+
+maybeP p = option Nothing (Just <$> p)
+
+pCommand = charSwitch $
+  [ ('{', Block <$> pBlock)
+  , ('!', NotAddr <$> pCommand)
+  , (':', Label <$> pLabel)
+  , ('<', Redirect <$> wsThen int <*> maybeP (ws1Then int))
+  , ('A', Accept <$> wsThen int <*> ws1Then int)
+  , ('L', Listen <$> int <*> maybeP pHostName <*> (char ':' *> int))
+  , ('b', Branch <$> maybeP pLabel)
+  , ('d', pure Delete)
+  , ('f', Fork <$> pLine)
+  , ('h', Hold <$> maybeP pRegister)
+  , ('n', Next <$> option 0 wsInt)
+  , ('p', Print <$> option 0 wsInt)
+  ]
+  where
+    charSwitch cps = choice [char c *> p | (c,p) <- cps]
 
 parseString :: ByteString -> [Sed]
 parseString input = case parseOnly pFile input of
-    Right p -> p
-    Left e -> error e
+    Success p -> p
+    Failure e -> error (show e)
 
+parseOnly p = parseByteString p (Lines 0 0 0 0)
 testParseString input = print (parseOnly pFile input)
 testParseFile = print . parseOnly pFile <=< BS.readFile
 testParseLines = mapM_ testParseString . BS.lines <=< BS.readFile

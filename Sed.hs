@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings #-}
+{-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 
 import Control.Applicative
 import Control.Concurrent
@@ -49,6 +50,10 @@ forkState state pgm = state { program = pgm, pattern = Nothing, lineNumber = 0 }
 runSed :: [Sed] -> IO ()
 runSed seds = runProgram (initialState seds) >> return ()
 
+-- TODO Should not run anything on line 0 (before-first) unless it matches it
+-- explicitly. Also should not run normal code in interrupt context.
+-- Note though that we *should* run this code if it's contained inside a matching
+-- 0{ or I{ block!
 check Always _ = return True
 check (At (Line expectedLine)) (SedState { lineNumber = actualLine })
     = return (expectedLine == actualLine)
@@ -86,6 +91,11 @@ run c state = case c of
         case res of
             Just state -> return state
             Nothing -> return state
+    -- TODO Does this restart? Clear the pattern space after printing? Restart?
+    Print i -> do
+        C.hPutStrLn (ofile i state) (fromJust (pattern state))
+        return state
+    Delete -> return state { pattern = Nothing }
     Listen i maybeHost port -> do
         let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
         let maybeHost' = fmap C.unpack maybeHost
