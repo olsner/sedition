@@ -25,7 +25,6 @@ data SedState = SedState {
   files :: Map Int File,
   lineNumber :: Int,
   pattern :: Maybe S,
-  eof :: Bool,
   -- hold "" is classic hold space
   hold :: Map S S,
   -- Probably the wrong model for these.
@@ -39,19 +38,20 @@ data SedState = SedState {
   deriving (Show)
 
 putstrlock = unsafePerformIO (newMVar ())
-debug s = return () -- withMVar putstrlock (\() -> putStrLn s)
+debug s = return () -- withMVar putstrlock (\() -> System.IO.putStrLn s)
 
 fatal msg = error ("ERROR: " ++ msg)
 
-initialState pgm = SedState pgm M.empty 0 Nothing False M.empty [] True
+initialState pgm = SedState pgm M.empty 0 Nothing M.empty [] True
 forkState state pgm = state { program = pgm, pattern = Nothing, lineNumber = 0 }
 
 runSed :: [Sed] -> IO ()
 runSed seds = runProgram (initialState seds) >> return ()
 
-check Always _ = True
+check Always _ = return True
 check (At (Line expectedLine)) (SedState { lineNumber = actualLine })
-    = expectedLine == actualLine
+    = return (expectedLine == actualLine)
+check (At EOF) state = hIsEOF (ifile 0 state)
 
 -- Only the first one negates - series of ! don't double-negate.
 -- run will traverse and ignore all NotAddr prefixes.
@@ -60,13 +60,15 @@ applyNot cmd t = t
 
 runProgram state = runBlock (program state) state
 runBlock (Sed cond s:ss) state = do
-    state <- if applyNot s $ check cond state then run s state else return state
+    dorun <- check cond state
+    state <- if applyNot s dorun then run s state else return state
     runBlock ss state
-runBlock [] state | eof state = debug "Finished program at EOF" >> return state
-                  | otherwise = do
-                    state <- next 0 state
-                    debug ("looped: state = " ++ show state)
-                    runProgram state
+runBlock [] state = do
+    res <- next 0 state
+    debug ("looped: state = " ++ show res)
+    case res of
+        Just state -> runProgram state
+        Nothing -> return state
 run :: Cmd -> SedState -> IO SedState
 run c state = case c of
     Block seds -> runBlock seds state
@@ -78,7 +80,11 @@ run c state = case c of
     Label l -> return state
     Branch l -> runBranch l (program state) state
     -- TODO 'n' autoprints if not disabled, *then* reads a new input line
-    Next i -> next i state
+    Next i -> do
+        res <- next i state
+        case res of
+            Just state -> return state
+            Nothing -> return state
     Listen i maybeHost port -> do
         let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
         let maybeHost' = fmap C.unpack maybeHost
@@ -128,13 +134,13 @@ next i state = do
         _ -> return ()
     let h = ifile i state
     eof <- hIsEOF h
-    -- TODO Should not close 'h' until *after* the eof loop is done, so we can
-    -- still output things in the last loop.
-    -- Also check exactly how the $ address works in sed.
-    l <- if eof
-        then hClose h >> return Nothing
-        else Just <$> C.hGetLine h
-    return state { eof = eof, pattern = l, lineNumber = 1 + lineNumber state }
+    eof2 <- isEOF
+    debug ("next: eof=" ++ show eof ++ " stdin eof=" ++ show eof2)
+    case eof of
+        True -> return Nothing
+        False -> do
+            l <- Just <$> C.hGetLine h
+            return $ Just state { pattern = l, lineNumber = 1 + lineNumber state }
 
 runBranch Nothing  ss     state = runBlock ss state
 runBranch (Just l) (s:ss) state = case s of
@@ -153,7 +159,7 @@ echoServer = C.unlines $
   , "< 2"
   , "bloop" ]
 
-cat = []
+cat = ""
 
 runSedString = runSed . parseString
 
