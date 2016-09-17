@@ -24,15 +24,18 @@ data Cmd
   -- | Test Label
   -- | TestNot Label
   | Next Int
-  -- nextappend
+  | NextA Int
   | Print Int
-  -- printfirstline
+  | PrintA Int
   -- fork flags are parsed separately to an event address with fork
   | Listen Int (Maybe S) Int
   | Accept Int Int
   | Redirect Int (Maybe Int)
   | Subst RE RE
 
+  -- dD
+  | Delete
+  | DeleteA
   -- hH/gG
   | Hold (Maybe S)
   | HoldA (Maybe S)

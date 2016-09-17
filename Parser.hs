@@ -22,7 +22,9 @@ manyMaybe p = catMaybes <$> many p
 maybeLine = choice [Just <$> pLine, Nothing <$ pComment]
 maybeP p = option Nothing (Just <$> p)
 
-pBlock = manyMaybe maybeLine <* char '}'
+pBlock = eol *> manyMaybe maybeLine <* char '}'
+
+($>) = flip (<$)
 
 pCommand :: Parser Cmd
 pCommand = choice
@@ -31,10 +33,12 @@ pCommand = choice
   , Label <$> (char ':' *> pLabel)
   , Branch <$> (char 'b' *> maybeP pLabel)
   , Accept <$> (char 'A' *> whiteSpace *> int) <*> (whiteSpace1 *> int)
-  , Redirect <$> (char '<' *> whiteSpace *> int) <*> (whiteSpace1 *> maybeP int)
+  , Redirect <$> (char '<' *> whiteSpace *> int) <*> maybeP (whiteSpace1 *> int)
   , Fork <$> (char 'f' *> pLine)
   , NotAddr <$> (char '!' *> pCommand)
   , Block <$> (char '{' *> pBlock)
+  , char 'p' *> (Print <$> option 0 (whiteSpace *> int))
+  , char 'd' $> Delete
   --, (\c -> error ("Unrecognized command " ++ show c)) <$> satisfy (/= '#') <* A.takeWhile (const True)
   ]
 
@@ -78,3 +82,4 @@ parseString input = case parseOnly pFile input of
 
 testParseString input = print (parseOnly pFile input)
 testParseFile = print . parseOnly pFile <=< BS.readFile
+testParseLines = mapM_ testParseString . BS.lines <=< BS.readFile
