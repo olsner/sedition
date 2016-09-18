@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, CPP #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 
 import Control.Applicative
@@ -39,8 +39,15 @@ data SedState = SedState {
 }
   deriving (Show)
 
+#define DEBUG 0
+#if DEBUG
 putstrlock = unsafePerformIO (newMVar ())
-debug s = return () -- withMVar putstrlock (\() -> System.IO.putStrLn s)
+debug s = withMVar putstrlock $ \() -> do
+    t <- myThreadId
+    System.IO.putStrLn (show t ++ ": " ++ s)
+#else
+debug _ = return ()
+#endif
 
 fatal msg = error ("ERROR: " ++ msg)
 
