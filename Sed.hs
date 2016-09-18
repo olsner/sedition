@@ -145,8 +145,7 @@ next i state = do
         _ -> return ()
     let h = ifile i state
     eof <- hIsEOF h
-    eof2 <- isEOF
-    debug ("next: eof=" ++ show eof ++ " stdin eof=" ++ show eof2)
+    debug ("next: eof=" ++ show eof)
     case eof of
         True -> return Nothing
         False -> do
