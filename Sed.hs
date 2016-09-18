@@ -55,7 +55,7 @@ initialState pgm = SedState pgm M.empty 0 Nothing M.empty [] True
 forkState state pgm = state { program = pgm, pattern = Nothing, lineNumber = 0 }
 
 runSed :: [Sed] -> IO ()
-runSed seds = runProgram (initialState seds) >> return ()
+runSed seds = runProgram (initialState seds)
 
 -- TODO Should not run anything on line 0 (before-first) unless it matches it
 -- explicitly. Also should not run normal code in interrupt context.
@@ -71,38 +71,52 @@ check (At EOF) state = hIsEOF (ifile 0 state)
 applyNot (NotAddr cmd) t = not t
 applyNot cmd t = t
 
-runProgram state = runBlock (program state) state
-runBlock (Sed cond s:ss) state = do
-    dorun <- check cond state
-    state <- if applyNot s dorun then run s state else return state
-    runBlock ss state
-runBlock [] state = do
+runProgram :: SedState -> IO ()
+runProgram state = runBlock (program state) state (const (return ()))
+
+-- Read a new input line, then run k if input was available or return ()
+-- directly if we've reached EOF.
+-- For 'n' (read input and continue execution), k is the next-command
+-- continuation. For the end-of-cycle or 'b' (t/T) without target, k is instead
+-- runProgram so that it restarts the whole program.
+newCycle state k = do
+    debug ("new cycle: -- state = " ++ show state)
     res <- next 0 state
-    debug ("looped: state = " ++ show res)
+    debug ("new cycle: => state = " ++ show res)
     case res of
-        Just state -> runProgram state
-        Nothing -> return state
-run :: Cmd -> SedState -> IO SedState
-run c state = case c of
-    Block seds -> runBlock seds state
+        Just state -> k state
+        Nothing -> debug ("new cycle: exiting")
+
+runBlock :: [Sed] -> SedState -> (SedState -> IO ()) -> IO ()
+runBlock [] state k = newCycle state runProgram
+runBlock (Sed cond c:ss) state k = do
+    dorun <- check cond state
+    debug (show cond ++ " => " ++ show dorun ++ ": " ++ show c)
+    let k' state = runBlock ss state k
+    if applyNot c dorun then run c state k' else k' state
+
+run :: Cmd -> SedState -> (SedState -> IO ()) -> IO ()
+run c state k = case c of
+    Block seds -> runBlock seds state k
     Fork sed -> do
-        forkIO (runProgram (forkState state [sed]) >> return ())
+        forkIO $ do
+            debug ("start of fork")
+            runProgram (forkState state [sed])
+            debug ("end of fork")
         debug ("parent is after fork")
-        return state
-    NotAddr c -> run c state
-    Label l -> return state
-    Branch l -> runBranch l (program state) state
-    -- TODO 'n' autoprints if not disabled, *then* reads a new input line
-    Next i -> do
-        res <- next i state
-        case res of
-            Just state -> return state
-            Nothing -> return state
+        k state
+    NotAddr c -> run c state k
+    Label l -> k state
+    Branch Nothing -> do
+        debug "branch: nothing"
+        newCycle state runProgram
+    Branch (Just l) -> runBranch l (program state) state
+    Next i -> newCycle state k
     -- TODO Does this restart? Clear the pattern space after printing? Restart?
     Print i -> do
         C.hPutStrLn (ofile i state) (fromJust (pattern state))
-        return state
-    Delete -> return state { pattern = Nothing }
+        k state
+    Delete -> k state { pattern = Nothing }
     Listen i maybeHost port -> do
         let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
         let maybeHost' = fmap C.unpack maybeHost
@@ -112,21 +126,22 @@ run c state = case c of
         bind s (addrAddress addr)
         listen s 7
         debug ("now listening on " ++ show i)
-        replaceFile i (SocketFile s) state
+        k =<< replaceFile i (SocketFile s) state
     Accept i j -> do
         let Just (SocketFile s) = getFile i state
         debug ("accepting from " ++ show i ++ " to " ++ show j)
         (c,addr) <- accept s
         debug ("accepted: " ++ show addr)
         h <- socketToHandle c ReadWriteMode
-        replaceFile j (HandleFile h) state
+        k =<< replaceFile j (HandleFile h) state
     Redirect i (Just j) -> do
-        case getFile j state of
+        state <- case getFile j state of
             Just f -> delFile j =<< replaceFile i f state
             Nothing -> closeFile i state
+        k state
     Redirect i Nothing -> do
         debug ("Closing " ++ show i ++ ": " ++ show (getFile i state))
-        closeFile i state
+        k =<< closeFile i state
 
 getFile i state = M.lookup i (files state)
 closeFile i state = do
@@ -159,10 +174,9 @@ next i state = do
             l <- Just <$> C.hGetLine h
             return $ Just state { pattern = l, lineNumber = 1 + lineNumber state }
 
-runBranch Nothing  ss     state = runBlock ss state
-runBranch (Just l) (s:ss) state = case s of
-    Sed _ (Label m) | l == m -> runBlock ss state
-    _ -> runBranch (Just l) ss state
+runBranch l (s:ss) state = case s of
+    Sed _ (Label m) | l == m -> runBlock ss state (const (return ()))
+    _ -> runBranch l ss state
 runBranch l [] state = fatal ("Label " ++ show l ++ " not found")
 
 -- TODO This single-threaded acceptor probably doesn't scale. What I would like
