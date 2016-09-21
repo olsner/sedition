@@ -7,6 +7,8 @@ A simple echo server:
 
     0 L1 :7
     :egin
+    # Allow this code to run on line 0 (before-first-line)
+    0{
     A 1 2
     # Fork: setup: redirect 2 to 0, then loop doing nothing (= cat)
     f 0 < 0 2
@@ -14,6 +16,7 @@ A simple echo server:
     < 2
     # Loop without waiting for a line on stdin
     begin
+    }
 
 HTTP server:
 
@@ -57,8 +60,9 @@ in the chat server. To be formalized as a desugaring...
 
 Chatroulette? Accepts connections in pairs, copies between them.
 
-    L1:2013
+    0L1:2013
     :egin
+    0{
     A 1 2
     A 1 3
     # Each fork takes input from 0 (renamed from either 2 or 3) and prints it
@@ -78,6 +82,8 @@ Chatroulette? Accepts connections in pairs, copies between them.
     <2
     <3
     begin
+    }
+
 
 Files/streams/channels:
 
@@ -108,16 +114,19 @@ The unnamed register is the normal hold space.
 Registers starting with ! are temporary and will be cleared at forks and at
 each cycle.
 A fork keeps register values at the time of the fork, and changes are only
-visible inside the thread.
+visible inside the thread. For communication between threads, use regexp
+interrupts.
 
-TODO: Abstract hold, with e.g. the register in a register
+
 TODO: ?reg as command argument anywhere replaces it with the register contents
 TODO: Move register to register without touching pattern space
   (but could be implemented with a temp reg)
 TODO: The register ! is empty (and writes are ignored)? or maybe not useful.
 
-Address syntax:
-n
+
+
+Address syntax (normal):
+n       line number
 $       *on* the last line (not after)
         => lines with $ need to check hIsEOF, but this shouldn't be done
         otherwise since it might involve waiting for more data and would block.
@@ -125,12 +134,13 @@ $       *on* the last line (not after)
 \// (custom regexp separator)
 ! (after address) negate
 
-Extensions:
+Address extensions:
+I       regexp interrupt delivery
 0       before beginning
 Maybe: $$ for after eof ($ is run on the last line, not after it)
 
 Addresses match on pattern space, reading from other files happens by using n
-or N with an ifd.
+or N with an ifd. EOF is only applicable for file 0.
 
 Normal sed doesn't (generally) accept 0 as a line number (except for 0,/re/
 which is different from 1,/re/ if the first line matches).
@@ -138,8 +148,24 @@ An address 0 here matches *before* the first input line. This lets you run
 commands for setting up. Pattern space will be "abstract" here and not match
 any regexps (including those for an empty string).
 
-Line numbers are reset within each fork, including the special 0 for setting
-up.
+On the before-first line, only commands with address 0 or in blocks with
+address 0 will run at all. Unconditional commands will *not* run. Unconditional
+*blocks*, however, *will* run.
+Likewise for the magical address/state I.
+
+On line 0, using pattern space will fail and regexps will not match.
+On IRQs, pattern space is available but the contents does not come from the
+input.
+
+
+TODO: Change before-first and IRQ addresses - if the program has any 0 or I
+address, the whole program will run on those addresses so the program has to
+watch out and add the required conditions by itself.
+If the whole program should run on address 0 without using input at all, it
+would e.g. only need to put an explicit 0 on the first line.
+If the program has no I addresses it will not accept regexp interrupts and if
+it has no 0 addresses it will not run on the before-first line.
+
 
 
 Command space:

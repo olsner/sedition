@@ -18,6 +18,7 @@ import System.IO.Unsafe
 import AST
 import Parser
 
+data BlockState = BlockN | BlockI | Block0 deriving (Show, Eq)
 data File
   = HandleFile { fileHandle :: Handle }
   | SocketFile { fileSocket :: Socket }
@@ -27,13 +28,15 @@ data SedState = SedState {
   files :: Map Int File,
   lineNumber :: Int,
   pattern :: Maybe S,
+  irq :: Bool,
   -- hold "" is classic hold space
   hold :: Map S S,
   -- Probably the wrong model for these.
   -- Consider one /foo/,/bar/ address and one /foo/,/baz/ address - pretty much
   -- each line should have its own state for whether it's still triggered.
   activeAddresses :: [Address],
-  autoprint :: Bool
+  autoprint :: Bool,
+  block :: BlockState
 
   -- Pending output? Other tricky stuff?
 }
@@ -51,20 +54,32 @@ debug _ = return ()
 
 fatal msg = error ("ERROR: " ++ msg)
 
-initialState pgm = SedState pgm M.empty 0 Nothing M.empty [] True
-forkState state pgm = state { program = pgm, pattern = Nothing, lineNumber = 0 }
+initialState pgm = SedState pgm M.empty 0 Nothing False M.empty [] True BlockN
+forkState state pgm = state {
+    program = pgm,
+    pattern = Nothing,
+    lineNumber = 0,
+    block = BlockN }
 
 runSed :: [Sed] -> IO ()
 runSed seds = runProgram (initialState seds)
 
--- TODO Should not run anything on line 0 (before-first) unless it matches it
--- explicitly. Also should not run normal code in interrupt context.
--- Note though that we *should* run this code if it's contained inside a matching
--- 0{ or I{ block!
-check Always _ = return True
+-- EOF is checked lazily to avoid the start of each cycle blocking until after
+-- at least one character of the next line has been read.
+check (At EOF) state = hIsEOF (ifile 0 state)
+-- A bit of special casing here - unconditional statements should not be run
+-- in the before-first or IRQ state unless they're inside a 0{} or I{} block.
+-- runBlock updates and restores the BlockI/Block0 state.
+-- This doesn't apply for unconditional *blocks* though - see runBlock below.
+check Always state
+    | 0 <- lineNumber state = return (block state == Block0)
+    | irq state = return (block state == BlockI)
+    | Just _ <- pattern state = return True
+    -- We should have at least one of the above cases matching...
+    | otherwise = fatal ("Unexpected state for matching Always " ++ show state)
 check (At (Line expectedLine)) (SedState { lineNumber = actualLine })
     = return (expectedLine == actualLine)
-check (At EOF) state = hIsEOF (ifile 0 state)
+check (At IRQ) state = return (irq state)
 
 -- Only the first one negates - series of ! don't double-negate.
 -- run will traverse and ignore all NotAddr prefixes.
@@ -89,11 +104,27 @@ newCycle state k = do
 
 runBlock :: [Sed] -> SedState -> (SedState -> IO ()) -> IO ()
 runBlock [] state k = newCycle state runProgram
+-- Would be nice not to need this hack here, the rest of the conditional stuff
+-- should be updated to work with this.
+-- This makes it so that unconditional blocks are run even if the BlockI/0
+-- state check would *not* run an unconditional statement now. The block might
+-- then contain conditionals that do match.
+runBlock (Sed Always (Block seds):ss) state k =
+    runBlock seds state (\state -> runBlock ss state k)
 runBlock (Sed cond c:ss) state k = do
     dorun <- check cond state
     debug (show cond ++ " => " ++ show dorun ++ ": " ++ show c)
-    let k' state = runBlock ss state k
-    if applyNot c dorun then run c state k' else k' state
+    -- If the address is one of these special addresses, then change the block
+    -- state, then make sure to reset it to its previous value before running
+    -- the next statement.
+    -- Blocks run inside this block will inherit it and get the block-state
+    -- popped once it gets back to the outer continuation.
+    let state' = case cond of
+            At (Line 0) -> state { block = Block0 }
+            At IRQ -> state { block = BlockI }
+            _ -> state
+    let k' state'' = runBlock ss (state'' { block = block state }) k
+    if applyNot c dorun then run c state' k' else k' state
 
 run :: Cmd -> SedState -> (SedState -> IO ()) -> IO ()
 run c state k = case c of
@@ -112,7 +143,6 @@ run c state k = case c of
         newCycle state runProgram
     Branch (Just l) -> runBranch l (program state) state
     Next i -> newCycle state k
-    -- TODO Does this restart? Clear the pattern space after printing? Restart?
     Print i -> do
         C.hPutStrLn (ofile i state) (fromJust (pattern state))
         k state
@@ -185,10 +215,12 @@ runBranch l [] state = fatal ("Label " ++ show l ++ " not found")
 echoServer = C.unlines $
   [ "0 L1:2007"
   , ":loop"
+  , "0{"
   , "A1 2"
   , "f 0 < 0 2"
   , "< 2"
-  , "bloop" ]
+  , "bloop"
+  , "}" ]
 
 cat = ""
 
