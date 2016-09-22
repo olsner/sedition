@@ -29,15 +29,20 @@ data SedState = SedState {
   files :: Map Int File,
   lineNumber :: Int,
   pattern :: Maybe S,
-  irq :: Bool,
   -- hold "" is classic hold space
   hold :: Map S S,
   -- Probably the wrong model for these.
   -- Consider one /foo/,/bar/ address and one /foo/,/baz/ address - pretty much
   -- each line should have its own state for whether it's still triggered.
-  activeAddresses :: [Address],
+  --activeAddresses :: [Address],
+
   autoprint :: Bool,
-  block :: BlockState
+  block :: BlockState,
+
+  bus :: Bus S,
+  passenger :: Passenger S,
+  -- If 'True', pattern is an event rather than a 
+  irq :: Bool
 
   -- Pending output? Other tricky stuff?
 }
@@ -55,15 +60,31 @@ debug _ = return ()
 
 fatal msg = error ("ERROR: " ++ msg)
 
-initialState pgm = SedState pgm M.empty 0 Nothing False M.empty [] True BlockN
-forkState state pgm = state {
+initialState pgm = do
+  bus <- newBus
+  passenger <- board bus
+  return SedState {
+    program = pgm,
+    files = M.empty,
+    lineNumber = 0,
+    pattern = Nothing,
+    hold = M.empty,
+    autoprint = True,
+    block = BlockN,
+    bus = bus,
+    passenger = passenger,
+    irq = False }
+forkState state pgm = do
+  passenger <- board (bus state)
+  return state {
     program = pgm,
     pattern = Nothing,
     lineNumber = 0,
-    block = BlockN }
+    block = BlockN,
+    passenger = passenger}
 
 runSed :: [Sed] -> IO ()
-runSed seds = runProgram (initialState seds)
+runSed seds = runProgram =<< initialState seds
 
 -- EOF is checked lazily to avoid the start of each cycle blocking until after
 -- at least one character of the next line has been read.
@@ -133,7 +154,7 @@ run c state k = case c of
     Fork sed -> do
         forkIO $ do
             debug ("start of fork")
-            runProgram (forkState state [sed])
+            runProgram =<< forkState state [sed]
             debug ("end of fork")
         debug ("parent is after fork")
         k state

@@ -1,4 +1,4 @@
-module Bus (Bus(), Passenger(), board, drive, travel) where
+module Bus (Bus(..), newBus, Passenger(..), board, drive, travel) where
 
 import Control.Concurrent
 import Control.Concurrent.Chan
@@ -14,6 +14,11 @@ import System.Mem.Weak
 
 newtype Bus a = Bus (MVar (Int, Map Int (Weak (MVar a))))
 newtype Passenger a = Passenger (MVar a)
+
+instance Show (Passenger a) where
+  show _ = "Passenger{}"
+instance Show (Bus a) where
+  show _ = "Bus{}"
 
 -- | Create a new empty bus.
 newBus :: IO (Bus a)
