@@ -1,0 +1,10 @@
+# Fork a thread that just prints every regex-intr message it receives, then
+# have the main thread send every incoming line onto the message bus.
+0 f {
+    0<0
+    I {
+        p
+    }
+}
+0 m Started!
+m
