@@ -57,6 +57,7 @@ debug s = withMVar putstrlock $ \() -> do
 #else
 debug _ = return ()
 #endif
+debugPrint x = debug (show x)
 
 fatal msg = error ("ERROR: " ++ msg)
 
@@ -195,6 +196,16 @@ run c state k = case c of
         debug ("Closing " ++ show i ++ ": " ++ show (getFile i state))
         k =<< closeFile i state
 
+    Message Nothing -> do
+        let Just m = pattern state
+        debug ("Messaging " ++ show m)
+        drive (bus state) m
+        k state
+    Message (Just m) -> do
+        debug ("Messaging " ++ show m)
+        drive (bus state) m
+        k state
+
 getFile i state = M.lookup i (files state)
 closeFile i state = do
     {- The underlying socket/files may be used by other threads, so don't
@@ -254,7 +265,7 @@ runSedString = runSed . parseString
 
 runSedFile f = do
     pgm <- parseString <$> C.readFile f
-    print pgm
+    debugPrint pgm
     runSed pgm
 
 --main = runSedString echoServer

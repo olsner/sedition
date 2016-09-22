@@ -41,5 +41,7 @@ data Cmd
   | HoldA (Maybe S)
   | Get (Maybe S)
   | GetA (Maybe S)
+
+  | Message (Maybe S)
   deriving (Show, Ord, Eq)
 

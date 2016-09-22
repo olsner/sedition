@@ -37,6 +37,7 @@ pAddress :: Parser Address
 pAddress = choice
   [ Line <$> int
   , EOF <$ char '$'
+  , IRQ <$ char 'I'
   ]
 
 -- not eof, blank, }, ; or #
@@ -44,6 +45,7 @@ pLabel = BS.pack <$> wsThen (some (noneOf "; \t\n\f\t\v\r#"))
 pRegister = pLabel
 -- Same but also delimited by : (for :port)
 pHostName = BS.pack <$> wsThen (some (noneOf ":; \t\n\f\t\v\r#"))
+pTextArgument = BS.pack <$> some (noneOf "\n\f\v\r#")
 
 int :: Parser Int
 int = fromInteger <$> decimal
@@ -71,6 +73,7 @@ pCommand = charSwitch $
   , ('h', Hold <$> maybeP pRegister)
   , ('n', Next <$> option 0 wsInt)
   , ('p', Print <$> option 0 wsInt)
+  , ('m', Message <$> wsThen (maybeP pTextArgument))
   ]
   where
     charSwitch cps = choice [char c *> p | (c,p) <- cps]
