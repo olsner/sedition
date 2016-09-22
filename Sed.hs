@@ -16,6 +16,7 @@ import System.IO
 import System.IO.Unsafe
 
 import AST
+import Bus
 import Parser
 
 data BlockState = BlockN | BlockI | Block0 deriving (Show, Eq)
@@ -191,18 +192,22 @@ delFile i state = return state { files = M.delete i (files state) }
 ifile i state = fileHandle (M.findWithDefault (HandleFile stdin) i (files state))
 ofile i state = fileHandle (M.findWithDefault (HandleFile stdout) i (files state))
 
+hMaybeGetLine :: Handle -> IO (Maybe S)
+hMaybeGetLine h = do
+    eof <- hIsEOF h
+    if eof then pure Nothing
+           else Just <$> C.hGetLine h
+
 next i state = do
     case pattern state of
         Just t | autoprint state -> C.hPutStrLn (ofile 0 state) t
         _ -> return ()
-    let h = ifile i state
-    eof <- hIsEOF h
-    debug ("next: eof=" ++ show eof)
-    case eof of
-        True -> return Nothing
-        False -> do
-            l <- Just <$> C.hGetLine h
-            return $ Just state { pattern = l, lineNumber = 1 + lineNumber state }
+    line <- hMaybeGetLine (ifile i state)
+    debug ("next: eof=" ++ show (isNothing line))
+    case line of
+        Nothing -> return Nothing
+        Just l -> do
+            return $ Just state { pattern = line, lineNumber = 1 + lineNumber state }
 
 runBranch l (s:ss) state = case s of
     Sed _ (Label m) | l == m -> runBlock ss state (const (return ()))
