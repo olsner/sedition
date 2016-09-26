@@ -278,21 +278,6 @@ runBranch l (s:ss) state = case s of
     _ -> runBranch l ss state
 runBranch l [] state = fatal ("Label " ++ show l ++ " not found")
 
--- TODO This single-threaded acceptor probably doesn't scale. What I would like
--- is to fork one thread per capability, all running accept. A special fork
--- command for forking "to each cpu"?
-echoServer = C.unlines $
-  [ "0 L1:2007"
-  , ":loop"
-  , "0{"
-  , "A1 2"
-  , "f 0 < 0 2"
-  , "< 2"
-  , "bloop"
-  , "}" ]
-
-cat = ""
-
 runSedString = runSed . parseString
 
 runSedFile f = do
@@ -300,5 +285,4 @@ runSedFile f = do
     debugPrint pgm
     runSed pgm
 
---main = runSedString echoServer
 main = runSedFile "examples/randomchat.xed"
