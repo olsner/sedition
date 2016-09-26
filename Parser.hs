@@ -69,7 +69,7 @@ pCommand = charSwitch $
   , ('L', Listen <$> int <*> maybeP pHostName <*> (char ':' *> int))
   , ('b', Branch <$> maybeP pLabel)
   , ('d', pure Delete)
-  , ('f', Fork <$> pLine)
+  , ('f', Fork <$> wsThen pLine)
   , ('h', Hold <$> maybeP pRegister)
   , ('n', Next <$> option 0 wsInt)
   , ('p', Print <$> option 0 wsInt)
