@@ -269,4 +269,4 @@ runSedFile f = do
     runSed pgm
 
 --main = runSedString echoServer
-main = runSedFile "examples/chatroulette.xed"
+main = runSedFile "examples/randomchat.xed"
