@@ -1,4 +1,6 @@
-module Bus (Bus(..), newBus, Passenger(..), board, drive, travel) where
+module Bus (
+    Bus(..), newBus, Passenger(..), board, drive, ride, wait, tryride
+    ) where
 
 import Control.Concurrent
 import Control.Concurrent.Chan
@@ -62,10 +64,18 @@ drive bus value = do
     active <- activePassengers bus
     forM_ active $ \v -> putMVar v value
 
--- | Travel with the bus: block until there's a value to receive, then make
--- | ourselves available to receive again.
-travel :: Passenger a -> IO a
-travel (Passenger v) = takeMVar v
+-- | Ride the bus: block until there's a value to receive, then make ourselves
+-- | available to receive again.
+ride :: Passenger a -> IO a
+ride (Passenger v) = takeMVar v
+
+-- | Wait for the bus to arrive, but don't ride it.
+wait :: Passenger a -> IO ()
+wait (Passenger v) = readMVar v >> return ()
+
+-- | Check if the bus is here yet.
+tryride :: Passenger a -> IO (Maybe a)
+tryride (Passenger v) = tryTakeMVar v
 
 putstrlock = unsafePerformIO (newMVar ())
 lockedPutStrLn s = withMVar putstrlock $ \() -> do
@@ -76,7 +86,7 @@ testBus j n = do
     passengers <- replicateM n (board bus)
     let traveller p = do
             t <- myThreadId
-            msg <- travel p
+            msg <- ride p
             lockedPutStrLn (show t ++ ": travelled to " ++ show msg)
             if msg == j then return () else traveller p
     mapM_ (forkIO . traveller) passengers

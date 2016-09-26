@@ -19,6 +19,11 @@ import AST
 import Bus
 import Parser
 
+-- Just to make SedState Showable
+newtype Mailbox a = Mailbox (MVar a)
+instance Show (Mailbox a) where
+    show _ = "Mailbox {}"
+
 data BlockState = BlockN | BlockI | Block0 deriving (Show, Eq)
 data File
   = HandleFile { fileHandle :: Handle }
@@ -39,9 +44,9 @@ data SedState = SedState {
   autoprint :: Bool,
   block :: BlockState,
 
+  box :: Mailbox (Either (Maybe S) S),
   bus :: Bus S,
   passenger :: Passenger S,
-  -- If 'True', pattern is an event rather than a 
   irq :: Bool
 
   -- Pending output? Other tricky stuff?
@@ -61,9 +66,14 @@ debugPrint x = debug (show x)
 
 fatal msg = error ("ERROR: " ++ msg)
 
+-- The wheels on the bus goes round and round...
+busRider p b = forever $ putMVar b . Right =<< ride p
+
 initialState pgm = do
   bus <- newBus
   passenger <- board bus
+  box <- newEmptyMVar
+  forkIO (busRider passenger box)
   return SedState {
     program = pgm,
     files = M.empty,
@@ -72,17 +82,21 @@ initialState pgm = do
     hold = M.empty,
     autoprint = True,
     block = BlockN,
+    box = Mailbox box,
     bus = bus,
     passenger = passenger,
     irq = False }
 forkState state pgm = do
   passenger <- board (bus state)
+  box <- newEmptyMVar
+  forkIO (busRider passenger box)
   return state {
     program = pgm,
     pattern = Nothing,
     lineNumber = 0,
     block = BlockN,
-    passenger = passenger}
+    passenger = passenger,
+    box = Mailbox box }
 
 runSed :: [Sed] -> IO ()
 runSed seds = runProgram =<< initialState seds
@@ -95,14 +109,16 @@ check (At EOF) state = hIsEOF (ifile 0 state)
 -- runBlock updates and restores the BlockI/Block0 state.
 -- This doesn't apply for unconditional *blocks* though - see runBlock below.
 check Always state
-    | 0 <- lineNumber state = return (block state == Block0)
     | irq state = return (block state == BlockI)
+    | 0 <- lineNumber state = return (block state == Block0)
     | Just _ <- pattern state = return True
     -- We should have at least one of the above cases matching...
     | otherwise = fatal ("Unexpected state for matching Always " ++ show state)
-check (At (Line expectedLine)) (SedState { lineNumber = actualLine })
+check (At (Line expectedLine)) (SedState { lineNumber = actualLine, irq = False })
     = return (expectedLine == actualLine)
+check (At (Line _)) state = return False
 check (At IRQ) state = return (irq state)
+check addr state = fatal ("Unhandled addr " ++ show addr ++ " in state " ++ show state)
 
 -- Only the first one negates - series of ! don't double-negate.
 -- run will traverse and ignore all NotAddr prefixes.
@@ -112,21 +128,8 @@ applyNot cmd t = t
 runProgram :: SedState -> IO ()
 runProgram state = runBlock (program state) state (const (return ()))
 
--- Read a new input line, then run k if input was available or return ()
--- directly if we've reached EOF.
--- For 'n' (read input and continue execution), k is the next-command
--- continuation. For the end-of-cycle or 'b' (t/T) without target, k is instead
--- runProgram so that it restarts the whole program.
-newCycle state k = do
-    debug ("new cycle: -- state = " ++ show state)
-    res <- next 0 state
-    debug ("new cycle: => state = " ++ show res)
-    case res of
-        Just state -> k state
-        Nothing -> debug ("new cycle: exiting")
-
 runBlock :: [Sed] -> SedState -> (SedState -> IO ()) -> IO ()
-runBlock [] state k = newCycle state runProgram
+runBlock [] state k = newCycle 0 state runProgram
 -- Would be nice not to need this hack here, the rest of the conditional stuff
 -- should be updated to work with this.
 -- This makes it so that unconditional blocks are run even if the BlockI/0
@@ -163,13 +166,17 @@ run c state k = case c of
     Label l -> k state
     Branch Nothing -> do
         debug "branch: nothing"
-        newCycle state runProgram
+        newCycle 0 state runProgram
     Branch (Just l) -> runBranch l (program state) state
-    Next i -> newCycle state k
+    -- err, this is wrong... n should not restart?
+    -- it should just replace pattern space - and should *not* accept an IRQ.
+    Next i -> newCycle i state k
     Print i -> do
         C.hPutStrLn (ofile i state) (fromJust (pattern state))
         k state
     Delete -> k state { pattern = Nothing }
+
+
     Listen i maybeHost port -> do
         let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
         let maybeHost' = fmap C.unpack maybeHost
@@ -180,6 +187,7 @@ run c state k = case c of
         listen s 7
         debug ("now listening on " ++ show i)
         k =<< replaceFile i (SocketFile s) state
+
     Accept i j -> do
         let Just (SocketFile s) = getFile i state
         debug ("accepting from " ++ show i ++ " to " ++ show j)
@@ -187,6 +195,7 @@ run c state k = case c of
         debug ("accepted: " ++ show addr)
         h <- socketToHandle c ReadWriteMode
         k =<< replaceFile j (HandleFile h) state
+
     Redirect i (Just j) -> do
         state <- case getFile j state of
             Just f -> delFile j =<< replaceFile i f state
@@ -230,16 +239,39 @@ hMaybeGetLine h = do
     if eof then pure Nothing
            else Just <$> C.hGetLine h
 
-next i state = do
+forkIO_ f = forkIO f >> return ()
+
+-- Read a new input line, then run k if input was available or return ()
+-- directly if we've reached EOF.
+-- For 'n' (read input and continue execution), k is the next-command
+-- continuation. For the end-of-cycle or 'b' (t/T) without target, k is instead
+-- runProgram so that it restarts the whole program.
+newCycle i state k = do
+    debug ("new cycle: -- state = " ++ show state)
+    next i state $ \state -> do
+        debug ("new cycle: => state = " ++ show state)
+        k state
+    debug ("new cycle: exiting")
+
+next i state k = do
     case pattern state of
-        Just t | autoprint state -> C.hPutStrLn (ofile 0 state) t
+        Just t | autoprint state && not (irq state) ->
+            C.hPutStrLn (ofile 0 state) t
         _ -> return ()
-    line <- hMaybeGetLine (ifile i state)
-    debug ("next: eof=" ++ show (isNothing line))
-    case line of
-        Nothing -> return Nothing
-        Just l -> do
-            return $ Just state { pattern = line, lineNumber = 1 + lineNumber state }
+    -- if we successfully got an IRQ for last cycle, that means we're already
+    -- running an asynchronous getLine and shouldn't start another.
+    let Mailbox v = box state
+    when (not (irq state)) $
+      forkIO_ (putMVar v . Left =<< hMaybeGetLine (ifile i state))
+    lineOrEvent <- takeMVar v
+    debug ("next: " ++ show lineOrEvent)
+    case lineOrEvent of
+      Left Nothing -> return ()
+      Left (Just l) -> do
+            k $ state { pattern = Just l, lineNumber = 1 + lineNumber state,
+                        irq = False }
+      Right l -> do
+            k $ state { pattern = Just l, irq = True }
 
 runBranch l (s:ss) state = case s of
     Sed _ (Label m) | l == m -> runBlock ss state (const (return ()))
