@@ -1,3 +1,5 @@
+{-# LANGUAGE CPP #-}
+
 module Bus (
     Bus(..), newBus, Passenger(..), board, drive, ride, wait, tryride
     ) where
@@ -36,7 +38,7 @@ board (Bus bus) = modifyMVar bus $ \(next,pid) -> do
 
 passengerLeft bus id = modifyMVar_ bus $ \(next,pid) -> do
   t <- myThreadId
-  lockedPutStrLn (show t ++ ": passenger " ++ show id ++ " left the bus")
+  debug (show t ++ ": passenger " ++ show id ++ " left the bus")
   return (next, M.delete id pid)
 
 -- Actually we rely on the weak vars stuff to get rid of passenger corpses.
@@ -54,7 +56,7 @@ activePassengers (Bus bus) = do
     let (lefts,rights) = partitionEithers lost
     let map' = foldr M.delete map rights
     putMVar bus (next,map')
-    lockedPutStrLn ("drive: lost " ++ show (length rights) ++ " passengers")
+    debug ("drive: lost " ++ show (length rights) ++ " passengers")
     return lefts
 
 -- | Drive the bus with a value, sending it to each travelling passenger.
@@ -80,6 +82,11 @@ tryride (Passenger v) = tryTakeMVar v
 putstrlock = unsafePerformIO (newMVar ())
 lockedPutStrLn s = withMVar putstrlock $ \() -> do
     putStrLn s
+#if 0
+debug = lockedPutStrLn
+#else
+debug _ = return ()
+#endif
 
 testBus j n = do
     bus <- newBus
