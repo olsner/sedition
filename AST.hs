@@ -1,13 +1,23 @@
 module AST where
 
-import Data.ByteString.Char8
+import Data.ByteString.Char8 as C
 type S = ByteString
 
--- Compiled regexp
-type RE = String
+-- TODO Replace with actual compiled regexp
+newtype RE = RE S deriving (Show, Ord, Eq)
 type Label = S
 
-data Address = Line Int | Match RE | EOF | IRQ
+re :: S -> Maybe RE
+re s | C.null s  = Nothing
+     | otherwise = Just (RE s)
+
+data SubstFlag
+  = SubstGlobal
+  | SubstExec
+  | SubstPrint Int
+  deriving (Show, Ord, Eq)
+
+data Address = Line Int | Match (Maybe RE) | EOF | IRQ
     deriving (Show, Ord, Eq)
 data MaybeAddress
   = Always
@@ -31,7 +41,8 @@ data Cmd
   | Listen Int (Maybe S) Int
   | Accept Int Int
   | Redirect Int (Maybe Int)
-  | Subst RE RE
+  | Subst (Maybe RE) S [SubstFlag]
+  | Trans S S
 
   -- dD
   | Delete

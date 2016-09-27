@@ -1,3 +1,5 @@
+{-# LANGUAGE OverloadedStrings #-}
+
 module Parser where
 
 import Control.Applicative
@@ -38,6 +40,7 @@ pAddress = choice
   [ Line <$> int
   , EOF <$ char '$'
   , IRQ <$ char 'I'
+  , Match . re <$> slash True
   ]
 
 -- not eof, blank, }, ; or #
@@ -58,9 +61,34 @@ blank = oneOf " \t"
 blanks = skipMany blank
 blanks1 = skipSome blank
 
+slash :: Bool -> Parser S
+slash re = (char '/' *> slashWith re '/')
+    <|> (char '\\' *> anyChar >>= slashWith re)
+
+-- Reads a "slash"-terminated (the terminator itself already parsed) argument
+-- and consumes the terminator.
+slashWith :: Bool -> Char -> Parser S
+slashWith re term = (fmap BS.pack $
+    many (noneOf [term,'\n','\\'] <|> (char '\\' >> char term))) <* char term
+
 maybeP p = option Nothing (Just <$> p)
 
-pCommand = charSwitch $
+flags accepted = oneOf accepted
+sFlag = charSwitch $
+  [ ('g', SubstGlobal)
+  , ('e', SubstExec)
+  -- TODO p int for printing to a given file descriptor
+  , ('p', SubstPrint 0)
+  -- integer: substitute only the nth occurrence
+  -- w file: write result to file
+  -- m/M: make ^ and $ match start/end of line in a multi-line buffer
+  --      (with \` and \' matching start/end of whole buffer)
+  -- i/I: match case-insensitively
+  -- would like to allow using m or M for messaging. Why did they use both?
+  -- (GNU extension though - doesn't (necessarily) need to be supported)
+  ]
+
+pCommand = charSwitchM $
   [ ('{', Block <$> pBlock)
   , ('!', NotAddr <$> pCommand)
   , (':', Label <$> pLabel)
@@ -74,16 +102,46 @@ pCommand = charSwitch $
   , ('n', Next <$> option 0 wsInt)
   , ('p', Print <$> option 0 wsInt)
   , ('m', Message <$> wsThen (maybeP pTextArgument))
+  , ('s', anyChar >>= (\c -> Subst <$> (re <$> slashWith True c)
+                                   <*> slashWith False c
+                                   <*> many sFlag))
   ]
-  where
-    charSwitch cps = choice [char c *> p | (c,p) <- cps]
+
+charSwitchM cps = choice [char c *> p | (c,p) <- cps]
+charSwitch cps = charSwitchM [(c, pure p) | (c,p) <- cps]
 
 parseString :: ByteString -> [Sed]
 parseString input = case parseOnly pFile input of
     Success p -> p
     Failure e -> error (show e)
 
+-- TODO: Include a parseFile here so we can get diagnostics with nice and
+-- proper file/line messaages.
+
 parseOnly p = parseByteString p (Lines 0 0 0 0)
 testParseString input = print (parseOnly pFile input)
 testParseFile = print . parseOnly pFile <=< BS.readFile
 testParseLines = mapM_ testParseString . BS.lines <=< BS.readFile
+
+doTest (input, result) = case parseOnly pFile input of
+   Success p | p == result -> putStrLn ("pass: " ++ show input ++ " parsed to " ++ show p)
+             | otherwise   -> putStrLn ("fail: " ++ show input ++ " did not parse to " ++ show result ++ " but " ++ show p)
+   Failure e -> putStrLn ("fail: " ++ show input ++ " failed to parse:\n" ++ show e)
+
+doTests = mapM_ doTest
+
+tests =
+  [ ("s/a/b/g", [Sed Always (Subst (Just (RE "a")) "b" [SubstGlobal])])
+  , ("s/\\//\\//", [Sed Always (Subst (Just (RE "/")) "/" [])])
+  , ("s|\\||\\||", [Sed Always (Subst (Just (RE "|")) "|" [])])
+  , ("s///", [Sed Always (Subst Nothing "" [])])
+  , ("//s///", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
+  , ("\\//s///", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
+  , ("\\||s|||", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
+  , ("\\/\\//s///", [Sed (At (Match (Just (RE "/")))) (Subst Nothing "" [])])
+  , ("\\|\\||s|||", [Sed (At (Match (Just (RE "|")))) (Subst Nothing "" [])])
+  ]
+
+main = do
+    doTests tests
+    putStrLn ("Finished " ++ show (length tests) ++ " tests")
