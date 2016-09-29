@@ -68,8 +68,18 @@ slash re = (char '/' *> slashWith re '/')
 -- Reads a "slash"-terminated (the terminator itself already parsed) argument
 -- and consumes the terminator.
 slashWith :: Bool -> Char -> Parser S
-slashWith re term = (fmap BS.pack $
-    many (noneOf [term,'\n','\\'] <|> (char '\\' >> char term))) <* char term
+slashWith re term = BS.pack . concat <$> many p <* char term
+  where
+  p = choice $
+    [ (:[]) <$> noneOf [term,'\n','\\']
+    -- TODO It's possible to use a regexp-special character as the delimiter,
+    -- which makes this a bit wonky. I think we may need to detect those and
+    -- treat them as explicitly literals (?), which may mean adding the \\
+    -- depending on if we use BRE or EREs.
+    , [term] <$ try (char '\\' >> char term)
+    -- Any other characters except the terminator get passed through to the
+    -- regexp engine including the backslash.
+    , (\x y -> [x,y]) <$> char '\\' <*> anyChar ]
 
 maybeP p = option Nothing (Just <$> p)
 
@@ -135,11 +145,14 @@ tests =
   , ("s/\\//\\//", [Sed Always (Subst (Just (RE "/")) "/" [])])
   , ("s|\\||\\||", [Sed Always (Subst (Just (RE "|")) "|" [])])
   , ("s///", [Sed Always (Subst Nothing "" [])])
-  , ("//s///", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
-  , ("\\//s///", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
-  , ("\\||s|||", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
+  , ("s/\\.//", [Sed Always (Subst (Just (RE "\\.")) "" [])])
+  , ("/\\./ s///", [Sed (At (Match (Just (RE "\\.")))) (Subst Nothing "" [])])
+
+  , ("// s///", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
+  , ("\\// s///", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
+  , ("\\|| s|||", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
   , ("\\/\\//s///", [Sed (At (Match (Just (RE "/")))) (Subst Nothing "" [])])
-  , ("\\|\\||s|||", [Sed (At (Match (Just (RE "|")))) (Subst Nothing "" [])])
+  , ("\\|\\|| s|||", [Sed (At (Match (Just (RE "|")))) (Subst Nothing "" [])])
   ]
 
 main = do
