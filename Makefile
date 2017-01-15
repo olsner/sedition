@@ -9,4 +9,4 @@ runtests: ParserTest
 clean:
 	rm -f Sed Sed.o Sed.hi Parser.o Parser.hi AST.hi AST.o
 
-.PHONY: force runtests
+.PHONY: force runtests clean
