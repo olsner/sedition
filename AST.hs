@@ -23,10 +23,17 @@ re s | C.null s  = Nothing
      -- TODO With options
      | otherwise = RE s <$> makeRegexM s
 
-data SubstFlag
-  = SubstGlobal
-  | SubstExec
-  | SubstPrint Int
+data SubstType
+  = SubstFirst
+  | SubstNth Int
+  | SubstAll
+  -- TODO More flags
+  deriving (Show, Ord, Eq)
+
+data SubstAction
+  = SActionNone
+  | SActionPrint Int
+  | SActionExec
   deriving (Show, Ord, Eq)
 
 data Address = Line Int | Match (Maybe RE) | EOF | IRQ
@@ -53,7 +60,7 @@ data Cmd
   | Listen Int (Maybe S) Int
   | Accept Int Int
   | Redirect Int (Maybe Int)
-  | Subst (Maybe RE) S [SubstFlag]
+  | Subst (Maybe RE) S SubstType SubstAction
   | Trans S S
 
   -- dD

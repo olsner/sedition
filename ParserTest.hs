@@ -14,19 +14,25 @@ doTest (input, result) = case parseOnly pFile input of
 
 doTests = mapM doTest
 
-tests =
-  [ ("s/a/b/g", [Sed Always (Subst (re "a") "b" [SubstGlobal])])
-  , ("s/\\//\\//", [Sed Always (Subst (re "/") "/" [])])
-  , ("s|\\||\\||", [Sed Always (Subst (re "|") "|" [])])
-  , ("s///", [Sed Always (Subst Nothing "" [])])
-  , ("s/\\.//", [Sed Always (Subst (re "\\.") "" [])])
-  , ("/\\./ s///", [Sed (At (Match (re "\\."))) (Subst Nothing "" [])])
+subst pat rep = Subst (re pat) rep SubstFirst SActionNone
+subst2 pat rep t act = Subst (re pat) rep t act
+emptySub = Subst Nothing "" SubstFirst SActionNone
 
-  , ("// s///", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
-  , ("\\// s///", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
-  , ("\\|| s|||", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
-  , ("\\/\\//s///", [Sed (At (Match (re "/"))) (Subst Nothing "" [])])
-  , ("\\|\\|| s|||", [Sed (At (Match (re "|"))) (Subst Nothing "" [])])
+tests =
+  [ ("s/a/b/g", [Sed Always (subst2 "a" "b" SubstAll SActionNone)])
+  , ("s/a/b/p", [Sed Always (subst2 "a" "b" SubstFirst (SActionPrint 0))])
+  , ("s/a/b/e", [Sed Always (subst2 "a" "b" SubstFirst SActionExec)])
+  , ("s/\\//\\//", [Sed Always (subst "/" "/")])
+  , ("s|\\||\\||", [Sed Always (subst "|" "|")])
+  , ("s///", [Sed Always emptySub])
+  , ("s/\\.//", [Sed Always (subst "\\." "")])
+  , ("/\\./ s///", [Sed (At (Match (re "\\."))) emptySub])
+
+  , ("// s///", [Sed (At (Match Nothing)) emptySub])
+  , ("\\// s///", [Sed (At (Match Nothing)) emptySub])
+  , ("\\|| s|||", [Sed (At (Match Nothing)) emptySub])
+  , ("\\/\\//s///", [Sed (At (Match (re "/"))) emptySub])
+  , ("\\|\\|| s|||", [Sed (At (Match (re "|"))) emptySub])
 
   , ("q", [Sed Always (Quit True ExitSuccess)])
   , ("q 0", [Sed Always (Quit True ExitSuccess)])

@@ -5,10 +5,13 @@ import Control.Applicative
 import Control.Concurrent
 import Control.Monad
 
+import Data.Array
 import Data.ByteString.Char8 as C
+import Data.Char
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
+import Data.Monoid
 
 import Network.Socket
 
@@ -16,7 +19,7 @@ import System.Exit
 import System.IO
 import System.IO.Unsafe
 
-import Text.Regex.TDFA
+import Text.Regex.TDFA hiding (match)
 
 import AST
 import Bus
@@ -43,6 +46,9 @@ data SedState = SedState {
   -- Consider one /foo/,/bar/ address and one /foo/,/baz/ address - pretty much
   -- each line should have its own state for whether it's still triggered.
   --activeAddresses :: [Address],
+
+  -- TODO Add last matched regexp. Requires 'check' to be able to update the
+  -- state before returning.
 
   autoprint :: Bool,
   block :: BlockState,
@@ -222,10 +228,56 @@ run c state k = case c of
         drive (bus state) m
         k state
 
+    Subst (Just (RE _ pat)) rep t action
+      | Just p <- pattern state,
+        -- matchAll if SubstGlobal is in flags
+        matches@(_:_) <- match t pat p -> do
+          let newp = subst p rep matches
+          runSubAction action newp state
+          k state { pattern = Just newp }
+      | otherwise -> k state
+
     Quit True status -> run (Print 0) state (const (exitWith status))
     Quit False status -> exitWith status
 
     _ -> System.IO.putStrLn ("Unhandled command: " ++ show c) >> exitFailure
+
+-- This could be preprocessed a bit better, e.g. having the parser parse the
+-- replacement into a list of (Literal|Ref Int).
+subst :: S -> S -> [MatchArray] -> S
+subst p rep matches = go "" 0 matches
+  where
+    go acc lastmatch (m:ms)
+        | matchstart >= lastmatch = go acc' matchend ms
+        | otherwise = go acc lastmatch ms
+        where
+            (matchstart,matchlen) = m ! 0
+            matchend = matchstart + matchlen
+            acc' = acc <> substr lastmatch (matchstart - lastmatch)
+                       <> replace rep m
+    go acc _ [] = acc
+
+    substr s l = C.take l (C.drop s p)
+    replace rep match = go "" 0
+      where
+        go acc i | i == C.length rep = acc
+        go acc i = case C.index rep i of
+          '\\' -> go (acc <> matchN (digitToInt (C.index rep (i + 1)))) (i + 2)
+          '&' -> go (acc <> matchN 0) (i + 1)
+          c -> go (C.snoc acc c) (i + 1)
+        matchN n = (uncurry substr) (match ! n)
+
+runSubAction SActionNone _ _ = return ()
+runSubAction SActionExec s _ = do
+    debug ("TODO: Actually execute " ++ show s)
+    return ()
+runSubAction (SActionPrint i) s state = C.hPutStrLn (ofile i state) s
+
+match SubstFirst re p = case matchOnce re p of Just x -> [x]; Nothing -> []
+match SubstAll re p = matchAll re p
+-- TODO Handle not finding enough matches for match i. Should be handled the
+-- same as a nonmatch.
+match (SubstNth i) re p = [matchAll re p !! i]
 
 getFile i state = M.lookup i (files state)
 closeFile i state = do

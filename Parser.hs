@@ -86,19 +86,26 @@ slashWith re term = BS.pack . concat <$> many p <* char term
 maybeP p = option Nothing (Just <$> p)
 
 flags accepted = oneOf accepted
+setSubstType   t   (Subst pat rep _ act) = Subst pat rep t act
+setSubstAction act (Subst pat rep t _  ) = Subst pat rep t act
 sFlag = charSwitch $
-  [ ('g', SubstGlobal)
-  , ('e', SubstExec)
-  -- TODO p int for printing to a given file descriptor
-  , ('p', SubstPrint 0)
+  -- First, flags: control or tweak the matching
+  [ ('g', setSubstType SubstAll)
   -- integer: substitute only the nth occurrence
-  -- w file: write result to file
+  -- i/I: match case-insensitively
   -- m/M: make ^ and $ match start/end of line in a multi-line buffer
   --      (with \` and \' matching start/end of whole buffer)
-  -- i/I: match case-insensitively
   -- would like to allow using m or M for messaging. Why did they use both?
   -- (GNU extension though - doesn't (necessarily) need to be supported)
+
+  -- Actions, decide how to make the substitution
+  , ('e', setSubstAction SActionExec)
+  -- TODO p int for printing to a given file descriptor
+  , ('p', setSubstAction (SActionPrint 0))
+  -- w file: write result to file
   ]
+
+mkSubst pat rep flags = foldr (.) id flags (Subst pat rep SubstFirst SActionNone)
 
 pQuit print = Quit print . intToExit <$> option 0 wsInt
 
@@ -118,9 +125,9 @@ pCommand = charSwitchM $
   , ('q', pQuit True)
   , ('Q', pQuit False)
   , ('m', Message <$> wsThen (maybeP pTextArgument))
-  , ('s', anyChar >>= (\c -> Subst <$> (re <$> slashWith True c)
-                                   <*> slashWith False c
-                                   <*> many sFlag))
+  , ('s', anyChar >>= (\c -> mkSubst <$> (re <$> slashWith True c)
+                                     <*> slashWith False c
+                                     <*> many sFlag))
   ]
 
 charSwitchM cps = choice [char c *> p | (c,p) <- cps]
