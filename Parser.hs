@@ -150,6 +150,7 @@ pCommand = charSwitchM $
                                      <*> many sFlag))
   , ('a', Append <$> pTextArgument)
   , ('i', Insert <$> pTextArgument)
+  , ('z', pure Clear)
   ]
 
 charSwitchM cps = choice [char c *> p | (c,p) <- cps]

@@ -180,14 +180,19 @@ run c state k = case c of
         debug "branch: nothing"
         newCycle 0 state runProgram
     Branch (Just l) -> runBranch l (program state) state
-    -- err, this is wrong... n should not restart?
-    -- it should just replace pattern space - and should *not* accept an IRQ.
+    -- "If auto-print is not disabled, print the pattern space, then,
+    -- regardless, replace the pattern space with the next line of input."
+    -- and don't restart a new cycle...
+    -- Also shouldn't accept interrupts here, just text lines.
     Next i -> newCycle i state k
     Print i | Just p <- pattern state -> do
                 C.hPutStrLn (ofile i state) p
                 k state
             | otherwise -> k state
-    Delete -> k state { pattern = Nothing }
+    -- Delete should clear pattern space and start a new cycle (this avoids
+    -- printing anything).
+    Delete -> newCycle 0 state { pattern = Nothing } k
+    Clear -> k state { pattern = Just "" }
 
     Insert s -> C.hPutStrLn (ofile 0 state) s >> k state
 

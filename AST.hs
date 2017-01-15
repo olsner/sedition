@@ -74,7 +74,8 @@ data Cmd
   -- every time since we'll clear the pattern space whenever it matches.
   -- | Change S
 
-  -- dD
+  -- dD - clear pattern space and start new cycle
+  -- TODO Since these read, take an Int for the file to read from
   | Delete
   | DeleteA
   -- hH/gG
@@ -87,5 +88,7 @@ data Cmd
 
   -- qQ (print before exit) (exit code)
   | Quit Bool ExitCode
+  -- z
+  | Clear
   deriving (Show, Ord, Eq)
 

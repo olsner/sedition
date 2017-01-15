@@ -48,6 +48,8 @@ tests =
   , ("a\\\nfoo\\r\\nbar\\\nbaz", [Sed Always (Append "foo\r\nbar\nbaz")])
   , ("a text\\\nbar", [Sed Always (Append "text\nbar")])
   , ("i text", [Sed Always (Insert "text")])
+
+  , ("z", [Sed Always Clear])
   ]
 
 -- tests that should not succeed
