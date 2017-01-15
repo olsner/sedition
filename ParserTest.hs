@@ -41,6 +41,7 @@ tests =
 
   , ("A 1 2", [Sed Always (Accept 1 2)])
   , ("A1 2", [Sed Always (Accept 1 2)])
+  , ("/^$/! p", [Sed (At (Match (re "^$"))) (NotAddr (Print 0))])
   ]
 
 -- tests that should not succeed

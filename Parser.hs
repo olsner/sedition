@@ -111,7 +111,7 @@ pQuit print = Quit print . intToExit <$> option 0 wsInt
 
 pCommand = charSwitchM $
   [ ('{', Block <$> pBlock)
-  , ('!', NotAddr <$> pCommand)
+  , ('!', NotAddr <$> wsThen pCommand)
   , (':', Label <$> pLabel)
   , ('<', Redirect <$> wsThen int <*> maybeP (ws1Then int))
   , ('A', Accept <$> wsThen int <*> ws1Then int)
