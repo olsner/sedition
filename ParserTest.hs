@@ -8,7 +8,7 @@ import Parser
 import AST
 
 doTest (input, result) = case parseOnly pFile input of
-   Success p | p == result -> putStrLn ("pass: " ++ show input ++ " parsed to " ++ show p) >> return True
+   Success p | p == result -> return True -- putStrLn ("pass: " ++ show input ++ " parsed to " ++ show p) >> return True
              | otherwise   -> putStrLn ("fail: " ++ show input ++ " did not parse to " ++ show result ++ " but " ++ show p) >> return False
    Failure e -> putStrLn ("fail: " ++ show input ++ " failed to parse:\n" ++ show e) >> return False
 
@@ -38,6 +38,6 @@ main = do
     results <- doTests tests
     let (passes, fails) = counts results
     case fails of
-      0 -> exitSuccess
+      0 -> putStrLn "OK" >> exitSuccess
       -- putStrLn ("Finished " ++ show (length tests) ++ " tests")
       _ -> putStrLn (show fails ++ " tests failed") >> exitFailure
