@@ -1,0 +1,35 @@
+0L1:1080
+A1 2
+f{
+    1 {
+        /^GET ([^ ]*)/ {
+            s//\1/
+            hurl
+            behead
+        }
+        broken
+    }
+    n
+
+    # TODO Make better use of address ranges here
+    # 2,/^$/ {} should match the headers
+    :ehead
+    /(.*): (.*)/ n
+    /^$/! behead
+
+    :egin
+    a\
+    HTTP/1.0 200 OK\r\
+    Content-Type: text/plain\r\
+    \r\
+    Hello world!
+
+    q
+
+    :roken
+    a\
+    400 Bad request\r\
+    \r\
+    Go away.
+}
+

@@ -38,7 +38,14 @@ tests =
   , ("q 0", [Sed Always (Quit True ExitSuccess)])
   , ("q 1", [Sed Always (Quit True (ExitFailure 1))])
   , ("Q", [Sed Always (Quit False ExitSuccess)])
+
+  , ("A 1 2", [Sed Always (Accept 1 2)])
+  , ("A1 2", [Sed Always (Accept 1 2)])
   ]
+
+-- tests that should not succeed
+failtests =
+  [ "A12" ] -- whitespace required between first and second argument
 
 counts [] = (0,0)
 counts (x:xs) | x = (trues + 1, falses)
