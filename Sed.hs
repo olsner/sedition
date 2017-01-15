@@ -16,6 +16,8 @@ import System.Exit
 import System.IO
 import System.IO.Unsafe
 
+import Text.Regex.TDFA
+
 import AST
 import Bus
 import Parser
@@ -119,6 +121,9 @@ check (At (Line expectedLine)) (SedState { lineNumber = actualLine, irq = False 
     = return (expectedLine == actualLine)
 check (At (Line _)) state = return False
 check (At IRQ) state = return (irq state)
+check (At (Match (Just (RE _ re)))) state
+    | Just p <- pattern state = return (matchTest re p)
+    | otherwise = return False
 check addr state = fatal ("Unhandled addr " ++ show addr ++ " in state " ++ show state)
 
 -- Only the first one negates - series of ! don't double-negate.

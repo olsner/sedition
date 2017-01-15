@@ -2,16 +2,26 @@ module AST where
 
 import System.Exit
 
+import Text.Regex.TDFA
+
 import Data.ByteString.Char8 as C
 type S = ByteString
 
 -- TODO Replace with actual compiled regexp
-newtype RE = RE S deriving (Show, Ord, Eq)
+data RE = RE S Regex
 type Label = S
+
+instance Show RE where
+  show (RE s _) = show s
+instance Eq RE where
+  RE s _ == RE t _ = s == t
+instance Ord RE where
+  compare (RE s _) (RE t _) = compare s t
 
 re :: S -> Maybe RE
 re s | C.null s  = Nothing
-     | otherwise = Just (RE s)
+     -- TODO With options
+     | otherwise = RE s <$> makeRegexM s
 
 data SubstFlag
   = SubstGlobal

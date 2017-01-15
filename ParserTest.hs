@@ -15,18 +15,18 @@ doTest (input, result) = case parseOnly pFile input of
 doTests = mapM doTest
 
 tests =
-  [ ("s/a/b/g", [Sed Always (Subst (Just (RE "a")) "b" [SubstGlobal])])
-  , ("s/\\//\\//", [Sed Always (Subst (Just (RE "/")) "/" [])])
-  , ("s|\\||\\||", [Sed Always (Subst (Just (RE "|")) "|" [])])
+  [ ("s/a/b/g", [Sed Always (Subst (re "a") "b" [SubstGlobal])])
+  , ("s/\\//\\//", [Sed Always (Subst (re "/") "/" [])])
+  , ("s|\\||\\||", [Sed Always (Subst (re "|") "|" [])])
   , ("s///", [Sed Always (Subst Nothing "" [])])
-  , ("s/\\.//", [Sed Always (Subst (Just (RE "\\.")) "" [])])
-  , ("/\\./ s///", [Sed (At (Match (Just (RE "\\.")))) (Subst Nothing "" [])])
+  , ("s/\\.//", [Sed Always (Subst (re "\\.") "" [])])
+  , ("/\\./ s///", [Sed (At (Match (re "\\."))) (Subst Nothing "" [])])
 
   , ("// s///", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
   , ("\\// s///", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
   , ("\\|| s|||", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
-  , ("\\/\\//s///", [Sed (At (Match (Just (RE "/")))) (Subst Nothing "" [])])
-  , ("\\|\\|| s|||", [Sed (At (Match (Just (RE "|")))) (Subst Nothing "" [])])
+  , ("\\/\\//s///", [Sed (At (Match (re "/"))) (Subst Nothing "" [])])
+  , ("\\|\\|| s|||", [Sed (At (Match (re "|"))) (Subst Nothing "" [])])
 
   , ("q", [Sed Always (Quit ExitSuccess)])
   , ("q 0", [Sed Always (Quit ExitSuccess)])
