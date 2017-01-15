@@ -114,9 +114,9 @@ check (At EOF) state = hIsEOF (ifile 0 state)
 check Always state
     | irq state = return (block state == BlockI)
     | 0 <- lineNumber state = return (block state == Block0)
-    | Just _ <- pattern state = return True
-    -- We should have at least one of the above cases matching...
-    | otherwise = fatal ("Unexpected state for matching Always " ++ show state)
+    -- On non-first lines, a missing pattern happens after 'd' (for example)
+    -- treat these as matching too.
+    | otherwise = return True
 check (At (Line expectedLine)) (SedState { lineNumber = actualLine, irq = False })
     = return (expectedLine == actualLine)
 check (At (Line _)) state = return False
@@ -177,9 +177,10 @@ run c state k = case c of
     -- err, this is wrong... n should not restart?
     -- it should just replace pattern space - and should *not* accept an IRQ.
     Next i -> newCycle i state k
-    Print i -> do
-        C.hPutStrLn (ofile i state) (fromJust (pattern state))
-        k state
+    Print i | Just p <- pattern state -> do
+                C.hPutStrLn (ofile i state) p
+                k state
+            | otherwise -> k state
     Delete -> k state { pattern = Nothing }
 
 
