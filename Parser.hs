@@ -133,28 +133,3 @@ testParseString input = print (parseOnly pFile input)
 testParseFile = print . parseOnly pFile <=< BS.readFile
 testParseLines = mapM_ testParseString . BS.lines <=< BS.readFile
 
-doTest (input, result) = case parseOnly pFile input of
-   Success p | p == result -> putStrLn ("pass: " ++ show input ++ " parsed to " ++ show p)
-             | otherwise   -> putStrLn ("fail: " ++ show input ++ " did not parse to " ++ show result ++ " but " ++ show p)
-   Failure e -> putStrLn ("fail: " ++ show input ++ " failed to parse:\n" ++ show e)
-
-doTests = mapM_ doTest
-
-tests =
-  [ ("s/a/b/g", [Sed Always (Subst (Just (RE "a")) "b" [SubstGlobal])])
-  , ("s/\\//\\//", [Sed Always (Subst (Just (RE "/")) "/" [])])
-  , ("s|\\||\\||", [Sed Always (Subst (Just (RE "|")) "|" [])])
-  , ("s///", [Sed Always (Subst Nothing "" [])])
-  , ("s/\\.//", [Sed Always (Subst (Just (RE "\\.")) "" [])])
-  , ("/\\./ s///", [Sed (At (Match (Just (RE "\\.")))) (Subst Nothing "" [])])
-
-  , ("// s///", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
-  , ("\\// s///", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
-  , ("\\|| s|||", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
-  , ("\\/\\//s///", [Sed (At (Match (Just (RE "/")))) (Subst Nothing "" [])])
-  , ("\\|\\|| s|||", [Sed (At (Match (Just (RE "|")))) (Subst Nothing "" [])])
-  ]
-
-main = do
-    doTests tests
-    putStrLn ("Finished " ++ show (length tests) ++ " tests")
