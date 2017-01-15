@@ -28,9 +28,10 @@ tests =
   , ("\\/\\//s///", [Sed (At (Match (re "/"))) (Subst Nothing "" [])])
   , ("\\|\\|| s|||", [Sed (At (Match (re "|"))) (Subst Nothing "" [])])
 
-  , ("q", [Sed Always (Quit ExitSuccess)])
-  , ("q 0", [Sed Always (Quit ExitSuccess)])
-  , ("q 1", [Sed Always (Quit (ExitFailure 1))])
+  , ("q", [Sed Always (Quit True ExitSuccess)])
+  , ("q 0", [Sed Always (Quit True ExitSuccess)])
+  , ("q 1", [Sed Always (Quit True (ExitFailure 1))])
+  , ("Q", [Sed Always (Quit False ExitSuccess)])
   ]
 
 counts [] = (0,0)

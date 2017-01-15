@@ -67,6 +67,7 @@ data Cmd
 
   | Message (Maybe S)
 
-  | Quit ExitCode
+  -- qQ (print before exit) (exit code)
+  | Quit Bool ExitCode
   deriving (Show, Ord, Eq)
 

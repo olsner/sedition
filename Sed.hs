@@ -222,7 +222,8 @@ run c state k = case c of
         drive (bus state) m
         k state
 
-    Quit status -> exitWith status
+    Quit True status -> run (Print 0) state (const (exitWith status))
+    Quit False status -> exitWith status
 
     _ -> System.IO.putStrLn ("Unhandled command: " ++ show c) >> exitFailure
 

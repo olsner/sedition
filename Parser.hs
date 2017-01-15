@@ -100,6 +100,8 @@ sFlag = charSwitch $
   -- (GNU extension though - doesn't (necessarily) need to be supported)
   ]
 
+pQuit print = Quit print . intToExit <$> option 0 wsInt
+
 pCommand = charSwitchM $
   [ ('{', Block <$> pBlock)
   , ('!', NotAddr <$> pCommand)
@@ -113,7 +115,8 @@ pCommand = charSwitchM $
   , ('h', Hold <$> maybeP pRegister)
   , ('n', Next <$> option 0 wsInt)
   , ('p', Print <$> option 0 wsInt)
-  , ('q', Quit <$> option ExitSuccess (intToExit <$> wsInt))
+  , ('q', pQuit True)
+  , ('Q', pQuit False)
   , ('m', Message <$> wsThen (maybeP pTextArgument))
   , ('s', anyChar >>= (\c -> Subst <$> (re <$> slashWith True c)
                                    <*> slashWith False c
