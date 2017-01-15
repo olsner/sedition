@@ -41,7 +41,13 @@ tests =
 
   , ("A 1 2", [Sed Always (Accept 1 2)])
   , ("A1 2", [Sed Always (Accept 1 2)])
+
   , ("/^$/! p", [Sed (At (Match (re "^$"))) (NotAddr (Print 0))])
+  , ("a text", [Sed Always (Append "text")])
+  , ("a\\\nfoo\\\nbar", [Sed Always (Append "foo\nbar")])
+  , ("a\\\nfoo\\r\\nbar\\\nbaz", [Sed Always (Append "foo\r\nbar\nbaz")])
+  , ("a text\\\nbar", [Sed Always (Append "text\nbar")])
+  , ("i text", [Sed Always (Insert "text")])
   ]
 
 -- tests that should not succeed

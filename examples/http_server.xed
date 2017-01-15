@@ -18,18 +18,19 @@ f{
     /^$/! behead
 
     :egin
-    a\
-    HTTP/1.0 200 OK\r\
-    Content-Type: text/plain\r\
-    \r\
-    Hello world!
+    i\
+HTTP/1.0 200 OK\r\
+Content-Type: text/plain\r\
+\r\
+Hello world!
 
     q
 
     :roken
-    a\
-    400 Bad request\r\
-    \r\
-    Go away.
+    i\
+400 Bad request\r\
+\r\
+Go away.
+
 }
 

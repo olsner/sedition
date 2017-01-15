@@ -47,6 +47,7 @@ data Sed = Sed MaybeAddress Cmd deriving (Show, Ord, Eq)
 data Cmd
   = Block [Sed]
   | Fork Sed
+  -- Really belongs in the Address, I think
   | NotAddr Cmd
   | Label Label
   | Branch (Maybe Label)
@@ -60,8 +61,18 @@ data Cmd
   | Listen Int (Maybe S) Int
   | Accept Int Int
   | Redirect Int (Maybe Int)
+  -- s///
   | Subst (Maybe RE) S SubstType SubstAction
+  -- y///
   | Trans S S
+
+  -- a: append text after this cycle finishes (TODO for this: needs more state)
+  | Append S
+  -- i: insert text, outputing it immediately
+  | Insert S
+  -- c: replace text in matching address range with new text, restarts cycle
+  -- every time since we'll clear the pattern space whenever it matches.
+  -- | Change S
 
   -- dD
   | Delete

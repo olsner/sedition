@@ -189,6 +189,7 @@ run c state k = case c of
             | otherwise -> k state
     Delete -> k state { pattern = Nothing }
 
+    Insert s -> C.hPutStrLn (ofile 0 state) s >> k state
 
     Listen i maybeHost port -> do
         let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
@@ -349,4 +350,4 @@ runSedFile f = do
     debugPrint pgm
     runSed pgm
 
-main = runSedFile "examples/randomchat.xed"
+main = runSedFile "examples/http_server.xed"

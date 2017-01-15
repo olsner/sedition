@@ -7,7 +7,6 @@ import Control.Monad
 
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BS
-
 import Data.Maybe
 
 import System.Exit
@@ -45,12 +44,33 @@ pAddress = choice
   , Match . re <$> slash True
   ]
 
+unescape 'n' = '\n'
+unescape 'r' = '\r'
+unescape c   = c
+
+list p1 p2 = (:) <$> p1 <*> p2
+
 -- not eof, blank, }, ; or #
 pLabel = BS.pack <$> wsThen (some (noneOf "; \t\n\f\t\v\r#"))
 pRegister = pLabel
 -- Same but also delimited by : (for :port)
 pHostName = BS.pack <$> wsThen (some (noneOf ":; \t\n\f\t\v\r#"))
-pTextArgument = BS.pack <$> some (noneOf "\n\f\v\r#")
+-- Accept both single-line and multiple-line arguments to [aicm]
+-- initial whitespace is ignored (but only on the very first line after the
+-- command), after that backslash followed by newline continues the text on the
+-- next line, backslash followed by anything else is unescaped and used.
+-- EOF or a newline not preceded by a backslash terminates the text.
+pTextArgument = BS.pack <$> (line0 <|> wsThen line1)
+  where
+    -- If the first data is backslash, newline, then it's ignored and starts a
+    -- multiline text.
+    line0 = char '\\' *> char '\n' *> line1
+    line1 = choice $
+      [ char '\\' *> (list (char '\n') line1
+                      <|> list (unescape <$> noneOf "\n") line1)
+      , [] <$ char '\n'
+      , [] <$ eof
+      , list anyChar line1]
 
 int :: Parser Int
 int = fromInteger <$> decimal
@@ -128,6 +148,8 @@ pCommand = charSwitchM $
   , ('s', anyChar >>= (\c -> mkSubst <$> (re <$> slashWith True c)
                                      <*> slashWith False c
                                      <*> many sFlag))
+  , ('a', Append <$> pTextArgument)
+  , ('i', Insert <$> pTextArgument)
   ]
 
 charSwitchM cps = choice [char c *> p | (c,p) <- cps]
