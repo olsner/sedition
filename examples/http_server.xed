@@ -1,6 +1,9 @@
 0L1:1080
-A1 2
-f{
+:egin
+0{
+A 1 2
+f {
+    0 < 0 2
     1 {
         /^GET ([^ ]*)/ {
             s//\1/
@@ -33,4 +36,5 @@ Hello world!
 Go away.
 
 }
-
+begin
+}
