@@ -223,6 +223,8 @@ run c state k = case c of
 
     Quit status -> exitWith status
 
+    _ -> System.IO.putStrLn ("Unhandled command: " ++ show c) >> exitFailure
+
 getFile i state = M.lookup i (files state)
 closeFile i state = do
     {- The underlying socket/files may be used by other threads, so don't
