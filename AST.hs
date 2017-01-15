@@ -1,5 +1,7 @@
 module AST where
 
+import System.Exit
+
 import Data.ByteString.Char8 as C
 type S = ByteString
 
@@ -54,5 +56,7 @@ data Cmd
   | GetA (Maybe S)
 
   | Message (Maybe S)
+
+  | Quit ExitCode
   deriving (Show, Ord, Eq)
 

@@ -27,6 +27,10 @@ tests =
   , ("\\|| s|||", [Sed (At (Match Nothing)) (Subst Nothing "" [])])
   , ("\\/\\//s///", [Sed (At (Match (Just (RE "/")))) (Subst Nothing "" [])])
   , ("\\|\\|| s|||", [Sed (At (Match (Just (RE "|")))) (Subst Nothing "" [])])
+
+  , ("q", [Sed Always (Quit ExitSuccess)])
+  , ("q 0", [Sed Always (Quit ExitSuccess)])
+  , ("q 1", [Sed Always (Quit (ExitFailure 1))])
   ]
 
 counts [] = (0,0)

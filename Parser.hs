@@ -10,6 +10,8 @@ import qualified Data.ByteString.Char8 as BS
 
 import Data.Maybe
 
+import System.Exit
+
 import Text.Trifecta
 import Text.Trifecta.Delta
 
@@ -111,6 +113,7 @@ pCommand = charSwitchM $
   , ('h', Hold <$> maybeP pRegister)
   , ('n', Next <$> option 0 wsInt)
   , ('p', Print <$> option 0 wsInt)
+  , ('q', Quit <$> option ExitSuccess (intToExit <$> wsInt))
   , ('m', Message <$> wsThen (maybeP pTextArgument))
   , ('s', anyChar >>= (\c -> Subst <$> (re <$> slashWith True c)
                                    <*> slashWith False c
@@ -119,6 +122,9 @@ pCommand = charSwitchM $
 
 charSwitchM cps = choice [char c *> p | (c,p) <- cps]
 charSwitch cps = charSwitchM [(c, pure p) | (c,p) <- cps]
+
+intToExit 0 = ExitSuccess
+intToExit n = ExitFailure n
 
 parseString :: ByteString -> [Sed]
 parseString input = case parseOnly pFile input of

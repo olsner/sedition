@@ -12,6 +12,7 @@ import Data.Maybe
 
 import Network.Socket
 
+import System.Exit
 import System.IO
 import System.IO.Unsafe
 
@@ -214,6 +215,8 @@ run c state k = case c of
         debug ("Messaging " ++ show m)
         drive (bus state) m
         k state
+
+    Quit status -> exitWith status
 
 getFile i state = M.lookup i (files state)
 closeFile i state = do
