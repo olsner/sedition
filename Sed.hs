@@ -1,6 +1,9 @@
 {-# LANGUAGE OverloadedStrings, CPP #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 
+#define AUTOPRINT False
+#define DEBUG 0
+
 import Control.Applicative
 import Control.Concurrent
 import Control.Monad
@@ -62,7 +65,6 @@ data SedState = SedState {
 }
   deriving (Show)
 
-#define DEBUG 0
 #if DEBUG
 putstrlock = unsafePerformIO (newMVar ())
 debug s = withMVar putstrlock $ \() -> do
@@ -89,7 +91,7 @@ initialState pgm = do
     lineNumber = 0,
     pattern = Nothing,
     hold = M.empty,
-    autoprint = True,
+    autoprint = AUTOPRINT,
     block = BlockN,
     box = Mailbox box,
     bus = bus,
