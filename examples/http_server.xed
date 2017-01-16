@@ -6,35 +6,52 @@ f {
     0 < 0 2
     1 {
         /^GET ([^ ]*)/ {
-            s//\1/
-            hurl
-            behead
+            # TODO Implement and rely on sed saving the last regexp
+            s/^GET ([^ ]*) .*/\1/
+            h
+            s/.*/Got URL &/p
+            b head
         }
+        i broken
         broken
     }
-    n
 
     # TODO Make better use of address ranges here
-    # 2,/^$/ {} should match the headers
-    :ehead
-    /(.*): (.*)/ n
-    /^$/! behead
+    # 2,/^\r$/ {} should match the headers
+    :head
+    i reading header
+    z
+    n
+    # TODO This should be s/\r$// (which works in sed!), but that is broken...
+    s/.$//
+    /^$/ breq
+    p
+    /^Host: (.*)/ {
+        i got host
+        s/^Host: (.*)/\1/
+        G
+        s,(.*)\n(.*),http://\1\2,
+        h
+        s/.*/Got full URL &/p
+        z
+    }
+    bhead
 
-    :egin
+    :req
     i\
 HTTP/1.0 200 OK\r\
 Content-Type: text/plain\r\
 \r\
-Hello world!
-
-    q
+Hello world!\
+Requested URL was:
+    g
+    p
 
     :roken
     i\
 400 Bad request\r\
 \r\
 Go away.
-
 }
 begin
 }
