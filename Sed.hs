@@ -3,6 +3,7 @@
 
 #define AUTOPRINT False
 #define DEBUG 0
+#define IPC 1
 
 import Control.Applicative
 import Control.Concurrent
@@ -56,9 +57,11 @@ data SedState = SedState {
   autoprint :: Bool,
   block :: BlockState,
 
+#if IPC
   box :: Mailbox (Either (Maybe S) S),
   bus :: Bus S,
   passenger :: Passenger S,
+#endif
   irq :: Bool
 
   -- Pending output? Other tricky stuff?
@@ -93,21 +96,28 @@ initialState pgm = do
     hold = M.empty,
     autoprint = AUTOPRINT,
     block = BlockN,
+#if IPC
     box = Mailbox box,
     bus = bus,
     passenger = passenger,
+#endif
     irq = False }
 forkState state pgm = do
+#if IPC
   passenger <- board (bus state)
   box <- newEmptyMVar
   forkIO (busRider passenger box)
+#endif
   return state {
-    program = pgm,
-    pattern = Nothing,
-    lineNumber = 0,
-    block = BlockN,
-    passenger = passenger,
-    box = Mailbox box }
+    program = pgm
+  , pattern = Nothing
+  , lineNumber = 0
+  , block = BlockN
+#if IPC
+  , passenger = passenger
+  , box = Mailbox box
+#endif
+ }
 
 runSed :: [Sed] -> IO ()
 runSed seds = runProgram =<< initialState seds
@@ -222,6 +232,7 @@ run c state k = case c of
         debug ("Closing " ++ show i ++ ": " ++ show (getFile i state))
         k =<< closeFile i state
 
+#if IPC
     Message Nothing -> do
         let Just m = pattern state
         debug ("Messaging " ++ show m)
@@ -231,6 +242,7 @@ run c state k = case c of
         debug ("Messaging " ++ show m)
         drive (bus state) m
         k state
+#endif
 
     Subst (Just (RE _ pat)) rep t action
       | Just p <- pattern state,
@@ -302,8 +314,8 @@ closeFile i state = do
     {- The underlying socket/files may be used by other threads, so don't
     -- actually close them. Let them be garbage collected instead.
     case M.lookup i (files state) of
-        --Just (SocketFile s) -> sClose s
-        --Just (HandleFile h) -> hClose h
+        Just (SocketFile s) -> sClose s
+        Just (HandleFile h) -> hClose h
         _ -> return ()
     -}
     delFile i state
@@ -340,12 +352,16 @@ next i state k = do
         Just t | autoprint state && not (irq state) ->
             C.hPutStrLn (ofile 0 state) t
         _ -> return ()
+#if IPC
     -- if we successfully got an IRQ for last cycle, that means we're already
     -- running an asynchronous getLine and shouldn't start another.
     let Mailbox v = box state
     when (not (irq state)) $
       forkIO_ (putMVar v . Left =<< hMaybeGetLine (ifile i state))
     lineOrEvent <- takeMVar v
+#else
+    lineOrEvent <- Left <$> hMaybeGetLine (ifile i state)
+#endif
     debug ("next: " ++ show lineOrEvent)
     case lineOrEvent of
       Left Nothing -> return ()
