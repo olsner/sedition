@@ -9,7 +9,7 @@ f {
             # TODO Implement and rely on sed saving the last regexp
             s/^GET ([^ ]*) .*/\1/
             h
-            s/.*/Got URL &/p
+            #s/.*/Got URL &/p
             b head
         }
         i broken
@@ -19,20 +19,19 @@ f {
     # TODO Make better use of address ranges here
     # 2,/^\r$/ {} should match the headers
     :head
-    i reading header
+    #i reading header
     z
     n
-    # TODO This should be s/\r$// (which works in sed!), but that is broken...
-    s/.$//
+    s/\r$//
     /^$/ breq
-    p
+    #p
     /^Host: (.*)/ {
-        i got host
+        #i got host
         s/^Host: (.*)/\1/
         G
         s,(.*)\n(.*),http://\1\2,
         h
-        s/.*/Got full URL &/p
+        #s/.*/Got full URL &/p
         z
     }
     bhead
@@ -46,12 +45,19 @@ Hello world!\
 Requested URL was:
     g
     p
+    b done
 
     :roken
     i\
 400 Bad request\r\
 \r\
 Go away.
+    b done
+
+    :done
+    < 0
+    d
 }
+< 2
 begin
 }

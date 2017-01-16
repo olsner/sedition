@@ -99,6 +99,7 @@ slashWith re term = BS.pack . concat <$> many p <* char term
     -- treat them as explicitly literals (?), which may mean adding the \\
     -- depending on if we use BRE or EREs.
     , [term] <$ try (char '\\' >> char term)
+    , (:[]) <$> try (char '\\' *> (unescape <$> oneOf "rn"))
     -- Any other characters except the terminator get passed through to the
     -- regexp engine including the backslash.
     , (\x y -> [x,y]) <$> char '\\' <*> anyChar ]
