@@ -353,10 +353,14 @@ next i state k = do
       Right l -> do
             k $ state { pattern = Just l, irq = True }
 
-runBranch l (s:ss) state = case s of
-    Sed _ (Label m) | l == m -> runBlock ss state (const (return ()))
-    _ -> runBranch l ss state
-runBranch l [] state = fatal ("Label " ++ show l ++ " not found")
+runBranch l ss state = go ss failed
+  where
+    go (s:ss) fail = case s of
+      Sed _ (Label m) | l == m -> runBlock ss state (const (return ()))
+      Sed _ (Block ss') -> go ss' (go ss fail)
+      _ -> go ss fail
+    go [] fail = fail
+    failed = fatal ("Label " ++ show l ++ " not found")
 
 runSedString = runSed . parseString
 
