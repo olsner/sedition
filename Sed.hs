@@ -180,10 +180,6 @@ run c state k = case c of
         debug "branch: nothing"
         newCycle 0 state runProgram
     Branch (Just l) -> runBranch l (program state) state
-    -- "If auto-print is not disabled, print the pattern space, then,
-    -- regardless, replace the pattern space with the next line of input."
-    -- and don't restart a new cycle...
-    -- Also shouldn't accept interrupts here, just text lines.
     Next i -> newCycle i state k
     Print i | Just p <- pattern state -> do
                 C.hPutStrLn (ofile i state) p
@@ -191,7 +187,7 @@ run c state k = case c of
             | otherwise -> k state
     -- Delete should clear pattern space and start a new cycle (this avoids
     -- printing anything).
-    Delete -> newCycle 0 state { pattern = Nothing } k
+    Delete -> newCycle 0 state { pattern = Nothing } runProgram
     Clear -> k state { pattern = Just "" }
 
     Insert s -> C.hPutStrLn (ofile 0 state) s >> k state
@@ -239,12 +235,26 @@ run c state k = case c of
         -- matchAll if SubstGlobal is in flags
         matches@(_:_) <- match t pat p -> do
           let newp = subst p rep matches
+          debug ("Subst: " ++ show p ++ " => " ++ show newp)
           runSubAction action newp state
           k state { pattern = Just newp }
-      | otherwise -> k state
+      | otherwise -> do
+          debug ("Subst: no match in " ++ show (pattern state))
+          k state
 
     Quit True status -> run (Print 0) state (const (exitWith status))
     Quit False status -> exitWith status
+
+
+    Hold reg -> do
+      let pat = fromMaybe "" (pattern state)
+      debug ("GetA: holding " ++ show pat ++ " in " ++ show reg)
+      k state { hold = M.insert (fromMaybe "" reg) pat (hold state) }
+    Get reg -> k state { pattern = Just (fromMaybe "" (M.lookup (fromMaybe "" reg) (hold state))) }
+    GetA reg | Just p <- pattern state -> do
+      let got = fromMaybe "" (M.lookup (fromMaybe "" reg) (hold state))
+      debug ("GetA: appending " ++ show got ++ " to " ++ show p)
+      k state { pattern = Just (p <> "\n" <> got) }
 
     _ -> System.IO.putStrLn ("Unhandled command: " ++ show c) >> exitFailure
 
