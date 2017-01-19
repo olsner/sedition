@@ -52,8 +52,7 @@ data SedState = SedState {
   hold :: Map S S,
   activeAddresses :: Set MaybeAddress,
 
-  -- TODO Add last matched regexp. Requires 'check' to be able to update the
-  -- state before returning too.
+  lastRegex :: Maybe RE,
 
   autoprint :: Bool,
   block :: BlockState,
@@ -96,6 +95,7 @@ initialState pgm = do
     pattern = Nothing,
     hold = M.empty,
     activeAddresses = S.empty,
+    lastRegex = Nothing,
     autoprint = AUTOPRINT,
     block = BlockN,
 #if IPC
@@ -131,6 +131,8 @@ modifyActiveAddresses f =
 activateAddress addr = modifyActiveAddresses (S.insert addr)
 deactivateAddress addr = modifyActiveAddresses (S.delete addr)
 
+setLastRegex re = modify $ \state -> state { lastRegex = Just re }
+
 check :: MaybeAddress -> SedM Bool
 -- A bit of special casing here - unconditional statements should not be run
 -- in the before-first or IRQ state unless they're inside a 0{} or I{} block.
@@ -161,15 +163,20 @@ check1 (Line expectedLine) = do
   state <- get
   return (lineNumber state == expectedLine && not (irq state))
 check1 IRQ = irq <$> get
-check1 (Match (Just (RE _ re))) = do
+check1 (Match Nothing) = do
+  lre <- lastRegex <$> get
+  case lre of
+    Just re -> checkRE re
+    Nothing -> return False
+check1 (Match (Just re)) = do
+  setLastRegex re
+  checkRE re
+
+checkRE (RE _ re) = do
   p <- pattern <$> get
   case p of
     Just p -> return (matchTest re p)
     _ -> return False
-
-check1 addr = do
-  state <- get
-  fatal ("Unhandled addr " ++ show addr ++ " in state " ++ show state)
 
 -- Only the first one negates - series of ! don't double-negate.
 -- run will traverse and ignore all NotAddr prefixes.
@@ -291,11 +298,15 @@ run c k = case c of
         k
 #endif
 
-    Subst (Just (RE _ pat)) rep t action -> do
+    Subst mre rep t action -> do
       state <- get
+      -- Still a Maybe RE in case there was no previous regexp at all
+      mre <- case mre of
+           Just re -> setLastRegex re >> return (Just re)
+           Nothing -> return (lastRegex state)
       case pattern state of
         -- matchAll if SubstGlobal is in flags
-        Just p | matches@(_:_) <- match t pat p -> do
+        Just p | Just (RE _ pat) <- mre, matches@(_:_) <- match t pat p -> do
           let newp = subst p rep matches
           debug ("Subst: " ++ show p ++ " => " ++ show newp)
           runSubAction action newp

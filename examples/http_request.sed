@@ -2,9 +2,9 @@
 # in GNU sed.
 
     1 {
-        /^GET ([^ ]*)/ {
+        /^GET ([^ ]*) / {
             # TODO Implement and rely on sed saving the last regexp
-            s/^GET ([^ ]*) .*/\1/
+            s//\1/
             h
             #s/.*/Got URL &/p
             d
@@ -19,7 +19,7 @@
         #p
         /^Host: (.*)/ {
             #i got host
-            s/^Host: (.*)/\1/
+            s//\1/
             G
             s,(.*)\n(.*),http://\1\2,
             h
