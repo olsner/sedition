@@ -18,6 +18,8 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Monoid
+import qualified Data.Set as S
+import Data.Set
 
 import Network.Socket
 
@@ -48,13 +50,10 @@ data SedState = SedState {
   pattern :: Maybe S,
   -- hold "" is classic hold space
   hold :: Map S S,
-  -- Probably the wrong model for these.
-  -- Consider one /foo/,/bar/ address and one /foo/,/baz/ address - pretty much
-  -- each line should have its own state for whether it's still triggered.
-  --activeAddresses :: [Address],
+  activeAddresses :: Set MaybeAddress,
 
   -- TODO Add last matched regexp. Requires 'check' to be able to update the
-  -- state before returning.
+  -- state before returning too.
 
   autoprint :: Bool,
   block :: BlockState,
@@ -96,6 +95,7 @@ initialState pgm = do
     lineNumber = 0,
     pattern = Nothing,
     hold = M.empty,
+    activeAddresses = S.empty,
     autoprint = AUTOPRINT,
     block = BlockN,
 #if IPC
@@ -113,6 +113,7 @@ forkState pgm = get >>= \state -> liftIO $ do
   return state {
     program = pgm
   , pattern = Nothing
+  , activeAddresses = S.empty
   , lineNumber = 0
   , block = BlockN
 #if IPC
@@ -124,10 +125,13 @@ forkState pgm = get >>= \state -> liftIO $ do
 runSed :: [Sed] -> IO ()
 runSed seds = evalStateT runProgram =<< initialState seds
 
+addressActive addr = S.member addr . activeAddresses <$> get
+modifyActiveAddresses f =
+  modify $ \state -> state { activeAddresses = f (activeAddresses state) }
+activateAddress addr = modifyActiveAddresses (S.insert addr)
+deactivateAddress addr = modifyActiveAddresses (S.delete addr)
+
 check :: MaybeAddress -> SedM Bool
--- EOF is checked lazily to avoid the start of each cycle blocking until after
--- at least one character of the next line has been read.
-check (At EOF) = liftIH 0 hIsEOF
 -- A bit of special casing here - unconditional statements should not be run
 -- in the before-first or IRQ state unless they're inside a 0{} or I{} block.
 -- runBlock updates and restores the BlockI/Block0 state.
@@ -140,16 +144,30 @@ check Always = do
      -- On non-first lines, a missing pattern happens after 'd' (for example)
      -- treat these as matching too.
      | otherwise -> return True
-check (At (Line expectedLine)) = do
+check (At addr) = check1 addr
+-- if active: check for end, deactivate, return true
+-- if not active: check for start => activate, return true
+-- otherwise: return false
+check addr@(Between start end) = do
+  active <- addressActive addr
+  change <- check1 (if active then end else start)
+  when change $ (if active then deactivateAddress else activateAddress) addr
+  return (active || change)
+
+-- EOF is checked lazily to avoid the start of each cycle blocking until after
+-- at least one character of the next line has been read.
+check1 EOF = liftIH 0 hIsEOF
+check1 (Line expectedLine) = do
   state <- get
   return (lineNumber state == expectedLine && not (irq state))
-check (At IRQ) = irq <$> get
-check (At (Match (Just (RE _ re)))) = do
+check1 IRQ = irq <$> get
+check1 (Match (Just (RE _ re))) = do
   p <- pattern <$> get
   case p of
     Just p -> return (matchTest re p)
     _ -> return False
-check addr = do
+
+check1 addr = do
   state <- get
   fatal ("Unhandled addr " ++ show addr ++ " in state " ++ show state)
 
