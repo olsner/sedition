@@ -50,6 +50,9 @@ tests =
   , ("i text", [Sed Always (Insert "text")])
 
   , ("z", [Sed Always Clear])
+
+  , ("2,/^$/ {}", [Sed (Between (Line 2) (Match (re "^$"))) (Block [])])
+  , ("{}", [Sed Always (Block [])])
   ]
 
 -- tests that should not succeed

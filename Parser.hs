@@ -31,10 +31,11 @@ lineOrComment = Just <$> pLine <|> Nothing <$ pComment
 pComment = char '#' *> skipMany (notChar '\n')
 pLine = Sed <$> option Always pMaybeAddress <*> wsThen pCommand
 
+-- Backtracking could be avoided here - we shouldn't need to reparse pAddress
+-- after failing to find a second part of the range.
 pMaybeAddress = choice $
-  [ At <$> pAddress
-  -- FIXME whitespace is accepted and ignored around the ,
-  , Between <$> pAddress <* char ',' <*> pAddress
+  [ try (Between <$> pAddress <* wsThen (char ',') <*> wsThen pAddress)
+  , At <$> pAddress
   ]
 pAddress :: Parser Address
 pAddress = choice
