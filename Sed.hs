@@ -124,27 +124,34 @@ forkState pgm = get >>= \state -> liftIO $ do
 runSed :: [Sed] -> IO ()
 runSed seds = evalStateT runProgram =<< initialState seds
 
+check :: MaybeAddress -> SedM Bool
 -- EOF is checked lazily to avoid the start of each cycle blocking until after
 -- at least one character of the next line has been read.
-check (At EOF) state = hIsEOF (ifile 0 state)
+check (At EOF) = liftIH 0 hIsEOF
 -- A bit of special casing here - unconditional statements should not be run
 -- in the before-first or IRQ state unless they're inside a 0{} or I{} block.
 -- runBlock updates and restores the BlockI/Block0 state.
 -- This doesn't apply for unconditional *blocks* though - see runBlock below.
-check Always state
-    | irq state = return (block state == BlockI)
-    | 0 <- lineNumber state = return (block state == Block0)
-    -- On non-first lines, a missing pattern happens after 'd' (for example)
-    -- treat these as matching too.
-    | otherwise = return True
-check (At (Line expectedLine)) (SedState { lineNumber = actualLine, irq = False })
-    = return (expectedLine == actualLine)
-check (At (Line _)) state = return False
-check (At IRQ) state = return (irq state)
-check (At (Match (Just (RE _ re)))) state
-    | Just p <- pattern state = return (matchTest re p)
-    | otherwise = return False
-check addr state = fatal ("Unhandled addr " ++ show addr ++ " in state " ++ show state)
+check Always = do
+  state <- get
+  case state of
+   _ | irq state -> return (block state == BlockI)
+     | 0 <- lineNumber state -> return (block state == Block0)
+     -- On non-first lines, a missing pattern happens after 'd' (for example)
+     -- treat these as matching too.
+     | otherwise -> return True
+check (At (Line expectedLine)) = do
+  state <- get
+  return (lineNumber state == expectedLine && not (irq state))
+check (At IRQ) = irq <$> get
+check (At (Match (Just (RE _ re)))) = do
+  p <- pattern <$> get
+  case p of
+    Just p -> return (matchTest re p)
+    _ -> return False
+check addr = do
+  state <- get
+  fatal ("Unhandled addr " ++ show addr ++ " in state " ++ show state)
 
 -- Only the first one negates - series of ! don't double-negate.
 -- run will traverse and ignore all NotAddr prefixes.
@@ -168,7 +175,7 @@ runBlock [] k = newCycle 0 runProgram
 runBlock (Sed Always (Block seds):ss) k =
     runBlock seds (runBlock ss k)
 runBlock (Sed cond c:ss) k = do
-    dorun <- liftIO . check cond =<< get
+    dorun <- check cond
     debug (show cond ++ " => " ++ show dorun ++ ": " ++ show c)
     -- If the address is one of these special addresses, then change the block
     -- state, then make sure to reset it to its previous value before running
