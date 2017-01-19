@@ -8,6 +8,8 @@
 import Control.Applicative
 import Control.Concurrent
 import Control.Monad
+import Control.Monad.IO.Class
+import Control.Monad.Trans.State.Strict
 
 import Data.Array
 import Data.ByteString.Char8 as C
@@ -20,7 +22,7 @@ import Data.Monoid
 import Network.Socket
 
 import System.Exit
-import System.IO
+import System.IO hiding (hPutStrLn)
 import System.IO.Unsafe
 
 import Text.Regex.TDFA hiding (match)
@@ -102,7 +104,7 @@ initialState pgm = do
     passenger = passenger,
 #endif
     irq = False }
-forkState state pgm = do
+forkState pgm = get >>= \state -> liftIO $ do
 #if IPC
   passenger <- board (bus state)
   box <- newEmptyMVar
@@ -120,7 +122,7 @@ forkState state pgm = do
  }
 
 runSed :: [Sed] -> IO ()
-runSed seds = runProgram =<< initialState seds
+runSed seds = evalStateT runProgram =<< initialState seds
 
 -- EOF is checked lazily to avoid the start of each cycle blocking until after
 -- at least one character of the next line has been read.
@@ -149,128 +151,156 @@ check addr state = fatal ("Unhandled addr " ++ show addr ++ " in state " ++ show
 applyNot (NotAddr cmd) t = not t
 applyNot cmd t = t
 
-runProgram :: SedState -> IO ()
-runProgram state = runBlock (program state) state (const (return ()))
+runProgram :: SedM ()
+runProgram = do
+  prog <- program <$> get
+  runBlock prog (return ())
 
-runBlock :: [Sed] -> SedState -> (SedState -> IO ()) -> IO ()
-runBlock [] state k = newCycle 0 state runProgram
+type SedM a = StateT SedState IO a
+
+runBlock :: [Sed] -> SedM () -> SedM ()
+runBlock [] k = newCycle 0 runProgram
 -- Would be nice not to need this hack here, the rest of the conditional stuff
 -- should be updated to work with this.
 -- This makes it so that unconditional blocks are run even if the BlockI/0
 -- state check would *not* run an unconditional statement now. The block might
 -- then contain conditionals that do match.
-runBlock (Sed Always (Block seds):ss) state k =
-    runBlock seds state (\state -> runBlock ss state k)
-runBlock (Sed cond c:ss) state k = do
-    dorun <- check cond state
+runBlock (Sed Always (Block seds):ss) k =
+    runBlock seds (runBlock ss k)
+runBlock (Sed cond c:ss) k = do
+    dorun <- liftIO . check cond =<< get
     debug (show cond ++ " => " ++ show dorun ++ ": " ++ show c)
     -- If the address is one of these special addresses, then change the block
     -- state, then make sure to reset it to its previous value before running
     -- the next statement.
     -- Blocks run inside this block will inherit it and get the block-state
     -- popped once it gets back to the outer continuation.
-    let state' = case cond of
-            At (Line 0) -> state { block = Block0 }
-            At IRQ -> state { block = BlockI }
-            _ -> state
-    let k' state'' = runBlock ss (state'' { block = block state }) k
-    if applyNot c dorun then run c state' k' else k' state
+    let setBlock b = modify $ \state -> state { block = b }
+    oldBlock <- block <$> get
+    setBlock $ case cond of
+        At (Line 0) -> Block0
+        At IRQ -> BlockI
+        _ -> oldBlock
+    let k' = setBlock oldBlock >> runBlock ss k
+    if applyNot c dorun then run c k' else k'
 
-run :: Cmd -> SedState -> (SedState -> IO ()) -> IO ()
-run c state k = case c of
-    Block seds -> runBlock seds state k
+run :: Cmd -> SedM () -> SedM ()
+run c k = case c of
+    Block seds -> runBlock seds k
     Fork sed -> do
-        forkIO $ do
+        state <- forkState [sed]
+        forkIO_ $ do
             debug ("start of fork")
-            runProgram =<< forkState state [sed]
+            put state
+            runProgram
             debug ("end of fork")
         debug ("parent is after fork")
-        k state
-    NotAddr c -> run c state k
-    Label l -> k state
+        k
+    NotAddr c -> run c k
+    Label l -> k
     Branch Nothing -> do
         debug "branch: nothing"
-        newCycle 0 state runProgram
-    Branch (Just l) -> runBranch l (program state) state
-    Next i -> newCycle i state k
-    Print i | Just p <- pattern state -> do
-                C.hPutStrLn (ofile i state) p
-                k state
-            | otherwise -> k state
+        newCycle 0 runProgram
+    Branch (Just l) -> runBranch l =<< program <$> get
+    Next i -> newCycle i k
+    Print i -> get >>= \state ->
+        case pattern state of
+          Just p -> printTo i p >> k
+          _ -> k
     -- Delete should clear pattern space and start a new cycle (this avoids
     -- printing anything).
-    Delete -> newCycle 0 state { pattern = Nothing } runProgram
-    Clear -> k state { pattern = Just "" }
+    Delete -> do
+      modify $ \state -> state { pattern = Nothing }
+      newCycle 0 runProgram
+    Clear -> do
+      modify $ \state -> state { pattern = Just "" }
+      k
 
-    Insert s -> C.hPutStrLn (ofile 0 state) s >> k state
+    Insert s -> do
+      printTo 0 s
+      k
 
     Listen i maybeHost port -> do
         let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
         let maybeHost' = fmap C.unpack maybeHost
-        addr:_ <- getAddrInfo (Just hints) maybeHost' (Just (show port))
-        s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
-        setSocketOption s ReuseAddr 1
-        bind s (addrAddress addr)
-        listen s 7
+        s <- liftIO $ do
+            addr:_ <- getAddrInfo (Just hints) maybeHost' (Just (show port))
+            s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+            setSocketOption s ReuseAddr 1
+            bind s (addrAddress addr)
+            listen s 7
+            return s
         debug ("now listening on " ++ show i)
-        k =<< replaceFile i (SocketFile s) state
+        replaceFile i (SocketFile s)
+        k
 
     Accept i j -> do
-        let Just (SocketFile s) = getFile i state
+        Just (SocketFile s) <- getFile i
         debug ("accepting from " ++ show i ++ " to " ++ show j)
-        (c,addr) <- accept s
+        (c,addr) <- liftIO $ accept s
         debug ("accepted: " ++ show addr)
-        h <- socketToHandle c ReadWriteMode
-        k =<< replaceFile j (HandleFile h) state
+        h <- liftIO $ socketToHandle c ReadWriteMode
+        replaceFile j (HandleFile h)
+        k
 
     Redirect i (Just j) -> do
-        state <- case getFile j state of
-            Just f -> delFile j =<< replaceFile i f state
-            Nothing -> closeFile i state
-        k state
+        f <- getFile j
+        case f of
+           Just f -> replaceFile i f >> delFile j
+           Nothing -> closeFile i
+        k
     Redirect i Nothing -> do
-        debug ("Closing " ++ show i ++ ": " ++ show (getFile i state))
-        k =<< closeFile i state
+        f <- getFile i
+        debug ("Closing " ++ show i ++ ": " ++ show f)
+        closeFile i
+        k
 
 #if IPC
-    Message Nothing -> do
-        let Just m = pattern state
+    Message msg -> do
+        state <- get
+        let m = case msg of
+              Just m -> m
+              Nothing -> fromJust (pattern state)
         debug ("Messaging " ++ show m)
-        drive (bus state) m
-        k state
-    Message (Just m) -> do
-        debug ("Messaging " ++ show m)
-        drive (bus state) m
-        k state
+        liftIO (drive (bus state) m)
+        k
 #endif
 
-    Subst (Just (RE _ pat)) rep t action
-      | Just p <- pattern state,
+    Subst (Just (RE _ pat)) rep t action -> do
+      state <- get
+      case pattern state of
         -- matchAll if SubstGlobal is in flags
-        matches@(_:_) <- match t pat p -> do
+        Just p | matches@(_:_) <- match t pat p -> do
           let newp = subst p rep matches
           debug ("Subst: " ++ show p ++ " => " ++ show newp)
-          runSubAction action newp state
-          k state { pattern = Just newp }
-      | otherwise -> do
+          runSubAction action newp
+          modify $ \state -> state { pattern = Just newp }
+          k
+        _ -> do
           debug ("Subst: no match in " ++ show (pattern state))
-          k state
+          k
 
-    Quit True status -> run (Print 0) state (const (exitWith status))
-    Quit False status -> exitWith status
-
+    Quit print status -> do
+      let exit = liftIO (exitWith status)
+      if print then run (Print 0) exit else exit
 
     Hold reg -> do
-      let pat = fromMaybe "" (pattern state)
+      pat <- fromMaybe "" . pattern <$> get
       debug ("GetA: holding " ++ show pat ++ " in " ++ show reg)
-      k state { hold = M.insert (fromMaybe "" reg) pat (hold state) }
-    Get reg -> k state { pattern = Just (fromMaybe "" (M.lookup (fromMaybe "" reg) (hold state))) }
-    GetA reg | Just p <- pattern state -> do
+      modify $ \state -> state { hold = M.insert (fromMaybe "" reg) pat (hold state) }
+      k
+    Get reg -> do
+      modify $ \state -> state { pattern = Just (fromMaybe "" (M.lookup (fromMaybe "" reg) (hold state))) }
+      k
+    GetA reg -> do
+      state <- get
+      let p = fromMaybe "" (pattern state)
       let got = fromMaybe "" (M.lookup (fromMaybe "" reg) (hold state))
       debug ("GetA: appending " ++ show got ++ " to " ++ show p)
-      k state { pattern = Just (p <> "\n" <> got) }
+      modify $ \state -> state { pattern = Just (p <> "\n" <> got) }
+      k
 
-    _ -> System.IO.putStrLn ("Unhandled command: " ++ show c) >> exitFailure
+    _ -> liftIO (System.IO.putStrLn ("Unhandled command: " ++ show c) >> exitFailure)
 
 -- This could be preprocessed a bit better, e.g. having the parser parse the
 -- replacement into a list of (Literal|Ref Int).
@@ -297,11 +327,11 @@ subst p rep matches = go "" 0 matches
           c -> go (C.snoc acc c) (i + 1)
         matchN n = (uncurry substr) (match ! n)
 
-runSubAction SActionNone _ _ = return ()
-runSubAction SActionExec s _ = do
+runSubAction SActionNone _ = return ()
+runSubAction SActionExec s = do
     debug ("TODO: Actually execute " ++ show s)
     return ()
-runSubAction (SActionPrint i) s state = C.hPutStrLn (ofile i state) s
+runSubAction (SActionPrint i) s = printTo i s
 
 match SubstFirst re p = case matchOnce re p of Just x -> [x]; Nothing -> []
 match SubstAll re p = matchAll re p
@@ -309,8 +339,8 @@ match SubstAll re p = matchAll re p
 -- same as a nonmatch.
 match (SubstNth i) re p = [matchAll re p !! i]
 
-getFile i state = M.lookup i (files state)
-closeFile i state = do
+getFile i = M.lookup i . files <$> get
+closeFile i = do
     {- The underlying socket/files may be used by other threads, so don't
     -- actually close them. Let them be garbage collected instead.
     case M.lookup i (files state) of
@@ -318,14 +348,21 @@ closeFile i state = do
         Just (HandleFile h) -> hClose h
         _ -> return ()
     -}
-    delFile i state
-replaceFile i f state = do
-    state <- closeFile i state
-    setFile i f state
-setFile i f state = return state { files = M.insert i f (files state) }
-delFile i state = return state { files = M.delete i (files state) }
+    delFile i
+replaceFile i f = do
+    closeFile i
+    setFile i f
+setFile i f = modify $ \state -> state { files = M.insert i f (files state) }
+delFile i = modify $ \state -> state { files = M.delete i (files state) }
 ifile i state = fileHandle (M.findWithDefault (HandleFile stdin) i (files state))
 ofile i state = fileHandle (M.findWithDefault (HandleFile stdout) i (files state))
+
+liftIH i f = liftIO . f =<< ifile i <$> get
+liftOH i f = liftIO . f =<< ofile i <$> get
+
+printTo i s = liftOH i (\h -> hPutStrLn h s)
+
+maybeGetLine i = liftIH i hMaybeGetLine
 
 hMaybeGetLine :: Handle -> IO (Maybe S)
 hMaybeGetLine h = do
@@ -333,48 +370,57 @@ hMaybeGetLine h = do
     if eof then pure Nothing
            else Just <$> C.hGetLine h
 
-forkIO_ f = forkIO f >> return ()
+forkIO_ :: SedM () -> SedM ()
+forkIO_ m = unliftIO forkIO m >> return ()
+
+unliftIO :: (IO b -> IO a) -> SedM b -> SedM a
+unliftIO f m = do
+  state <- get
+  liftIO (f (evalStateT m state))
 
 -- Read a new input line, then run k if input was available or return ()
 -- directly if we've reached EOF.
 -- For 'n' (read input and continue execution), k is the next-command
 -- continuation. For the end-of-cycle or 'b' (t/T) without target, k is instead
 -- runProgram so that it restarts the whole program.
-newCycle i state k = do
-    debug ("new cycle: -- state = " ++ show state)
-    next i state $ \state -> do
-        debug ("new cycle: => state = " ++ show state)
-        k state
+newCycle i k = do
+    get >>= \state -> debug ("new cycle: -- state = " ++ show state)
+    next i $ do
+        get >>= \state -> debug ("new cycle: => state = " ++ show state)
+        k
     debug ("new cycle: exiting")
 
-next i state k = do
+next i k = do
+    state <- get
     case pattern state of
         Just t | autoprint state && not (irq state) ->
-            C.hPutStrLn (ofile 0 state) t
+            printTo 0 t
         _ -> return ()
 #if IPC
     -- if we successfully got an IRQ for last cycle, that means we're already
     -- running an asynchronous getLine and shouldn't start another.
     let Mailbox v = box state
     when (not (irq state)) $
-      forkIO_ (putMVar v . Left =<< hMaybeGetLine (ifile i state))
-    lineOrEvent <- takeMVar v
+      forkIO_ (liftIO . putMVar v . Left =<< maybeGetLine i)
+    lineOrEvent <- liftIO $ takeMVar v
 #else
-    lineOrEvent <- Left <$> hMaybeGetLine (ifile i state)
+    lineOrEvent <- Left <$> maybeGetLine i
 #endif
     debug ("next: " ++ show lineOrEvent)
     case lineOrEvent of
       Left Nothing -> return ()
       Left (Just l) -> do
-            k $ state { pattern = Just l, lineNumber = 1 + lineNumber state,
+            modify $ \state -> state { pattern = Just l, lineNumber = 1 + lineNumber state,
                         irq = False }
+            k
       Right l -> do
-            k $ state { pattern = Just l, irq = True }
+            modify $ \state -> state { pattern = Just l, irq = True }
+            k
 
-runBranch l ss state = go ss failed
+runBranch l ss = go ss failed
   where
     go (s:ss) fail = case s of
-      Sed _ (Label m) | l == m -> runBlock ss state (const (return ()))
+      Sed _ (Label m) | l == m -> runBlock ss (return ())
       Sed _ (Block ss') -> go ss' (go ss fail)
       _ -> go ss fail
     go [] fail = fail
