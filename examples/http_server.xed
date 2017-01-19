@@ -10,31 +10,28 @@ f {
             s/^GET ([^ ]*) .*/\1/
             h
             #s/.*/Got URL &/p
-            b head
+            d
         }
         i broken
         broken
     }
 
-    # TODO Make better use of address ranges here
-    # 2,/^\r$/ {} should match the headers
-    :head
-    #i reading header
-    z
-    n
     s/\r$//
-    /^$/ breq
-    #p
-    /^Host: (.*)/ {
-        #i got host
-        s/^Host: (.*)/\1/
-        G
-        s,(.*)\n(.*),http://\1\2,
-        h
-        #s/.*/Got full URL &/p
-        z
+    2,/^$/ {
+        #i reading header
+        #p
+        /^Host: (.*)/ {
+            #i got host
+            s/^Host: (.*)/\1/
+            G
+            s,(.*)\n(.*),http://\1\2,
+            h
+            #s/.*/Got full URL &/p
+            z
+        }
+        /^$/ breq
+        d
     }
-    bhead
 
     :req
     i\
