@@ -1,63 +1,4 @@
-xed, e(X)tended sed, pronounced shed
-====================================
-
-Examples:
-
-A simple echo server:
-
-    0 L1 :7
-    :egin
-    # Allow this code to run on line 0 (before-first-line)
-    0{
-    A 1 2
-    # Fork: setup: redirect 2 to 0, then loop doing nothing (= cat)
-    f 0 < 0 2
-    # In main, close 2
-    < 2
-    # Loop without waiting for a line on stdin
-    begin
-    }
-
-HTTP server:
-
-    0L1:1080
-    A12
-    f{
-        1 {
-            /^GET ([^ ]*)/ {
-                s//\1/
-                hurl
-                behead
-            }
-            broken
-        }
-        n
-
-        # TODO Make better use of address ranges here
-        # 2,/^$/ {} should match the headers
-        :ehead
-        /(.*): (.*)/ n
-        /^$/! behead
-
-        :egin
-        a\
-        HTTP/1.0 200 OK\r\
-        Content-Type: text/plain\r\
-        \r\
-        Hello world!
-
-        q
-
-        :roken
-        a\
-        400 Bad request\r\
-        \r\
-        Go away.
-    }
-
-Using the /f extension which does something like the listen/accept/fork dance
-in the chat server. To be formalized as a desugaring...
-
+Random collections of ideas:
 
 Files/streams/channels:
 
@@ -165,21 +106,26 @@ L[ifd] host:port/flags
                     :port on its own listens on all interfaces
                     space between ifd and :port is optional if there is no host.
 
-                    Match [ifd A fd] events to accept connections.
+                    Connections can be accepted using the A command.
 
                     Currently defined L flags:
                     f: fork
                         The L command is followed by a command (like fork), the
                         forked program will be run for each incoming connection,
                         with the client as fd 0.
+                        (NB: not implemented)
 
-        free: mM (regex interrupts)
+m [message]
+                    broadcast a message on the message bus (see regexintr.txt)
+                    if messge is blank, pattern space will be sent instead.
 
 o[ifd] file         open file for reading
 O[ofd] file         open file for writing
 
-S: send UDP? connect SSL?
-uUvVXYzZ
+S: connect SSL? (needs an SSL listen too, hmm...)
+
+        free: uUvVXYzZ
+
 X [reg]             indirect load: load register (reg) into reg
                     e.g. if hold space has "foo", "X" without register replaces
                     hold space with value of foo.

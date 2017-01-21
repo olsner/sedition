@@ -1,6 +1,9 @@
 N = 2
 
-all: Sed runtests
+all: Sed runtests README.html
+
+%.html: %.md
+	markdown $< >$@
 
 Sed: force
 	ghc -O2 -j$(N) --make -threaded -rtsopts $@
