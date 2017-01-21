@@ -141,6 +141,8 @@ command descriptions, these are usually called `fd`.
   Broadcast `message` as an IPC message to all running threads. The next cycle
   of all threads will process the message instead of a line of input.
 
+  If no message is given, the current pattern space will be broadcast instead.
+
 ### Extended hold-space
 
 `g`, `G`, `h` and `H` are extended to take an optional register name. When used
