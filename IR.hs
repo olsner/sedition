@@ -1,4 +1,4 @@
-module IR where
+module IR (toIR) where
 
 import Parser
 
@@ -117,7 +117,7 @@ ifCheck c tx fx = do
 
 -- TODO Post-process into labelled basic blocks
 toIR :: Bool -> [Sed] -> (Label, [Either Label SedIR])
-toIR autoprint seds = evalRWS (tSeds seds) M.empty (startState autoprint)
+toIR autoprint seds = evalRWS (tProgram seds) M.empty (startState autoprint)
 
 -- Returns the entry-point label (pre-first line) of the sed program.
 --
@@ -125,17 +125,23 @@ toIR autoprint seds = evalRWS (tSeds seds) M.empty (startState autoprint)
 -- * pre-first line code (if any)
 -- * interrupt reception (for new-cycle code)
 -- * new cycle label
-tSeds seds = do
+tProgram seds = do
   newCycle <- newLabel
   modify $ \state -> state { nextCycleLabel = newCycle }
   entry <- emitNewLabel
   -- TODO Emit pre-first line separately
-  mapM_ tSed seds
+  tSeds seds
   emitLabel newCycle
-  -- And here, actually emit code for starting a new cycle, reading a line etc.
+  get >>= \s -> when (autoprint s) (emit (Print 0))
+  emit (Clear)
+  -- TODO Add interrupt handler
+  emit (ReadAppend 0 Nothing)
   emitBranch entry
   modify $ \state -> state { nextCycleLabel = invalidLabel "end of program" }
   return entry
+
+-- May need more state: I-block or 0-block for instance
+tSeds = mapM_ tSed
 
 withCond Always x = x
 withCond (At c) x = do
@@ -172,7 +178,7 @@ tCheck p addr = error ("Unmatched case " ++ show addr)
 -- TODO track I-block and 0-block state like the interpreter does
 tSed (Sed cond x) = withCond cond $ tCmd x
 
-tCmd (AST.Block xs) = mapM_ tSed xs
+tCmd (AST.Block xs) = tSeds xs
 tCmd (AST.Print fd) = emit (Print fd) >> emit Clear
 tCmd (AST.Next fd) = printIfAuto >> emit Clear >> emit (ReadAppend fd Nothing)
 tCmd (AST.NextA fd) = printIfAuto >> emit (ReadAppend fd Nothing)
@@ -185,7 +191,7 @@ tCmd (AST.Fork sed) = do
   skip <- newLabel
   emitBranch skip
   oldNextCycle <- nextCycleLabel <$> get
-  forked <- tSeds [sed]
+  forked <- tProgram [sed]
   modify $ \state -> state { nextCycleLabel = oldNextCycle }
   emitLabel skip
   emit (Fork forked)

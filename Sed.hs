@@ -33,6 +33,7 @@ import Text.Regex.TDFA hiding (match)
 import AST
 import Bus
 import Parser
+import IR
 
 -- Just to make SedState Showable
 newtype Mailbox a = Mailbox (MVar a)
