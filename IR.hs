@@ -1,4 +1,4 @@
-module IR (toIR) where
+module IR where
 
 import Parser
 
@@ -6,6 +6,7 @@ import AST hiding (Cmd(..), Address(..), Label(..))
 import qualified AST
 
 import Control.Monad
+import qualified Control.Monad.Trans.State.Strict as S
 import Control.Monad.Trans.RWS.Strict
 
 import Data.Map (Map)
@@ -21,14 +22,21 @@ data SedIR =
   | If Pred Label Label
   | Set Pred Bool
   | Clear -- pattern space
-  | ReadAppend FD (Maybe Label)
+  -- for n and new cycle (which can accept incoming messages)
+  | Read FD (Maybe Label)
+  -- for N (which can never accept interrupts)
+  | ReadAppend FD
   | Print FD
   | PrintS FD S
 
   | Hold (Maybe S)
   | HoldA (Maybe S)
+  | Get (Maybe S)
   | GetA (Maybe S)
 
+  -- TODO Add instruction for incrementing the line number when starting a new
+  -- cycle. Or is the line number incremented on read?
+  -- Any read for file descriptor 0 would increment it.
   | Line Int Pred
   -- Possible extension: explicit "match" registers to track several precomputed
   -- matches at once.
@@ -115,9 +123,22 @@ ifCheck c tx fx = do
   tCheck p0 c
   tIf p0 tx fx
 
+blocky :: Label -> [Either Label SedIR] -> (Label, Map Label [SedIR])
+blocky entry code = (entry, S.execState (go entry [] code) M.empty)
+  where
+    finish label acc = S.modify $ \s -> M.insert label (reverse acc) s
+    -- TODO Track exit labels to avoid inserting redundant branches
+    go label acc [] = finish label acc
+    go label acc (x:xs) =
+      case x of
+        Left l -> finish label (Branch l:acc) >> go l [] xs
+        Right r -> go label (r:acc) xs
+
 -- TODO Post-process into labelled basic blocks
-toIR :: Bool -> [Sed] -> (Label, [Either Label SedIR])
-toIR autoprint seds = evalRWS (tProgram seds) M.empty (startState autoprint)
+toIR' :: Bool -> [Sed] -> (Label, [Either Label SedIR])
+toIR' autoprint seds = evalRWS (tProgram seds) M.empty (startState autoprint)
+
+toIR autoprint seds = uncurry blocky (toIR' autoprint seds)
 
 -- Returns the entry-point label (pre-first line) of the sed program.
 --
@@ -133,9 +154,9 @@ tProgram seds = do
   tSeds seds
   emitLabel newCycle
   get >>= \s -> when (autoprint s) (emit (Print 0))
-  emit (Clear)
+  emit Clear
   -- TODO Add interrupt handler
-  emit (ReadAppend 0 Nothing)
+  emit (Read 0 Nothing)
   emitBranch entry
   modify $ \state -> state { nextCycleLabel = invalidLabel "end of program" }
   return entry
@@ -180,8 +201,8 @@ tSed (Sed cond x) = withCond cond $ tCmd x
 
 tCmd (AST.Block xs) = tSeds xs
 tCmd (AST.Print fd) = emit (Print fd) >> emit Clear
-tCmd (AST.Next fd) = printIfAuto >> emit Clear >> emit (ReadAppend fd Nothing)
-tCmd (AST.NextA fd) = printIfAuto >> emit (ReadAppend fd Nothing)
+tCmd (AST.Next fd) = printIfAuto >> emit (Read fd Nothing)
+tCmd (AST.NextA fd) = printIfAuto >> emit (ReadAppend fd)
 tCmd (AST.Listen fd host port) = emit (Listen fd host port)
 tCmd (AST.Accept sfd fd) = emit (Accept sfd fd)
 tCmd (AST.Label name) = emitLabel =<< getLabelMapping name
@@ -203,7 +224,7 @@ tCmd (AST.Subst mre sub flags actions) = do
   tCheck p0 (AST.Match mre)
   tIf p0 (emit (Subst sub flags) >> tSubstAction actions) (return ())
 tCmd (AST.Hold maybeReg) = emit (Hold maybeReg)
-tCmd (AST.Get maybeReg) = emit Clear >> emit (GetA maybeReg)
+tCmd (AST.Get maybeReg) = emit (Get maybeReg)
 tCmd (AST.GetA maybeReg) = emit (GetA maybeReg)
 tCmd (AST.Insert s) = emit (PrintS 0 s)
 -- TODO append ('a'/'A') needs to save data to be printed at the start of the

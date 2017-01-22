@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings, CPP #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 
-#define DEBUG 0
+#define DEBUG 1
 #define IPC 1
 
 import Control.Applicative
@@ -33,7 +33,8 @@ import Text.Regex.TDFA hiding (match)
 import AST
 import Bus
 import Parser
-import IR
+import IR (toIR)
+import qualified IR
 
 -- Just to make SedState Showable
 newtype Mailbox a = Mailbox (MVar a)
@@ -45,8 +46,8 @@ data File
   = HandleFile { fileHandle :: Handle }
   | SocketFile { fileSocket :: Socket }
   deriving (Show, Eq)
-data SedState = SedState {
-  program :: [Sed],
+data SedState program = SedState {
+  program :: program,
   files :: Map Int File,
   lineNumber :: Int,
   pattern :: Maybe S,
@@ -58,6 +59,8 @@ data SedState = SedState {
 
   autoprint :: Bool,
   block :: BlockState,
+
+  predicates :: Set Int,
 
 #if IPC
   box :: Mailbox (Either (Maybe S) S),
@@ -72,7 +75,7 @@ data SedState = SedState {
 
 #if DEBUG
 putstrlock = unsafePerformIO (newMVar ())
-debug s = withMVar putstrlock $ \() -> do
+debug s = liftIO $ withMVar putstrlock $ \() -> do
     t <- myThreadId
     System.IO.putStrLn (show t ++ ": " ++ s)
 #else
@@ -100,6 +103,7 @@ initialState autoprint pgm = do
     lastRegex = Nothing,
     autoprint = autoprint,
     block = BlockN,
+    predicates = S.empty,
 #if IPC
     box = Mailbox box,
     bus = bus,
@@ -124,8 +128,64 @@ forkState pgm = get >>= \state -> liftIO $ do
 #endif
  }
 
+setPred (IR.Pred n) b = modify $ \s -> s { predicates = f (predicates s) }
+  where
+    f | b = S.insert n
+      | otherwise = S.delete n
+getPred (IR.Pred n) = S.member n . predicates <$> get
+
 runSed :: Bool -> [Sed] -> IO ()
+#if 0
 runSed autoprint seds = evalStateT runProgram =<< initialState autoprint seds
+#else
+runSed autoprint seds = do
+    let (e,ir) = toIR autoprint seds
+    state <- initialState autoprint ir
+    evalStateT (runIRLabel e) state
+#endif
+
+runIRLabel entry = do
+  Just code <- M.lookup entry . program <$> get
+  mapM_ runIR_debug code
+
+runIR_debug i = do
+  debug (show i)
+  runIR i
+
+runIR (IR.Branch l) = runIRLabel l
+runIR (IR.Line l p) = do
+  state <- get
+  setPred p (l == lineNumber state)
+runIR (IR.If p t f) = do
+  b <- getPred p
+  runIRLabel (if b then t else f)
+runIR (IR.Listen i maybeHost port) = doListen i maybeHost port
+runIR (IR.Accept s c) = doAccept s c
+runIR (IR.Fork entry) = do
+    pgm <- program <$> get
+    state <- forkState pgm
+    forkIO_ $ do
+        debug ("start of fork")
+        put state
+        runIRLabel entry
+        debug ("end of fork")
+    debug ("parent is after fork")
+runIR (IR.Redirect i j) = redirectFile i j
+runIR (IR.CloseFile i) = closeFile i
+runIR (IR.Match re p) = setPred p =<< checkRE re
+runIR (IR.SetLastRE re) = setLastRegex re
+runIR (IR.PrintS i s) = printTo i s
+runIR (IR.Print i) = get >>= \state ->
+    case pattern state of
+        Just p -> printTo i p
+        _ -> return ()
+runIR (IR.Clear) = modify $ \state -> state { pattern = Just "" }
+runIR (IR.Get reg) = doGet reg
+runIR (IR.GetA reg) = doGetAppend reg
+runIR (IR.Read i Nothing) = do
+  res <- maybeGetLine i
+  modify $ \state -> state { pattern = res }
+runIR cmd = fatal ("Unhandled instruction " ++ show cmd)
 
 addressActive addr = S.member addr . activeAddresses <$> get
 modifyActiveAddresses f =
@@ -190,7 +250,9 @@ runProgram = do
   prog <- program <$> get
   runBlock prog (return ())
 
-type SedM a = StateT SedState IO a
+type SedPM p a = StateT (SedState p) IO a
+type SedM a = SedPM [Sed] a
+type SedIRM a = SedPM (Map IR.Label [IR.SedIR]) a
 
 runBlock :: [Sed] -> SedM () -> SedM ()
 runBlock [] k = newCycle 0 runProgram
@@ -255,37 +317,17 @@ run c k = case c of
       k
 
     Listen i maybeHost port -> do
-        let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
-        let maybeHost' = fmap C.unpack maybeHost
-        s <- liftIO $ do
-            addr:_ <- getAddrInfo (Just hints) maybeHost' (Just (show port))
-            s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
-            setSocketOption s ReuseAddr 1
-            bind s (addrAddress addr)
-            listen s 7
-            return s
-        debug ("now listening on " ++ show i)
-        replaceFile i (SocketFile s)
+        doListen i maybeHost port
         k
 
     Accept i j -> do
-        Just (SocketFile s) <- getFile i
-        debug ("accepting from " ++ show i ++ " to " ++ show j)
-        (c,addr) <- liftIO $ accept s
-        debug ("accepted: " ++ show addr)
-        h <- liftIO $ socketToHandle c ReadWriteMode
-        replaceFile j (HandleFile h)
+        doAccept i j
         k
 
     Redirect i (Just j) -> do
-        f <- getFile j
-        case f of
-           Just f -> replaceFile i f >> delFile j
-           Nothing -> closeFile i
+        redirectFile i j
         k
     Redirect i Nothing -> do
-        f <- getFile i
-        debug ("Closing " ++ show i ++ ": " ++ show f)
         closeFile i
         k
 
@@ -327,18 +369,41 @@ run c k = case c of
       debug ("GetA: holding " ++ show pat ++ " in " ++ show reg)
       modify $ \state -> state { hold = M.insert (fromMaybe "" reg) pat (hold state) }
       k
-    Get reg -> do
-      modify $ \state -> state { pattern = Just (fromMaybe "" (M.lookup (fromMaybe "" reg) (hold state))) }
-      k
-    GetA reg -> do
-      state <- get
-      let p = fromMaybe "" (pattern state)
-      let got = fromMaybe "" (M.lookup (fromMaybe "" reg) (hold state))
-      debug ("GetA: appending " ++ show got ++ " to " ++ show p)
-      modify $ \state -> state { pattern = Just (p <> "\n" <> got) }
-      k
+    Get reg -> doGet reg >> k
+    GetA reg -> doGetAppend reg >> k
 
     _ -> liftIO (System.IO.putStrLn ("Unhandled command: " ++ show c) >> exitFailure)
+
+doListen i maybeHost port = do
+    let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
+    let maybeHost' = fmap C.unpack maybeHost
+    s <- liftIO $ do
+        addr:_ <- getAddrInfo (Just hints) maybeHost' (Just (show port))
+        s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+        setSocketOption s ReuseAddr 1
+        bind s (addrAddress addr)
+        listen s 7
+        return s
+    debug ("now listening on " ++ show i)
+    replaceFile i (SocketFile s)
+
+doAccept i j = do
+    Just (SocketFile s) <- getFile i
+    debug ("accepting from " ++ show i ++ " to " ++ show j)
+    (c,addr) <- liftIO $ accept s
+    debug ("accepted: " ++ show addr)
+    h <- liftIO $ socketToHandle c ReadWriteMode
+    replaceFile j (HandleFile h)
+
+doGet reg =
+  modify $ \s -> s { pattern = Just (fromMaybe "" (M.lookup (fromMaybe "" reg) (hold s))) }
+
+doGetAppend reg = do
+  state <- get
+  let p = fromMaybe "" (pattern state)
+  let got = fromMaybe "" (M.lookup (fromMaybe "" reg) (hold state))
+  debug ("GetA: appending " ++ show got ++ " to " ++ show p)
+  modify $ \state -> state { pattern = Just (p <> "\n" <> got) }
 
 -- This could be preprocessed a bit better, e.g. having the parser parse the
 -- replacement into a list of (Literal|Ref Int).
@@ -377,8 +442,9 @@ match SubstAll re p = matchAll re p
 -- same as a nonmatch.
 match (SubstNth i) re p = [matchAll re p !! i]
 
-getFile i = M.lookup i . files <$> get
 closeFile i = do
+    f <- getFile i
+    debug ("Closing " ++ show i ++ ": " ++ show f)
     {- The underlying socket/files may be used by other threads, so don't
     -- actually close them. Let them be garbage collected instead.
     case M.lookup i (files state) of
@@ -390,8 +456,16 @@ closeFile i = do
 replaceFile i f = do
     closeFile i
     setFile i f
+redirectFile i j = do
+    f <- getFile j
+    case f of
+       Just f -> replaceFile i f >> delFile j
+       Nothing -> closeFile i
+
+getFile i = M.lookup i . files <$> get
 setFile i f = modify $ \state -> state { files = M.insert i f (files state) }
 delFile i = modify $ \state -> state { files = M.delete i (files state) }
+
 ifile i state = fileHandle (M.findWithDefault (HandleFile stdin) i (files state))
 ofile i state = fileHandle (M.findWithDefault (HandleFile stdout) i (files state))
 
@@ -408,10 +482,10 @@ hMaybeGetLine h = do
     if eof then pure Nothing
            else Just <$> C.hGetLine h
 
-forkIO_ :: SedM () -> SedM ()
+forkIO_ :: StateT s IO () -> StateT s IO ()
 forkIO_ m = unliftIO forkIO m >> return ()
 
-unliftIO :: (IO b -> IO a) -> SedM b -> SedM a
+unliftIO :: (IO b -> IO a) -> StateT s IO b -> StateT s IO a
 unliftIO f m = do
   state <- get
   liftIO (f (evalStateT m state))
