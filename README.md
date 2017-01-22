@@ -21,8 +21,8 @@ package used though.
 * Install Haskell prerequisites: `./boot.sh`
 * Build with `make`
 
-So far, this builds an executable Sed that runs a hardcoded program.
-Eventually, that'll be something proper than can use command line parameters.
+The produced sed executable accepts the usual sed command-line options. (But
+not all of them.)
 
 ## Examples
 

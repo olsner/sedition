@@ -1,21 +1,23 @@
 N = 2
 
-all: Sed runtests README.html
+all: sed runtests README.html
 
 %.html: %.md
 	markdown $< >$@
 
-Sed: force
-	ghc -O2 -j$(N) --make -threaded -rtsopts $@
+sed: Sed.hs force
+	ghc -O2 -j$(N) --make -threaded -rtsopts -o $@ $<
 
-ParserTest: force
-	ghc -O0 -j$(N) --make -threaded -rtsopts $@
+# Compiles after 'sed' because they're sharing modules.
+ParserTest: force sed
+	ghc -O2 -j$(N) --make -threaded -rtsopts $@
 
 runtests: ParserTest
 	./ParserTest
 
 clean:
-	rm -f Sed Sed.o Sed.hi Parser.o Parser.hi AST.hi AST.o Bus.hi Bus.o
+	rm -f sed Sed Sed.o Sed.hi Parser.o Parser.hi AST.hi AST.o Bus.hi Bus.o
 	rm -f ParserTest ParserTest.hi ParserTest.o
+	rm -f README.html
 
 .PHONY: force runtests clean

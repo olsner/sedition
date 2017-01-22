@@ -1,7 +1,6 @@
 {-# LANGUAGE OverloadedStrings, CPP #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 
-#define AUTOPRINT False
 #define DEBUG 0
 #define IPC 1
 
@@ -12,19 +11,21 @@ import Control.Monad.IO.Class
 import Control.Monad.Trans.State.Strict
 
 import Data.Array
-import Data.ByteString.Char8 as C
+import qualified Data.ByteString.Char8 as C
 import Data.Char
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Monoid
 import qualified Data.Set as S
-import Data.Set
+import Data.Set (Set)
 
 import Network.Socket
 
+import System.Console.GetOpt
+import System.Environment
 import System.Exit
-import System.IO hiding (hPutStrLn)
+import System.IO
 import System.IO.Unsafe
 
 import Text.Regex.TDFA hiding (match)
@@ -83,7 +84,7 @@ fatal msg = error ("ERROR: " ++ msg)
 -- The wheels on the bus goes round and round...
 busRider p b = forever $ putMVar b . Right =<< ride p
 
-initialState pgm = do
+initialState autoprint pgm = do
   bus <- newBus
   passenger <- board bus
   box <- newEmptyMVar
@@ -96,7 +97,7 @@ initialState pgm = do
     hold = M.empty,
     activeAddresses = S.empty,
     lastRegex = Nothing,
-    autoprint = AUTOPRINT,
+    autoprint = autoprint,
     block = BlockN,
 #if IPC
     box = Mailbox box,
@@ -122,8 +123,8 @@ forkState pgm = get >>= \state -> liftIO $ do
 #endif
  }
 
-runSed :: [Sed] -> IO ()
-runSed seds = evalStateT runProgram =<< initialState seds
+runSed :: Bool -> [Sed] -> IO ()
+runSed autoprint seds = evalStateT runProgram =<< initialState autoprint seds
 
 addressActive addr = S.member addr . activeAddresses <$> get
 modifyActiveAddresses f =
@@ -396,7 +397,7 @@ ofile i state = fileHandle (M.findWithDefault (HandleFile stdout) i (files state
 liftIH i f = liftIO . f =<< ifile i <$> get
 liftOH i f = liftIO . f =<< ofile i <$> get
 
-printTo i s = liftOH i (\h -> hPutStrLn h s)
+printTo i s = liftOH i (\h -> C.hPutStrLn h s)
 
 maybeGetLine i = liftIH i hMaybeGetLine
 
@@ -462,11 +463,58 @@ runBranch l ss = go ss failed
     go [] fail = fail
     failed = fatal ("Label " ++ show l ++ " not found")
 
-runSedString = runSed . parseString
+runSedString autoprint = runSed autoprint . parseString
 
-runSedFile f = do
+runSedFile autoprint f = do
     pgm <- parseString <$> C.readFile f
     debugPrint pgm
-    runSed pgm
+    runSed autoprint pgm
 
-main = runSedFile "examples/http_server.xed"
+data Flag =
+    -- Accepted but ignored, since this is already the default.
+    ExtendedRegexps
+  | Autoprint Bool
+  | Script S
+  | ScriptFile FilePath
+  -- | Sandbox
+  deriving Show
+
+sedOptions =
+  [ Option ['r', 'E'] ["regexp-extended"] (NoArg ExtendedRegexps) "Use extended regexps (default, always enabled, only parsed for sed compatibility"
+  , Option ['n'] ["quiet", "silent"] (NoArg (Autoprint False)) "suppress automatic printing of pattern space"
+  , Option ['e'] ["expression"] (ReqArg (Script . C.pack) "SCRIPT") "add the script to the commands to be executed"
+  , Option ['f'] ["file"] (ReqArg ScriptFile "SCRIPT_FILE") "add the contents of script-file ot the commands to be executed"
+  -- Not implemented!
+  -- , Option ['s'] ["sandbox"] (NoArg Sandbox) "Disable unsafe commands (WAR"
+  ]
+
+-- TODO Include source file/line info here, thread through to the parser...
+flagScript :: Flag -> IO [S]
+flagScript (Script e) = return [e]
+flagScript (ScriptFile f) = C.lines <$> C.readFile f
+flagScript _ = return []
+
+getScript :: [Flag] -> [S] -> IO ([S], [S])
+getScript flags inputs = do
+  scripts <- concat <$> mapM flagScript flags
+  if null scripts
+    then return ([head inputs], tail inputs)
+    else return (scripts, inputs)
+
+getAutoprint [] def = def
+getAutoprint (Autoprint ap:xs) _ = getAutoprint xs ap
+getAutoprint (_:xs) def = getAutoprint xs def
+
+main = do
+  args <- getArgs
+  let (opts,nonOpts,errors) = getOpt Permute sedOptions args
+  let usage = usageInfo "Usage: sed [OPTION]... [SCRIPT] [INPUT]..." sedOptions
+  when (not (null errors)) $ do
+    mapM_ putStrLn (errors ++ [usage])
+    exitFailure
+
+  (scriptLines,inputs) <- getScript opts (map C.pack nonOpts)
+  let pgm = parseString (C.unlines scriptLines)
+  when (not (null inputs)) $ fatal "Input files not handled yet, only stdin"
+  let autoprint = getAutoprint opts True
+  runSed autoprint pgm
