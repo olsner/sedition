@@ -11,7 +11,7 @@ import Data.Maybe
 
 import System.Exit
 
-import Text.Trifecta
+import Text.Trifecta hiding (parseString)
 import Text.Trifecta.Delta
 
 import AST
@@ -173,7 +173,8 @@ parseString input = case parseOnly pFile input of
 -- proper file/line messaages.
 
 parseOnly p = parseByteString p (Lines 0 0 0 0)
+parseFile f = parseString <$> BS.readFile f
 testParseString input = print (parseOnly pFile input)
-testParseFile = print . parseOnly pFile <=< BS.readFile
+testParseFile f = print =<< parseFile f
 testParseLines = mapM_ testParseString . BS.lines <=< BS.readFile
 
