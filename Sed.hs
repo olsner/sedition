@@ -183,8 +183,21 @@ runIR (IR.Fork entry next) = do
     runIRLabel next
 runIR (IR.Redirect i j) = redirectFile i j
 runIR (IR.CloseFile i) = closeFile i
+
 runIR (IR.Match re p) = setPred p =<< checkRE re
 runIR (IR.SetLastRE re) = setLastRegex re
+
+runIR (IR.Subst sub stype) = do
+  state <- get
+  case pattern state of
+    Just p
+      | Just (RE _ pat) <- lastRegex state
+      , matches@(_:_) <- match stype pat p -> do
+          let newp = subst p sub matches
+          debug ("Subst: " ++ show p ++ " => " ++ show newp)
+          modify $ \state -> state { pattern = Just newp }
+    _ -> fatal "Subst: no match when substituting?"
+
 runIR (IR.PrintS i s) = printTo i s
 runIR (IR.Print i) = get >>= \state ->
     case pattern state of
@@ -198,7 +211,10 @@ runIR (IR.Read i _ cont) = do
   res <- maybeGetLine i
   modify $ \state -> state { pattern = res }
   runIRLabel cont
-runIR cmd = fatal ("Unhandled instruction " ++ show cmd)
+
+runIR (IR.Quit code) = liftIO (exitWith code)
+
+runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
 
 addressActive addr = S.member addr . activeAddresses <$> get
 modifyActiveAddresses f =
