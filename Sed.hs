@@ -1,8 +1,10 @@
-{-# LANGUAGE OverloadedStrings, CPP #-}
+{-# LANGUAGE OverloadedStrings, CPP, TypeFamilies #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 
 #define DEBUG 1
 #define IPC 1
+
+import Compiler.Hoopl as H
 
 import Control.Applicative
 import Control.Concurrent
@@ -145,7 +147,7 @@ runSed autoprint seds = do
 #endif
 
 runIRLabel entry = do
-  Just code <- M.lookup entry . program <$> get
+  Just code <- mapLookup entry . program <$> get
   mapM_ runIR_debug code
 
 runIR_debug i = do
@@ -252,7 +254,7 @@ runProgram = do
 
 type SedPM p a = StateT (SedState p) IO a
 type SedM a = SedPM [Sed] a
-type SedIRM a = SedPM (Map IR.Label [IR.SedIR]) a
+type SedIRM a = SedPM (Map H.Label [IR.Insn]) a
 
 runBlock :: [Sed] -> SedM () -> SedM ()
 runBlock [] k = newCycle 0 runProgram

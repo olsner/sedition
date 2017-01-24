@@ -1,9 +1,8 @@
+{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies #-}
+
 module IR where
 
-import Parser
-
-import AST hiding (Cmd(..), Address(..), Label(..))
-import qualified AST
+import Compiler.Hoopl as H
 
 import Control.Monad
 import qualified Control.Monad.Trans.State.Strict as S
@@ -13,11 +12,15 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
 
-newtype Label = Label Int deriving (Show,Ord,Eq)
+import Parser
+
+import AST hiding (Cmd(..), Address(..), Label(..))
+import qualified AST
+
 newtype Pred = Pred Int deriving (Show,Ord,Eq)
 type FD = Int
 
-data SedIR =
+data Insn =
     Branch Label
   | If Pred Label Label
   | Set Pred Bool
@@ -56,7 +59,7 @@ data SedIR =
   deriving (Show,Ord,Eq)
 
 data State = State
-  { firstFreeLabel :: Int
+  { firstFreeUnique :: Unique
   , firstFreePred :: Int
   , autoprint :: Bool
   , sourceLabels :: Map S Label
@@ -69,12 +72,13 @@ startState autoprint = State 0 1 autoprint M.empty (invalidLabel "uninitialized 
 p0 = Pred 0
 -- Might need next-cycle label
 
-newLabel :: Monoid w => RWS r w State Label
-newLabel = do
-  res <- firstFreeLabel <$> get
-  modify $ \state -> state { firstFreeLabel = res + 1 }
-  return (Label res)
+instance (Monoid w, Monad m) => UniqueMonad (RWST r w State m) where
+  freshUnique = do
+    res <- firstFreeUnique <$> get
+    modify $ \state -> state { firstFreeUnique = res + 1 }
+    return res
 
+newLabel = freshLabel
 newPred :: Monoid w => RWS r w State Pred
 newPred = do
   res <- firstFreePred <$> get
@@ -123,10 +127,10 @@ ifCheck c tx fx = do
   tCheck p0 c
   tIf p0 tx fx
 
-blocky :: Label -> [Either Label SedIR] -> (Label, Map Label [SedIR])
-blocky entry code = (entry, S.execState (go entry [] code) M.empty)
+blocky :: Label -> [Either Label Insn] -> (Label, LabelMap [Insn])
+blocky entry code = (entry, S.execState (go entry [] code) mapEmpty)
   where
-    finish label acc = S.modify $ \s -> M.insert label (reverse acc) s
+    finish label acc = S.modify $ \s -> mapInsert label (reverse acc) s
     -- TODO Track exit labels to avoid inserting redundant branches
     go label acc [] = finish label acc
     go label acc (x:xs) =
@@ -135,7 +139,7 @@ blocky entry code = (entry, S.execState (go entry [] code) M.empty)
         Right r -> go label (r:acc) xs
 
 -- TODO Post-process into labelled basic blocks
-toIR' :: Bool -> [Sed] -> (Label, [Either Label SedIR])
+toIR' :: Bool -> [Sed] -> (Label, [Either Label Insn])
 toIR' autoprint seds = evalRWS (tProgram seds) M.empty (startState autoprint)
 
 toIR autoprint seds = uncurry blocky (toIR' autoprint seds)
