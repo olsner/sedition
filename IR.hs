@@ -1,16 +1,17 @@
-{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies #-}
+{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving #-}
 
 module IR where
 
 import Compiler.Hoopl as H
 
 import Control.Monad
-import qualified Control.Monad.Trans.State.Strict as S
-import Control.Monad.Trans.RWS.Strict
+import Control.Monad.Trans.State.Strict
 
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
+
+import System.Exit
 
 import Parser
 
@@ -20,66 +21,87 @@ import qualified AST
 newtype Pred = Pred Int deriving (Show,Ord,Eq)
 type FD = Int
 
-data Insn =
-    Branch Label
-  | If Pred Label Label
-  | Set Pred Bool
-  | Clear -- pattern space
+data Insn e x where
+  Label         :: Label                    -> Insn C O
+  Branch        :: Label                    -> Insn O C
+  If            :: Pred -> Label -> Label   -> Insn O C
+  Fork          :: Label -> Label           -> Insn O C
+  Quit          :: ExitCode                 -> Insn O C
   -- for n and new cycle (which can accept incoming messages)
-  | Read FD (Maybe Label)
-  -- for N (which can never accept interrupts)
-  | ReadAppend FD
-  | Print FD
-  | PrintS FD S
+  Read          :: FD -> (Maybe Label) -> Label -> Insn O C
 
-  | Hold (Maybe S)
-  | HoldA (Maybe S)
-  | Get (Maybe S)
-  | GetA (Maybe S)
+  Set           :: Pred -> Bool             -> Insn O O
+  -- Clear pattern space
+  Clear         ::                             Insn O O
+  -- for N (which can never accept interrupts)
+  ReadAppend    :: FD                       -> Insn O O
+  Print         :: FD                       -> Insn O O
+  PrintS        :: FD -> S                  -> Insn O O
+
+  Hold          :: (Maybe S)                -> Insn O O
+  HoldA         :: (Maybe S)                -> Insn O O
+  Get           :: (Maybe S)                -> Insn O O
+  GetA          :: (Maybe S)                -> Insn O O
 
   -- TODO Add instruction for incrementing the line number when starting a new
   -- cycle. Or is the line number incremented on read?
+  -- TODO Add EOF check instruction
   -- Any read for file descriptor 0 would increment it.
-  | Line Int Pred
+  Line          :: Int -> Pred              -> Insn O O
   -- Possible extension: explicit "match" registers to track several precomputed
   -- matches at once.
-  | Match RE Pred
-  | SetLastRE RE
-  | MatchLastRE Pred
+  Match         :: RE -> Pred               -> Insn O O
+  SetLastRE     :: RE                       -> Insn O O
+  MatchLastRE   :: Pred                     -> Insn O O
   -- Subst last match against current pattern. See Match TODO about match regs.
-  | Subst S SubstType
+  Subst         :: S -> SubstType           -> Insn O O
 
-  | ShellExec
-  | Listen Int (Maybe S) Int
-  | Accept Int Int
-  | Redirect Int Int
-  | CloseFile Int
+  ShellExec     ::                             Insn O O
+  Listen        :: Int -> (Maybe S) -> Int  -> Insn O O
+  Accept        :: Int -> Int               -> Insn O O
+  Redirect      :: Int -> Int               -> Insn O O
+  CloseFile     :: Int                      -> Insn O O
 
-  | Fork Label
-  deriving (Show,Ord,Eq)
+deriving instance Show (Insn e x)
 
-data State = State
+instance NonLocal Insn where
+  entryLabel (Label l) = l
+  successors (Branch t) = [t]
+  successors (If _ t f) = [t,f]
+  successors (Fork t c) = [t,c]
+  successors (Read _ (Just i) r) = [i,r]
+  successors (Read _ Nothing r) = [r]
+
+instance HooplNode Insn where
+  mkBranchNode = Branch
+  mkLabelNode = Label
+
+data Cycle = PreFirstCycle | NormalCycle | InterruptCycle
+
+data IRState = State
   { firstFreeUnique :: Unique
   , firstFreePred :: Int
   , autoprint :: Bool
   , sourceLabels :: Map S Label
   , nextCycleLabel :: Label
-  } deriving (Show,Ord,Eq)
+  , program :: Graph Insn O O
+  }
 
 invalidLabel :: String -> Label
 invalidLabel s = error ("Invalid label: " ++ s)
-startState autoprint = State 0 1 autoprint M.empty (invalidLabel "uninitialized next-cycle label")
+startState autoprint = State 0 1 autoprint M.empty (invalidLabel "uninitialized next-cycle label") emptyGraph
 p0 = Pred 0
--- Might need next-cycle label
 
-instance (Monoid w, Monad m) => UniqueMonad (RWST r w State m) where
+instance UniqueMonad IRM where
   freshUnique = do
     res <- firstFreeUnique <$> get
     modify $ \state -> state { firstFreeUnique = res + 1 }
     return res
 
+initBlock :: Label -> Graph Insn C O
+initBlock l = mkLabel l
+
 newLabel = freshLabel
-newPred :: Monoid w => RWS r w State Pred
 newPred = do
   res <- firstFreePred <$> get
   modify $ \state -> state { firstFreePred = res + 1 }
@@ -96,30 +118,39 @@ getLabelMapping name = do
       addLabelMapping name l
       return l
 
-emitLabel l = tell [Left l]
-emitNewLabel = do
-  l <- newLabel
-  emitLabel l
-  return l
-emit c = tell [Right c]
-emitBranch l = emit (Branch l)
-branchNextCycle = do
-  l <- nextCycleLabel <$> get
-  emitBranch l
+emitOCO :: Insn O C -> Insn C O -> IRM ()
+emitOCO last first =
+    modify $ \s -> s { program = program s H.<*> mkLast last |*><*| mkFirst first }
+
+thenLabel :: Insn O C -> Label -> IRM ()
+thenLabel last next = emitOCO last (Label next)
+
+finishBlock = thenLabel
+finishBlock' b = newLabel >>= finishBlock b
+
+emit :: Insn O O -> IRM ()
+emit insn =
+    modify $ \s -> s { program = program s H.<*> mkMiddle insn }
+
+emitBranch' l = newLabel >>= emitBranch l
+emitBranch l next = Branch l `thenLabel` next
+branchNextCycle = emitBranch' =<< nextCycleLabel <$> get
+
+emitLabel l = Branch l `thenLabel` l
 
 printIfAuto = do
     ap <- autoprint <$> get
     when ap (emit (Print 0))
 
+-- emitIf branch th el = graphFromAGraph (mkIfThenElse branch th el)
+
 tIf p tx fx = do
     f <- newLabel
     t <- newLabel
     e <- newLabel
-    emit (If p t f)
-    emitLabel t
+    finishBlock (If p t f) t
     tx
-    emitBranch e
-    emitLabel f
+    emitBranch e f
     fx
     emitLabel e
 
@@ -127,22 +158,10 @@ ifCheck c tx fx = do
   tCheck p0 c
   tIf p0 tx fx
 
-blocky :: Label -> [Either Label Insn] -> (Label, LabelMap [Insn])
-blocky entry code = (entry, S.execState (go entry [] code) mapEmpty)
-  where
-    finish label acc = S.modify $ \s -> mapInsert label (reverse acc) s
-    -- TODO Track exit labels to avoid inserting redundant branches
-    go label acc [] = finish label acc
-    go label acc (x:xs) =
-      case x of
-        Left l -> finish label (Branch l:acc) >> go l [] xs
-        Right r -> go label (r:acc) xs
+type IRM = State IRState
 
--- TODO Post-process into labelled basic blocks
-toIR' :: Bool -> [Sed] -> (Label, [Either Label Insn])
-toIR' autoprint seds = evalRWS (tProgram seds) M.empty (startState autoprint)
-
-toIR autoprint seds = uncurry blocky (toIR' autoprint seds)
+toIR :: Bool -> [Sed] -> Graph Insn O C
+toIR autoprint seds = program (execState (tProgram seds) (startState autoprint)) H.<*> mkLast (Quit ExitSuccess)
 
 -- Returns the entry-point label (pre-first line) of the sed program.
 --
@@ -151,30 +170,42 @@ toIR autoprint seds = uncurry blocky (toIR' autoprint seds)
 -- * interrupt reception (for new-cycle code)
 -- * new cycle label
 tProgram seds = do
+  entry <- newLabel
   newCycle <- newLabel
+  intr <- newLabel
+  exit <- newLabel
   modify $ \state -> state { nextCycleLabel = newCycle }
-  entry <- emitNewLabel
-  -- TODO Emit pre-first line separately
-  tSeds seds
+
+  -- tSeds PreFirstCycle seds
+
   emitLabel newCycle
   get >>= \s -> when (autoprint s) (emit (Print 0))
   emit Clear
-  -- TODO Add interrupt handler
-  emit (Read 0 Nothing)
-  emitBranch entry
+  -- TODO EOF -> exit
+  Read 0 (Just intr) entry `thenLabel` entry
+
+  -- Actual normal program here
+  tSeds NormalCycle seds
+
+  Branch newCycle `thenLabel` intr
+
+  -- Interrupt handling here
+  -- tSeds InterruptCycle seds
+
+  Branch newCycle `thenLabel` exit
+
   modify $ \state -> state { nextCycleLabel = invalidLabel "end of program" }
-  return entry
 
 -- May need more state: I-block or 0-block for instance
-tSeds = mapM_ tSed
+tSeds cycle = mapM_ tSed
 
 withCond Always x = x
 withCond (At c) x = do
+  -- Check if `c` should update block state, compare with cycle from state
   f <- newLabel
   t <- newLabel
   tCheck p0 c
-  emit (If p0 t f)
-  emitLabel t
+  finishBlock (If p0 t f) t
   x
   emitLabel f
 withCond (Between start end) x = do
@@ -182,8 +213,8 @@ withCond (Between start end) x = do
   f <- newLabel
   t <- newLabel
 
-  let run = emitBranch t
-      skip = emitBranch f
+  let run = emitBranch' t
+      skip = emitBranch' f
       set = emit (Set pActive True)
       clear = emit (Set pActive False)
 
@@ -198,28 +229,36 @@ tCheck p (AST.Line n) = emit (Line n p)
 -- TODO Translate last-expression into something explicit
 tCheck p (AST.Match (Just re)) = emit (Match re p) >> emit (SetLastRE re)
 tCheck p (AST.Match Nothing) = emit (MatchLastRE p)
-tCheck p addr = error ("Unmatched case " ++ show addr)
+tCheck p addr = error ("tCheck: Unmatched case " ++ show addr)
 
 -- TODO track I-block and 0-block state like the interpreter does
 tSed (Sed cond x) = withCond cond $ tCmd x
 
-tCmd (AST.Block xs) = tSeds xs
+tCmd (AST.Block xs) = tSeds NormalCycle xs
 tCmd (AST.Print fd) = emit (Print fd) >> emit Clear
-tCmd (AST.Next fd) = printIfAuto >> emit (Read fd Nothing)
+tCmd (AST.Next fd) = do
+  printIfAuto
+  next <- newLabel
+  Read fd Nothing next `thenLabel` next
 tCmd (AST.NextA fd) = printIfAuto >> emit (ReadAppend fd)
 tCmd (AST.Listen fd host port) = emit (Listen fd host port)
 tCmd (AST.Accept sfd fd) = emit (Accept sfd fd)
 tCmd (AST.Label name) = emitLabel =<< getLabelMapping name
-tCmd (AST.Branch (Just name)) = emitBranch =<< getLabelMapping name
+tCmd (AST.Branch (Just name)) = emitBranch' =<< getLabelMapping name
 tCmd (AST.Branch Nothing) = branchNextCycle
 tCmd (AST.Fork sed) = do
-  skip <- newLabel
-  emitBranch skip
+  exit <- newLabel
+  entry <- newLabel
+
+  Fork exit entry `thenLabel` entry
+
   oldNextCycle <- nextCycleLabel <$> get
-  forked <- tProgram [sed]
+  tProgram [sed]
   modify $ \state -> state { nextCycleLabel = oldNextCycle }
-  emitLabel skip
-  emit (Fork forked)
+
+  -- End of thread (quit)
+  Quit ExitSuccess `thenLabel` exit
+
 tCmd (AST.Delete) = branchNextCycle
 tCmd (AST.Clear) = emit Clear
 tCmd (AST.Redirect dst (Just src)) = emit (Redirect dst src)
@@ -233,7 +272,10 @@ tCmd (AST.GetA maybeReg) = emit (GetA maybeReg)
 tCmd (AST.Insert s) = emit (PrintS 0 s)
 -- TODO append ('a'/'A') needs to save data to be printed at the start of the
 -- next cycle (or the end of this one).
-tCmd cmd = error ("Unmatched case " ++ show cmd)
+tCmd (AST.Quit print status) = do
+  when print $ emit (Print 0)
+  finishBlock' (Quit status)
+tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
 
 tSubstAction SActionNone = return ()
 tSubstAction SActionExec = emit ShellExec

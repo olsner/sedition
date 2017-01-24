@@ -141,19 +141,27 @@ runSed :: Bool -> [Sed] -> IO ()
 runSed autoprint seds = evalStateT runProgram =<< initialState autoprint seds
 #else
 runSed autoprint seds = do
-    let (e,ir) = toIR autoprint seds
-    state <- initialState autoprint ir
-    evalStateT (runIRLabel e) state
+    let body@(GMany (JustO e) _ _) = toIR autoprint seds
+    state <- initialState autoprint body
+    evalStateT (runIRBlock e) state
 #endif
 
+runIRLabel :: H.Label -> SedIRM ()
 runIRLabel entry = do
-  Just code <- mapLookup entry . program <$> get
-  mapM_ runIR_debug code
+  GMany _ blocks _ <- program <$> get
+  let Just block = mapLookup entry blocks
+  runIRBlock block
+runIRBlock block = do
+  let lift f n z = z >> f n
+  foldBlockNodesF (lift runIR_debug) block (return ())
 
+runIR_debug :: IR.Insn e x -> SedIRM ()
 runIR_debug i = do
   debug (show i)
   runIR i
 
+runIR :: IR.Insn e x -> SedIRM ()
+runIR (IR.Label l) = return ()
 runIR (IR.Branch l) = runIRLabel l
 runIR (IR.Line l p) = do
   state <- get
@@ -163,7 +171,7 @@ runIR (IR.If p t f) = do
   runIRLabel (if b then t else f)
 runIR (IR.Listen i maybeHost port) = doListen i maybeHost port
 runIR (IR.Accept s c) = doAccept s c
-runIR (IR.Fork entry) = do
+runIR (IR.Fork entry next) = do
     pgm <- program <$> get
     state <- forkState pgm
     forkIO_ $ do
@@ -172,6 +180,7 @@ runIR (IR.Fork entry) = do
         runIRLabel entry
         debug ("end of fork")
     debug ("parent is after fork")
+    runIRLabel next
 runIR (IR.Redirect i j) = redirectFile i j
 runIR (IR.CloseFile i) = closeFile i
 runIR (IR.Match re p) = setPred p =<< checkRE re
@@ -184,9 +193,11 @@ runIR (IR.Print i) = get >>= \state ->
 runIR (IR.Clear) = modify $ \state -> state { pattern = Just "" }
 runIR (IR.Get reg) = doGet reg
 runIR (IR.GetA reg) = doGetAppend reg
-runIR (IR.Read i Nothing) = do
+-- TODO Check for interrupts too (if an intr label is given)
+runIR (IR.Read i _ cont) = do
   res <- maybeGetLine i
   modify $ \state -> state { pattern = res }
+  runIRLabel cont
 runIR cmd = fatal ("Unhandled instruction " ++ show cmd)
 
 addressActive addr = S.member addr . activeAddresses <$> get
@@ -254,7 +265,7 @@ runProgram = do
 
 type SedPM p a = StateT (SedState p) IO a
 type SedM a = SedPM [Sed] a
-type SedIRM a = SedPM (Map H.Label [IR.Insn]) a
+type SedIRM a = SedPM (Graph IR.Insn O C) a
 
 runBlock :: [Sed] -> SedM () -> SedM ()
 runBlock [] k = newCycle 0 runProgram
@@ -582,8 +593,8 @@ getAutoprint [] def = def
 getAutoprint (Autoprint ap:xs) _ = getAutoprint xs ap
 getAutoprint (_:xs) def = getAutoprint xs def
 
-main = do
-  args <- getArgs
+main = do_main =<< getArgs
+do_main args = do
   let (opts,nonOpts,errors) = getOpt Permute sedOptions args
   let usage = usageInfo "Usage: sed [OPTION]... [SCRIPT] [INPUT]..." sedOptions
   when (not (null errors)) $ do
