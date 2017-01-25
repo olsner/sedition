@@ -211,12 +211,17 @@ tProgram seds = do
 
 tSeds = mapM_ tSed
 
-withBlock b x = do
+withBlock BlockN x = ifRightBlock x
+withBlock b x = withBlock' b x
+
+withBlock' b x = do
   oldBlock <- block <$> get
   modify $ \s -> s { block = b }
-  comment ("start of block " ++ show b)
-  ifRightBlock $ x
-  comment ("end of block " ++ show b)
+  state <- get
+  comment ("start of block " ++ show b ++ " in " ++ show (cycleBlock state))
+  x
+  state <- get
+  comment ("end of block " ++ show b ++ " in " ++ show (cycleBlock state))
   modify $ \s -> s { block = oldBlock }
 
 blockForAddr AST.IRQ = BlockI
@@ -253,6 +258,9 @@ withCond (Between start end) x = do
   comment "between/end of code"
   emitLabel f
 
+tCheck p (AST.Line 0) = do
+  s <- get
+  emit (Set p (block s == cycleBlock s))
 tCheck p (AST.Line n) = emit (Line n p)
 -- TODO Translate last-expression into something explicit
 tCheck p (AST.Match (Just re)) = emit (Match re p) >> emit (SetLastRE re)
