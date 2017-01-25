@@ -142,6 +142,7 @@ runSed autoprint seds = evalStateT runProgram =<< initialState autoprint seds
 #else
 runSed autoprint seds = do
     let body@(GMany (JustO e) _ _) = toIR autoprint seds
+    print body
     state <- initialState autoprint body
     evalStateT (runIRBlock e) state
 #endif
@@ -185,6 +186,9 @@ runIR (IR.Redirect i j) = redirectFile i j
 runIR (IR.CloseFile i) = closeFile i
 
 runIR (IR.Match re p) = setPred p =<< checkRE re
+runIR (IR.MatchLastRE p) = do
+  Just re <- lastRegex <$> get
+  setPred p =<< checkRE re
 runIR (IR.SetLastRE re) = setLastRegex re
 
 runIR (IR.Subst sub stype) = do
@@ -209,10 +213,12 @@ runIR (IR.GetA reg) = doGetAppend reg
 -- TODO Check for interrupts too (if an intr label is given)
 runIR (IR.Read i _ cont) = do
   res <- maybeGetLine i
-  modify $ \state -> state { pattern = res }
+  let i = if isJust res then 1 else 0
+  modify $ \state -> state { pattern = res, lineNumber = lineNumber state + i }
   runIRLabel cont
 
 runIR (IR.Quit code) = liftIO (exitWith code)
+runIR (IR.Comment s) = debug s
 
 runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
 

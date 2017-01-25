@@ -61,8 +61,12 @@ data Insn e x where
   Accept        :: Int -> Int               -> Insn O O
   Redirect      :: Int -> Int               -> Insn O O
   CloseFile     :: Int                      -> Insn O O
+  Comment       :: String                   -> Insn O O
 
 deriving instance Show (Insn e x)
+
+showInsn (Label l) = show l ++ ":"
+showInsn i = "  " ++ show i
 
 instance NonLocal Insn where
   entryLabel (Label l) = l
@@ -86,6 +90,9 @@ data IRState = State
   , nextCycleLabel :: Label
   , program :: Graph Insn O O
   }
+
+instance Show (Graph Insn e x) where
+  show g = showGraph showInsn g
 
 invalidLabel :: String -> Label
 invalidLabel s = error ("Invalid label: " ++ s)
@@ -132,6 +139,8 @@ emit :: Insn O O -> IRM ()
 emit insn =
     modify $ \s -> s { program = program s H.<*> mkMiddle insn }
 
+comment s = emit (Comment s)
+
 emitBranch' l = newLabel >>= emitBranch l
 emitBranch l next = Branch l `thenLabel` next
 branchNextCycle = emitBranch' =<< nextCycleLabel <$> get
@@ -149,10 +158,13 @@ tIf p tx fx = do
     t <- newLabel
     e <- newLabel
     finishBlock (If p t f) t
+    comment "tIf/true"
     tx
     emitBranch e f
+    comment "tIf/false"
     fx
     emitLabel e
+    comment "tIf/end"
 
 ifCheck c tx fx = do
   tCheck p0 c
@@ -218,11 +230,16 @@ withCond (Between start end) x = do
       set = emit (Set pActive True)
       clear = emit (Set pActive False)
 
-  tIf pActive (ifCheck end (clear >> run) run)
-              (ifCheck start (set >> run) skip)
+  tIf pActive (do comment "between/active"
+                  ifCheck end (do comment "between/last"
+                                  clear
+                                  run) run)
+              (do comment "between/inactive"
+                  ifCheck start (comment "between/first" >> set >> run) skip)
 
   emitLabel t
   x
+  comment "between/end of code"
   emitLabel f
 
 tCheck p (AST.Line n) = emit (Line n p)
