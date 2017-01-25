@@ -252,7 +252,7 @@ tCheck p addr = error ("tCheck: Unmatched case " ++ show addr)
 tSed (Sed cond x) = withCond cond $ tCmd x
 
 tCmd (AST.Block xs) = tSeds NormalCycle xs
-tCmd (AST.Print fd) = emit (Print fd) >> emit Clear
+tCmd (AST.Print fd) = emit (Print fd)
 tCmd (AST.Next fd) = do
   printIfAuto
   next <- newLabel

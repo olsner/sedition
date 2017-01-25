@@ -167,6 +167,7 @@ runIR (IR.Branch l) = runIRLabel l
 runIR (IR.Line l p) = do
   state <- get
   setPred p (l == lineNumber state)
+runIR (IR.Set p v) = setPred p v
 runIR (IR.If p t f) = do
   b <- getPred p
   runIRLabel (if b then t else f)
@@ -208,6 +209,7 @@ runIR (IR.Print i) = get >>= \state ->
         Just p -> printTo i p
         _ -> return ()
 runIR (IR.Clear) = modify $ \state -> state { pattern = Just "" }
+runIR (IR.Hold reg) = doHold reg
 runIR (IR.Get reg) = doGet reg
 runIR (IR.GetA reg) = doGetAppend reg
 -- TODO Check for interrupts too (if an intr label is given)
@@ -399,11 +401,7 @@ run c k = case c of
       let exit = liftIO (exitWith status)
       if print then run (Print 0) exit else exit
 
-    Hold reg -> do
-      pat <- fromMaybe "" . pattern <$> get
-      debug ("GetA: holding " ++ show pat ++ " in " ++ show reg)
-      modify $ \state -> state { hold = M.insert (fromMaybe "" reg) pat (hold state) }
-      k
+    Hold reg -> doHold reg >> k
     Get reg -> doGet reg >> k
     GetA reg -> doGetAppend reg >> k
 
@@ -430,6 +428,10 @@ doAccept i j = do
     h <- liftIO $ socketToHandle c ReadWriteMode
     replaceFile j (HandleFile h)
 
+doHold reg = do
+  pat <- fromMaybe "" . pattern <$> get
+  debug ("Hold: holding " ++ show pat ++ " in " ++ show reg)
+  modify $ \s -> s { hold = M.insert (fromMaybe "" reg) pat (hold s) }
 doGet reg =
   modify $ \s -> s { pattern = Just (fromMaybe "" (M.lookup (fromMaybe "" reg) (hold s))) }
 
