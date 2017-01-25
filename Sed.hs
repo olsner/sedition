@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings, CPP, TypeFamilies #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 
-#define DEBUG 1
+#define DEBUG 0
 #define IPC 1
 
 import Compiler.Hoopl as H
@@ -75,11 +75,12 @@ data SedState program = SedState {
 }
   deriving (Show)
 
+debug :: MonadIO m => String -> m ()
 #if DEBUG
-putstrlock = unsafePerformIO (newMVar ())
 debug s = liftIO $ withMVar putstrlock $ \() -> do
     t <- myThreadId
     System.IO.putStrLn (show t ++ ": " ++ s)
+putstrlock = unsafePerformIO (newMVar ())
 #else
 debug _ = return ()
 #endif
