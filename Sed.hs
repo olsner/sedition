@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings, CPP, TypeFamilies #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 
-#define DEBUG 0
+#define DEBUG 1
 #define IPC 1
 
 import Compiler.Hoopl as H
@@ -43,7 +43,6 @@ newtype Mailbox a = Mailbox (MVar a)
 instance Show (Mailbox a) where
     show _ = "Mailbox {}"
 
-data BlockState = BlockN | BlockI | Block0 deriving (Show, Eq)
 data File
   = HandleFile { fileHandle :: Handle }
   | SocketFile { fileSocket :: Socket }
@@ -144,6 +143,7 @@ runSed autoprint seds = evalStateT runProgram =<< initialState autoprint seds
 runSed autoprint seds = do
     let body@(GMany (JustO e) _ _) = toIR autoprint seds
     debug ("\n" ++ show body)
+    exitSuccess
     state <- initialState autoprint body
     evalStateT (runIRBlock e) state
 #endif

@@ -36,6 +36,8 @@ data SubstAction
   | SActionExec
   deriving (Show, Ord, Eq)
 
+data BlockState = BlockN | BlockI | Block0 deriving (Show, Eq)
+
 data Address = Line Int | Match (Maybe RE) | EOF | IRQ
     deriving (Show, Ord, Eq)
 data MaybeAddress

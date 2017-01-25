@@ -80,8 +80,6 @@ instance HooplNode Insn where
   mkBranchNode = Branch
   mkLabelNode = Label
 
-data Cycle = PreFirstCycle | NormalCycle | InterruptCycle
-
 data IRState = State
   { firstFreeUnique :: Unique
   , firstFreePred :: Int
@@ -89,6 +87,8 @@ data IRState = State
   , sourceLabels :: Map S Label
   , nextCycleLabel :: Label
   , program :: Graph Insn O O
+  , cycleBlock :: BlockState
+  , block :: BlockState
   }
 
 instance Show (Graph Insn e x) where
@@ -96,7 +96,7 @@ instance Show (Graph Insn e x) where
 
 invalidLabel :: String -> Label
 invalidLabel s = error ("Invalid label: " ++ s)
-startState autoprint = State 0 1 autoprint M.empty (invalidLabel "uninitialized next-cycle label") emptyGraph
+startState autoprint = State 0 1 autoprint M.empty (invalidLabel "uninitialized next-cycle label") emptyGraph Block0 BlockN
 p0 = Pred 0
 
 instance UniqueMonad IRM where
@@ -186,9 +186,9 @@ tProgram seds = do
   newCycle <- newLabel
   intr <- newLabel
   exit <- newLabel
-  modify $ \state -> state { nextCycleLabel = newCycle }
+  modify $ \state -> state { nextCycleLabel = newCycle, cycleBlock = Block0 }
 
-  -- tSeds PreFirstCycle seds
+  tSeds seds
 
   emitLabel newCycle
   get >>= \s -> when (autoprint s) (emit (Print 0))
@@ -196,29 +196,40 @@ tProgram seds = do
   -- TODO EOF -> exit
   Read 0 (Just intr) entry `thenLabel` entry
 
+  modify $ \state -> state { nextCycleLabel = newCycle, cycleBlock = BlockN }
   -- Actual normal program here
-  tSeds NormalCycle seds
+  tSeds seds
 
   Branch newCycle `thenLabel` intr
 
-  -- Interrupt handling here
-  -- tSeds InterruptCycle seds
+  modify $ \state -> state { nextCycleLabel = newCycle, cycleBlock = BlockI }
+  tSeds seds
 
   Branch newCycle `thenLabel` exit
 
   modify $ \state -> state { nextCycleLabel = invalidLabel "end of program" }
 
--- May need more state: I-block or 0-block for instance
-tSeds cycle = mapM_ tSed
+tSeds = mapM_ tSed
+
+withBlock b x = do
+  oldBlock <- block <$> get
+  modify $ \s -> s { block = b }
+  comment ("start of block " ++ show b)
+  ifRightBlock $ x
+  comment ("end of block " ++ show b)
+  modify $ \s -> s { block = oldBlock }
+
+blockForAddr AST.IRQ = BlockI
+blockForAddr (AST.Line 0) = Block0
+blockForAddr _ = BlockN
 
 withCond Always x = x
 withCond (At c) x = do
-  -- Check if `c` should update block state, compare with cycle from state
   f <- newLabel
   t <- newLabel
   tCheck p0 c
   finishBlock (If p0 t f) t
-  x
+  withBlock (blockForAddr c) x
   emitLabel f
 withCond (Between start end) x = do
   pActive <- newPred
@@ -248,10 +259,15 @@ tCheck p (AST.Match (Just re)) = emit (Match re p) >> emit (SetLastRE re)
 tCheck p (AST.Match Nothing) = emit (MatchLastRE p)
 tCheck p addr = error ("tCheck: Unmatched case " ++ show addr)
 
--- TODO track I-block and 0-block state like the interpreter does
-tSed (Sed cond x) = withCond cond $ tCmd x
+ifRightBlock x = do
+  state <- get
+  when (cycleBlock state == block state) x
+  when (cycleBlock state /= block state) (comment ("cycle " ++ show (cycleBlock state) ++ " block " ++ show (block state)))
 
-tCmd (AST.Block xs) = tSeds NormalCycle xs
+tSed (Sed Always (AST.Block xs)) = tSeds xs
+tSed (Sed cond x) = ifRightBlock $ withCond cond $ tCmd x
+
+tCmd (AST.Block xs) = tSeds xs
 tCmd (AST.Print fd) = emit (Print fd)
 tCmd (AST.Next fd) = do
   printIfAuto
