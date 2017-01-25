@@ -143,7 +143,7 @@ runSed autoprint seds = evalStateT runProgram =<< initialState autoprint seds
 #else
 runSed autoprint seds = do
     let body@(GMany (JustO e) _ _) = toIR autoprint seds
-    print body
+    debug ("\n" ++ show body)
     state <- initialState autoprint body
     evalStateT (runIRBlock e) state
 #endif
