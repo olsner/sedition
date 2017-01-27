@@ -43,10 +43,7 @@ data Insn e x where
   Get           :: (Maybe S)                -> Insn O O
   GetA          :: (Maybe S)                -> Insn O O
 
-  -- TODO Add instruction for incrementing the line number when starting a new
-  -- cycle. Or is the line number incremented on read?
-  -- TODO Add EOF check instruction
-  -- Any read for file descriptor 0 would increment it.
+  AtEOF         :: Pred                     -> Insn O O
   Line          :: Int -> Pred              -> Insn O O
   -- Possible extension: explicit "match" registers to track several precomputed
   -- matches at once.
@@ -186,57 +183,73 @@ tProgram seds = do
   newCycle <- newLabel
   intr <- newLabel
   exit <- newLabel
-  modify $ \state -> state { nextCycleLabel = newCycle, cycleBlock = Block0 }
+
+  oldSourceLabels <- gets sourceLabels
+  oldCycleBlock <- gets cycleBlock
+  oldNextCycle <- gets nextCycleLabel
+
+  modify $ \state -> state { nextCycleLabel = newCycle, cycleBlock = Block0, sourceLabels = M.empty }
 
   tSeds seds
 
   emitLabel newCycle
   get >>= \s -> when (autoprint s) (emit (Print 0))
   emit Clear
-  -- TODO EOF -> exit
+  doRead <- newLabel
+  emit (AtEOF p0)
+  If p0 exit doRead `thenLabel` doRead
   Read 0 (Just intr) entry `thenLabel` entry
 
-  modify $ \state -> state { nextCycleLabel = newCycle, cycleBlock = BlockN }
+  modify $ \state -> state { nextCycleLabel = newCycle, cycleBlock = BlockN, sourceLabels = M.empty }
   -- Actual normal program here
   tSeds seds
 
   Branch newCycle `thenLabel` intr
 
-  modify $ \state -> state { nextCycleLabel = newCycle, cycleBlock = BlockI }
+  modify $ \state -> state { nextCycleLabel = newCycle, cycleBlock = BlockI, sourceLabels = M.empty }
   tSeds seds
 
   Branch newCycle `thenLabel` exit
 
-  modify $ \state -> state { nextCycleLabel = invalidLabel "end of program" }
+  modify $ \state -> state { nextCycleLabel = oldNextCycle, cycleBlock = oldCycleBlock, sourceLabels = oldSourceLabels }
 
 tSeds = mapM_ tSed
 
-withBlock BlockN x = ifRightBlock x
-withBlock b x = withBlock' b x
-
-withBlock' b x = do
+withBlock b x = do
   oldBlock <- block <$> get
   modify $ \s -> s { block = b }
-  state <- get
-  comment ("start of block " ++ show b ++ " in " ++ show (cycleBlock state))
+  cblock <- gets cycleBlock
+  comment ("start of block " ++ show b ++ " in " ++ show cblock)
   x
-  state <- get
-  comment ("end of block " ++ show b ++ " in " ++ show (cycleBlock state))
+  cblock <- gets cycleBlock
+  comment ("end of block " ++ show b ++ " in " ++ show cblock)
   modify $ \s -> s { block = oldBlock }
 
 blockForAddr AST.IRQ = BlockI
 blockForAddr (AST.Line 0) = Block0
 blockForAddr _ = BlockN
 
-withCond Always x = x
+ifBlock b x = do
+  block <- gets cycleBlock
+  when (b == block) x
+  when (b /= block) $ do
+    comment ("wrong block " ++ show block ++ ", wanted " ++ show b)
+
+ifRightBlock x = do
+  b <- gets block
+  ifBlock b x
+
+withCond Always x = ifRightBlock x
 withCond (At c) x = do
-  f <- newLabel
-  t <- newLabel
-  tCheck p0 c
-  finishBlock (If p0 t f) t
-  withBlock (blockForAddr c) x
-  emitLabel f
-withCond (Between start end) x = do
+  block <- gets cycleBlock
+  when (blockForAddr c == block) $ do
+    f <- newLabel
+    t <- newLabel
+    tCheck p0 c
+    finishBlock (If p0 t f) t
+    withBlock (blockForAddr c) x
+    emitLabel f
+withCond (Between start end) x = ifBlock BlockN $ do
   pActive <- newPred
   f <- newLabel
   t <- newLabel
@@ -258,22 +271,21 @@ withCond (Between start end) x = do
   comment "between/end of code"
   emitLabel f
 
+-- TODO Even in "block 0", this will stop being true if we read a line...
 tCheck p (AST.Line 0) = do
-  s <- get
-  emit (Set p (block s == cycleBlock s))
+  b <- gets cycleBlock
+  emit (Set p (b == Block0))
 tCheck p (AST.Line n) = emit (Line n p)
--- TODO Translate last-expression into something explicit
 tCheck p (AST.Match (Just re)) = emit (Match re p) >> emit (SetLastRE re)
 tCheck p (AST.Match Nothing) = emit (MatchLastRE p)
 tCheck p addr = error ("tCheck: Unmatched case " ++ show addr)
 
-ifRightBlock x = do
-  state <- get
-  when (cycleBlock state == block state) x
-  when (cycleBlock state /= block state) (comment ("cycle " ++ show (cycleBlock state) ++ " block " ++ show (block state)))
-
 tSed (Sed Always (AST.Block xs)) = tSeds xs
-tSed (Sed cond x) = ifRightBlock $ withCond cond $ tCmd x
+tSed (Sed cond (AST.Block xs)) = withCond cond $ tSeds xs
+tSed (Sed cond x) = do
+  cb <- gets cycleBlock
+  comment ("In " ++ show cb ++ ", " ++ show cond ++ ": " ++ show x)
+  withCond cond $ tCmd x
 
 tCmd (AST.Block xs) = tSeds xs
 tCmd (AST.Print fd) = emit (Print fd)
@@ -284,14 +296,18 @@ tCmd (AST.Next fd) = do
 tCmd (AST.NextA fd) = printIfAuto >> emit (ReadAppend fd)
 tCmd (AST.Listen fd host port) = emit (Listen fd host port)
 tCmd (AST.Accept sfd fd) = emit (Accept sfd fd)
-tCmd (AST.Label name) = emitLabel =<< getLabelMapping name
-tCmd (AST.Branch (Just name)) = emitBranch' =<< getLabelMapping name
+tCmd (AST.Label name) = do
+  emitLabel =<< getLabelMapping name
+  comment ("at label " ++ show name)
+tCmd (AST.Branch (Just name)) = do
+  comment ("branch " ++ show name)
+  emitBranch' =<< getLabelMapping name
 tCmd (AST.Branch Nothing) = branchNextCycle
 tCmd (AST.Fork sed) = do
   exit <- newLabel
   entry <- newLabel
 
-  Fork exit entry `thenLabel` entry
+  Fork entry exit `thenLabel` entry
 
   oldNextCycle <- nextCycleLabel <$> get
   tProgram [sed]

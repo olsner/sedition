@@ -124,6 +124,7 @@ forkState pgm = get >>= \state -> liftIO $ do
   , activeAddresses = S.empty
   , lineNumber = 0
   , block = BlockN
+  , predicates = S.empty
 #if IPC
   , passenger = passenger
   , box = Mailbox box
@@ -143,7 +144,6 @@ runSed autoprint seds = evalStateT runProgram =<< initialState autoprint seds
 runSed autoprint seds = do
     let body@(GMany (JustO e) _ _) = toIR autoprint seds
     debug ("\n" ++ show body)
-    exitSuccess
     state <- initialState autoprint body
     evalStateT (runIRBlock e) state
 #endif
@@ -151,13 +151,16 @@ runSed autoprint seds = do
 runIRLabel :: H.Label -> SedIRM ()
 runIRLabel entry = do
   GMany _ blocks _ <- program <$> get
-  let Just block = mapLookup entry blocks
+  block <- case mapLookup entry blocks of
+    Nothing -> error ("Entry " ++ show entry ++ " not found in graph?")
+    Just block -> return block
   runIRBlock block
 runIRBlock block = do
   let lift f n z = z >> f n
   foldBlockNodesF (lift runIR_debug) block (return ())
 
 runIR_debug :: IR.Insn e x -> SedIRM ()
+runIR_debug i@(IR.Comment _) = runIR i
 runIR_debug i = do
   debug (show i)
   runIR i
@@ -219,9 +222,9 @@ runIR (IR.Read i _ cont) = do
   let i = if isJust res then 1 else 0
   modify $ \state -> state { pattern = res, lineNumber = lineNumber state + i }
   runIRLabel cont
-
+runIR (IR.AtEOF p) = setPred p =<< liftIH 0 hIsEOF
 runIR (IR.Quit code) = liftIO (exitWith code)
-runIR (IR.Comment s) = debug s
+runIR (IR.Comment s) = debug ("*** " ++ s)
 
 runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
 
