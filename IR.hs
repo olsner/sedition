@@ -1,4 +1,6 @@
-{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving #-}
+{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving, CPP #-}
+
+#define DEBUG 0
 
 module IR where
 
@@ -136,7 +138,12 @@ emit :: Insn O O -> IRM ()
 emit insn =
     modify $ \s -> s { program = program s H.<*> mkMiddle insn }
 
+comment :: String -> IRM ()
+#if DEBUG
 comment s = emit (Comment s)
+#else
+comment _ = return ()
+#endif
 
 emitBranch' l = newLabel >>= emitBranch l
 emitBranch l next = Branch l `thenLabel` next
