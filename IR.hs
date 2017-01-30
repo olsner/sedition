@@ -91,9 +91,10 @@ instance Show (Graph Insn e x) where
 
 invalidLabel :: String -> Label
 invalidLabel s = error ("Invalid label: " ++ s)
-startState autoprint = State 0 2 autoprint M.empty (invalidLabel "uninitialized next-cycle label") emptyGraph
-pIntr = Pred 1
+startState autoprint = State 0 3 autoprint M.empty (invalidLabel "uninitialized next-cycle label") emptyGraph
 pPreFirst = Pred 0
+pIntr = Pred 1
+pRunNormal = Pred 2
 
 instance UniqueMonad IRM where
   freshUnique = do
@@ -187,11 +188,13 @@ tProgram seds = do
 
   modify $ \state -> state { nextCycleLabel = newCycle }
   emit (Set pPreFirst True)
+  emit (Set pRunNormal False)
   emitLabel entry
   -- Actual normal program here
   tSeds seds
 
   emitLabel newCycle
+  emit (Set pRunNormal True)
   emit (Set pPreFirst False)
   emit (Set pIntr False)
   get >>= \s -> when (autoprint s) (emit (Print 0))
@@ -202,12 +205,27 @@ tProgram seds = do
   Read 0 (Just intr) entry `thenLabel` intr
 
   emit (Set pIntr True)
+  emit (Set pRunNormal False)
 
   Branch entry `thenLabel` exit
 
   modify $ \state -> state { nextCycleLabel = oldNextCycle }
 
 tSeds = mapM_ tSed
+
+tWhenNot p x = do
+  t <- newLabel
+  f <- newLabel
+  If p t f `thenLabel` f
+  x
+  emitLabel t
+
+tWhen p x = do
+  t <- newLabel
+  f <- newLabel
+  If p t f `thenLabel` t
+  x
+  emitLabel f
 
 withCond Always x = x
 withCond (At c) x = do
@@ -250,11 +268,16 @@ tCheck (AST.IRQ) = return pIntr
 tCheck addr = error ("tCheck: Unmatched case " ++ show addr)
 
 tSed (Sed Always (AST.Block xs)) = tSeds xs
--- TODO Always for other things: check that not prefirst or interrupt
--- TODO Figure out how to do jumps out of and into such blocks thouhg...
--- Separate run-all-blocks flag? Cleared by default, gets set when entering an
--- interrupt or pre-first block?
-tSed (Sed cond x) = withCond cond $ tCmd x
+tSed (Sed cond@(At (AST.Line 0)) x) = withCond cond $ do
+  -- While running a 0-conditional line, also run all normal lines until we
+  -- either reach the "fall-through" from that line, or until we start a new
+  -- cycle, then reset it back to... its original value, hmm...
+  emit (Set pRunNormal True)
+  tCmd x
+  -- FIXME This may need to keep a counter or something rather than just set
+  -- to false. Or assign a fresh predicate to push/copy the value into?
+  emit (Set pRunNormal False)
+tSed (Sed cond x) = tWhen pRunNormal $ withCond cond $ tCmd x
 
 tCmd (AST.Block xs) = tSeds xs
 tCmd (AST.Print fd) = emit (Print fd)
