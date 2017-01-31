@@ -72,6 +72,7 @@ instance NonLocal Insn where
   successors (Branch t) = [t]
   successors (If _ t f) = [t,f]
   successors (Fork t c) = [t,c]
+  successors (Quit _) = []
   successors (Read _ (Just i) r) = [i,r]
   successors (Read _ Nothing r) = [r]
 

@@ -21,6 +21,7 @@ import Compiler.Hoopl
 import IR
 
 import ConstPred (constPredPass)
+import RedundantBranches (redundantBranchesPass)
 
 -- More passes:
 --  branch-to-branch
@@ -31,9 +32,12 @@ import ConstPred (constPredPass)
 openEntry :: LabelsPtr [Label] => MaybeC O [Label]
 openEntry = NothingC
 
+debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
+
 optimize' :: (CheckpointMonad m, FuelMonad m) => Graph Insn O C -> m (Graph Insn O C)
 optimize' program = do
   (program,_,_) <- analyzeAndRewriteFwd constPredPass openEntry program M.empty
+  (program,_,_) <- analyzeAndRewriteBwd (debugBwd redundantBranchesPass) openEntry program mapEmpty
   return program
 
 runSFM :: Fuel -> SimpleFuelMonad a -> a

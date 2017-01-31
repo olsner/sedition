@@ -42,7 +42,7 @@ constPredTransfer = mkFTransfer3 first middle last
     middle (Match _ p)     f = M.delete p f
     middle (MatchLastRE p) f = M.delete p f
 
-    middle insn f = trace ("Unhandled instruction " ++ show insn) f
+    middle insn f = {-trace ("Unhandled instruction " ++ show insn)-} f
 
     -- O C
     last :: Insn O C -> ConstPredFact -> FactBase ConstPredFact
