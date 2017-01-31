@@ -44,9 +44,12 @@ constPredTransfer = mkFTransfer3 first middle last
 
     -- O O
     middle :: Insn O O -> ConstPredFact -> ConstPredFact
-    middle (Set p x)  f = M.insert p (PElem x) f
-    -- TODO Need to handle all instructions that modify predicates to at least
-    -- mark them as Top/unknown.
+    middle (Set p x)       f = M.insert p (PElem x) f
+    middle (AtEOF p)       f = M.delete p f
+    middle (Line _ p)      f = M.delete p f
+    middle (Match _ p)     f = M.delete p f
+    middle (MatchLastRE p) f = M.delete p f
+
     middle insn f = trace ("Unhandled instruction " ++ show insn) f
 
     -- O C
