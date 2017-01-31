@@ -1,2 +1,2 @@
 #!/bin/sh
-exec cabal install regex-tdfa trifecta network
+exec cabal install -j`nproc` regex-tdfa trifecta network
