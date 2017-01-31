@@ -37,6 +37,7 @@ import Bus
 import Parser
 import IR (toIR)
 import qualified IR
+import Optimize
 
 -- Just to make SedState Showable
 newtype Mailbox a = Mailbox (MVar a)
@@ -142,8 +143,11 @@ runSed :: Bool -> [Sed] -> IO ()
 runSed autoprint seds = evalStateT runProgram =<< initialState autoprint seds
 #else
 runSed autoprint seds = do
-    let body@(GMany (JustO e) _ _) = toIR autoprint seds
-    debug ("\n" ++ show body)
+    let program = toIR autoprint seds
+    let program' = optimize 1000 program
+    let body@(GMany (JustO e) _ _) = program'
+    debug ("\n\n*** ORIGINAL: \n" ++ show program)
+    debug ("\n\n*** OPTIMIZED: \n" ++ show program')
     state <- initialState autoprint body
     evalStateT (runIRBlock e) state
 #endif

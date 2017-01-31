@@ -6,11 +6,11 @@ all: sed runtests README.html
 	markdown $< >$@
 
 sed: Sed.hs force
-	ghc -O2 -j$(N) --make -threaded -rtsopts -o $@ $<
+	ghc -O2 -j$(N) -Wincomplete-patterns --make -threaded -rtsopts -o $@ $<
 
 # Compiles after 'sed' because they're sharing modules.
 ParserTest: force sed
-	ghc -O2 -j$(N) --make -threaded -rtsopts $@
+	ghc -O2 -j$(N) -Wincomplete-patterns --make -threaded -rtsopts $@
 
 runtests: ParserTest
 	./ParserTest
