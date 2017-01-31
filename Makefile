@@ -15,9 +15,11 @@ ParserTest: force sed
 runtests: ParserTest
 	./ParserTest
 
+MODULES = Sed Parser AST Bus ParserTest Optimize ConstPred IR
+
 clean:
-	rm -f sed Sed Sed.o Sed.hi Parser.o Parser.hi AST.hi AST.o Bus.hi Bus.o
-	rm -f ParserTest ParserTest.hi ParserTest.o
+	rm -f sed Sed ParserTest
+	rm -f $(MODULES:%=%.o) $(MODULES:%=%.hi)
 	rm -f README.html
 
 .PHONY: force runtests clean
