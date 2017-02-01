@@ -16,11 +16,7 @@ import Compiler.Hoopl
 
 import IR
 
--- TODO Instead of just labels for branch-to-branch, take any O C instruction,
--- optimize branch-to-if or e.g. branch-to-exit by duplicating it. This might
--- add new opportunities for the constant predicates optimization.
-
-type RBFact = WithTopAndBot Label
+type RBFact = WithTopAndBot (Insn O C)
 lattice :: DataflowLattice RBFact
 lattice = addPoints "Redundant branches" join
  where
@@ -41,14 +37,13 @@ transfer = mkBTransfer3 first middle last
 
     -- O C
     last :: Insn O C -> FactBase RBFact -> RBFact
-    last (Branch l) fb = PElem l
-    last _ fb = Top
+    last insn fb = PElem insn
 
 rewrite :: FuelMonad m => BwdRewrite m Insn RBFact
 rewrite = mkBRewrite rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x RBFact -> m (Maybe (Graph Insn e x))
-    rw old@(Branch t) f = rwLast old (Branch (label t f))
+    rw old@(Branch t) f | Just (PElem new) <- mapLookup t f = rwLast old new
     rw old@(If p tl fl) f = rwLast old (If p (label tl f) (label fl f))
     rw old@(Fork l1 l2) f = rwLast old (Fork (label l1 f) (label l2 f))
     rw old@(Read fd (Just l1) l2) f = rwLast old (Read fd (Just (label l1 f)) (label l2 f))
@@ -59,7 +54,7 @@ rewrite = mkBRewrite rw
         if old == new then return Nothing else return (Just (mkLast new))
 
     label :: Label -> FactBase RBFact -> Label
-    label l f | Just (PElem b) <- mapLookup l f = b
+    label l f | Just (PElem (Branch b)) <- mapLookup l f = b
               | otherwise = l
 
 simplifySameIfs :: FuelMonad m => BwdRewrite m Insn RBFact

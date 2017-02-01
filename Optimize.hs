@@ -24,10 +24,10 @@ import ConstPred (constPredPass)
 import RedundantBranches (redundantBranchesPass)
 
 -- More passes:
---  branch-to-branch
 --  dead pred elimination, as Ifs get removed some predicates become unused too
 --    and could be removed
 --  line number counting
+--
 
 --debugBwd = debugBwdJoins trace (const True)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
@@ -42,15 +42,16 @@ deleteLabels (GMany e body f) ls = GMany e body' f
   where
     body' = mapDeleteList (setElems ls) body
 
-optimize' :: (CheckpointMonad m, FuelMonad m) => Graph Insn O C -> m (Graph Insn O C)
-optimize' program = do
+-- Since redundantBranches may produce more opportunities for const predicates
+-- (and vice versa), run this at least twice. (Could run to fixpoint instead?)
+optimizeOnce :: (CheckpointMonad m, FuelMonad m) => Graph Insn O C -> m (Graph Insn O C)
+optimizeOnce program = do
   (program,_,_) <- analyzeAndRewriteFwdOx constPredPass program M.empty
   (program,_,_) <- analyzeAndRewriteBwdOx redundantBranchesPass program mapEmpty
-  program <- return (stripUnused program)
-  -- After redundantBranchesPass optimizes branch-to-if, run another const
-  -- predicate pass.
-  --(program,_,_) <- analyzeAndRewriteFwdOx constPredPass program M.empty
-  return program
+  return (stripUnused program)
+
+optimize' :: (CheckpointMonad m, FuelMonad m) => Graph Insn O C -> m (Graph Insn O C)
+optimize' = optimizeOnce >=> optimizeOnce
 
 runSFM :: Fuel -> SimpleFuelMonad a -> a
 runSFM fuel m = runSimpleUniqueMonad (runWithFuel fuel m)
