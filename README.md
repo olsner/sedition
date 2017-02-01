@@ -1,5 +1,5 @@
-xed/szed/extended sed/something
-===============================
+sedition
+========
 
 This is a dialect of sed, extended with some useful features:
 
