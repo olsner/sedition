@@ -4,8 +4,6 @@ module Optimize (optimize) where
 
 import Compiler.Hoopl as H hiding ((<*>))
 
-import Control.Monad
-
 --import Data.Map (Map)
 --import qualified Data.Map as M
 --import Debug.Trace
@@ -28,12 +26,19 @@ optimizeOnce entry program = do
   (program,_,_) <- analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
   return program
 
-rep :: Monad m => Int -> (a -> m a) -> (a -> m a)
-rep 0 _ = return
-rep n f = f >=> rep (n-1) f
+optToFix f original = do
+  oldFuel <- fuelRemaining
+  -- If we've already ran out of fuel, the optimizations will run but do
+  -- nothing, which we'll consider a fixpoint since oldFuel == newFuel == 0.
+  optimized <- f original
+  newFuel <- fuelRemaining
+  --trace ("optToFix: " ++ show (oldFuel - newFuel) ++ " fuel consumed") $ return ()
+  if oldFuel == newFuel
+    then return optimized
+    else optToFix f optimized
 
 optimize' :: (CheckpointMonad m, FuelMonad m) => (Label, Graph Insn C C) -> m (Graph Insn C C)
-optimize' (entry, program) = rep 5 (optimizeOnce entry) program
+optimize' (entry, program) = optToFix (optimizeOnce entry) program
 
 runSFM :: Fuel -> SimpleFuelMonad a -> (a, Fuel)
 runSFM fuel m = runSimpleUniqueMonad (runWithFuel fuel ((,) <$> m <*> fuelRemaining))

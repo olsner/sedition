@@ -65,4 +65,3 @@ constPredPass = FwdPass
   , fp_transfer = constPredTransfer
   , fp_rewrite = constPred }
 
-
