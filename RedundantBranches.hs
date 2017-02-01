@@ -50,8 +50,8 @@ rewrite = mkBRewrite rw
     rw _ f = return Nothing
 
     rwLast :: FuelMonad m => Insn O C -> Insn O C -> m (Maybe (Graph Insn O C))
-    rwLast old new = --trace ("rewrite: " ++ show old ++ " -> " ++ show new) $
-        if old == new then return Nothing else return (Just (mkLast new))
+    rwLast old new =
+        if old == new then return Nothing else trace ("rewrite: " ++ show old ++ " -> " ++ show new) $ return (Just (mkLast new))
 
     label :: Label -> FactBase RBFact -> Label
     label l f | Just (PElem (Branch b)) <- mapLookup l f = b

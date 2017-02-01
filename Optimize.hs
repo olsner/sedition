@@ -49,11 +49,25 @@ optimizeOnce program = do
   (program,_,_) <- analyzeAndRewriteFwdOx constPredPass program M.empty
   (program,_,_) <- analyzeAndRewriteBwdOx redundantBranchesPass program mapEmpty
   return (stripUnused program)
+  return program
+
+optToFix :: (CheckpointMonad m, FuelMonad m) => (Graph Insn O C -> m (Graph Insn O C)) -> Graph Insn O C -> m (Graph Insn O C)
+optToFix f original = do
+  oldFuel <- fuelRemaining
+  optimized <- f original
+  newFuel <- fuelRemaining
+  trace ("optToFix: " ++ show newFuel ++ " remaining") $ return ()
+  trace ("optToFix: " ++ showGraph showInsn optimized) $ return ()
+  -- TODO Looks like we're consuming fuel despite not actually optimizing
+  -- anything, somewhere, so a plain "newFuel == oldFuel" check doesn't work.
+  if oldFuel == newFuel
+    then return optimized
+    else optToFix f optimized
 
 optimize' :: (CheckpointMonad m, FuelMonad m) => Graph Insn O C -> m (Graph Insn O C)
-optimize' = optimizeOnce >=> optimizeOnce
+optimize' = optToFix optimizeOnce
 
 runSFM :: Fuel -> SimpleFuelMonad a -> a
 runSFM fuel m = runSimpleUniqueMonad (runWithFuel fuel m)
 
-optimize p = runSFM 10000000 (optimize' p)
+optimize p = runSFM (500 -32) (optimize' p)

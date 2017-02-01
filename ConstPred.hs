@@ -66,9 +66,11 @@ constPred = mkFRewrite rw
 
     rw (Set p x) f = return Nothing
 
-    rw (If p tl fl) f =
+    -- TODO This keeps firing repeatedly, but the program doesn't change?
+    rw insn@(If p tl fl) f =
       case M.lookup p f of
-        Just (PElem b) -> return (Just (mkLast (Branch (if b then tl else fl))))
+        Just (PElem b) -> trace (show insn ++ " -> " ++ show p ++ " == " ++ show b) $
+          return (Just (mkLast (Branch (if b then tl else fl))))
         _ -> return Nothing
 
     rw _ f = return Nothing
@@ -77,6 +79,5 @@ constPredPass :: FuelMonad m => FwdPass m Insn ConstPredFact
 constPredPass = FwdPass
   { fp_lattice = constLattice
   , fp_transfer = constPredTransfer
-  , fp_rewrite = constPred {- `thenFwdRw` simplify -} }
-
+  , fp_rewrite = constPred }
 
