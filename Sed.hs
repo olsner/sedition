@@ -144,7 +144,7 @@ runSed autoprint seds = evalStateT runProgram =<< initialState autoprint seds
 #else
 runSed autoprint seds = do
     let program = toIR autoprint seds
-    let program' = optimize 1000 program
+    let program' = optimize program
     let body@(GMany (JustO e) _ _) = program'
     debug ("\n\n*** ORIGINAL: \n" ++ show program)
     debug ("\n\n*** OPTIMIZED: \n" ++ show program')
