@@ -29,15 +29,27 @@ import RedundantBranches (redundantBranchesPass)
 --    and could be removed
 --  line number counting
 
-openEntry :: LabelsPtr [Label] => MaybeC O [Label]
-openEntry = NothingC
+--debugBwd = debugBwdJoins trace (const True)
+--debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
 
-debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
+stripUnused :: Graph Insn e x -> Graph Insn e x
+stripUnused g = deleteLabels g (labelsDefined g `setDifference` labelsUsed g)
+
+deleteLabels :: Graph Insn e x -> LabelSet -> Graph Insn e x
+deleteLabels GNil ls = GNil
+deleteLabels g@(GUnit {}) ls = g
+deleteLabels (GMany e body f) ls = GMany e body' f
+  where
+    body' = mapDeleteList (setElems ls) body
 
 optimize' :: (CheckpointMonad m, FuelMonad m) => Graph Insn O C -> m (Graph Insn O C)
 optimize' program = do
-  (program,_,_) <- analyzeAndRewriteFwd constPredPass openEntry program M.empty
-  (program,_,_) <- analyzeAndRewriteBwd (debugBwd redundantBranchesPass) openEntry program mapEmpty
+  (program,_,_) <- analyzeAndRewriteFwdOx constPredPass program M.empty
+  (program,_,_) <- analyzeAndRewriteBwdOx redundantBranchesPass program mapEmpty
+  program <- return (stripUnused program)
+  -- After redundantBranchesPass optimizes branch-to-if, run another const
+  -- predicate pass.
+  --(program,_,_) <- analyzeAndRewriteFwdOx constPredPass program M.empty
   return program
 
 runSFM :: Fuel -> SimpleFuelMonad a -> a

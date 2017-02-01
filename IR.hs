@@ -63,6 +63,7 @@ data Insn e x where
   Comment       :: String                   -> Insn O O
 
 deriving instance Show (Insn e x)
+deriving instance Eq (Insn e x)
 
 showInsn (Label l) = show l ++ ":"
 showInsn i = "  " ++ show i

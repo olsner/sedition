@@ -16,23 +16,24 @@ import Compiler.Hoopl
 
 import IR
 
-type RBFact = WithTop Label
+-- TODO Instead of just labels for branch-to-branch, take any O C instruction,
+-- optimize branch-to-if or e.g. branch-to-exit by duplicating it. This might
+-- add new opportunities for the constant predicates optimization.
+
+type RBFact = WithTopAndBot Label
 lattice :: DataflowLattice RBFact
-lattice = DataflowLattice
- { fact_name = "Const predicate"
- , fact_bot  = Top
- , fact_join = extendJoinDomain addFact }
+lattice = addPoints "Redundant branches" join
  where
-   addFact _ (OldFact old) (NewFact new)
-       = if new == old then (NoChange, PElem new)
-         else               (SomeChange, Top)
+   join _ (OldFact old) (NewFact new)
+       = if new == old then (NoChange, new)
+         else               (SomeChange, new)
 
 transfer :: BwdTransfer Insn RBFact
 transfer = mkBTransfer3 first middle last
   where
     first :: Insn C O -> RBFact -> RBFact
     -- C O
-    first (Label l) f = Top
+    first (Label l) f = f
 
     -- O O
     middle :: Insn O O -> RBFact -> RBFact
@@ -47,17 +48,31 @@ rewrite :: FuelMonad m => BwdRewrite m Insn RBFact
 rewrite = mkBRewrite rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x RBFact -> m (Maybe (Graph Insn e x))
-    rw (Branch t) f =
-      case mapLookup t f of
-        Just (PElem b) -> return (Just (mkLast (Branch b)))
-        _ -> return Nothing
+    rw old@(Branch t) f = rwLast old (Branch (label t f))
+    rw old@(If p tl fl) f = rwLast old (If p (label tl f) (label fl f))
+    rw old@(Fork l1 l2) f = rwLast old (Fork (label l1 f) (label l2 f))
+    rw old@(Read fd (Just l1) l2) f = rwLast old (Read fd (Just (label l1 f)) (label l2 f))
+    rw _ f = return Nothing
 
+    rwLast :: FuelMonad m => Insn O C -> Insn O C -> m (Maybe (Graph Insn O C))
+    rwLast old new = --trace ("rewrite: " ++ show old ++ " -> " ++ show new) $
+        if old == new then return Nothing else return (Just (mkLast new))
+
+    label :: Label -> FactBase RBFact -> Label
+    label l f | Just (PElem b) <- mapLookup l f = b
+              | otherwise = l
+
+simplifySameIfs :: FuelMonad m => BwdRewrite m Insn RBFact
+simplifySameIfs = mkBRewrite rw
+  where
+    rw :: FuelMonad m => Insn e x -> Fact x RBFact -> m (Maybe (Graph Insn e x))
+    rw i@(If p tl fl) f | tl == fl = trace ("simplifySameIf: " ++ show i) $ return (Just (mkLast (Branch tl)))
     rw _ f = return Nothing
 
 redundantBranchesPass :: FuelMonad m => BwdPass m Insn RBFact
 redundantBranchesPass = BwdPass
   { bp_lattice = lattice
   , bp_transfer = transfer
-  , bp_rewrite = rewrite }
+  , bp_rewrite = rewrite `thenBwdRw` simplifySameIfs }
 
 
