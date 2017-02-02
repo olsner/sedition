@@ -53,6 +53,10 @@ tests =
 
   , ("2,/^$/ {}", [Sed (Between (Line 2) (Match (re "^$"))) (Block [])])
   , ("{}", [Sed Always (Block [])])
+
+  , ("m foo", [Sed Always (Message (Just "foo"))])
+  , ("m", [Sed Always (Message Nothing)])
+  , ("m  ", [Sed Always (Message Nothing)])
   ]
 
 -- tests that should not succeed

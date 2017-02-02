@@ -106,6 +106,7 @@ slashWith re term = BS.pack . concat <$> many p <* char term
     , (\x y -> [x,y]) <$> char '\\' <*> anyChar ]
 
 maybeP p = option Nothing (Just <$> p)
+maybeNonEmpty s | BS.null s = Nothing | otherwise = Just s
 
 flags accepted = oneOf accepted
 setSubstType   t   (Subst pat rep _ act) = Subst pat rep t act
@@ -149,7 +150,7 @@ pCommand = charSwitchM $
   , ('p', Print <$> option 0 wsInt)
   , ('q', pQuit True)
   , ('Q', pQuit False)
-  , ('m', Message <$> wsThen (maybeP pTextArgument))
+  , ('m', Message <$> maybeNonEmpty <$> wsThen pTextArgument)
   , ('s', anyChar >>= (\c -> mkSubst <$> (re <$> slashWith True c)
                                      <*> slashWith False c
                                      <*> many sFlag))
