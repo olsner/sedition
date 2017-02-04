@@ -1,23 +1,28 @@
 N = 2
 
+WARNINGS = -Widentities -Wcompat -Wall -Wno-name-shadowing -Wno-missing-signatures
+GHCFLAGS = -j$(N) -O2 -threaded -rtsopts $(WARNINGS)
+
 all: sed runtests README.html
 
 %.html: %.md
 	markdown $< >$@
 
 sed: Sed.hs force
-	ghc -O2 -j$(N) --make -threaded -rtsopts -o $@ $<
+	ghc $(GHCFLAGS) --make -o $@ $<
 
 # Compiles after 'sed' because they're sharing modules.
 ParserTest: force sed
-	ghc -O2 -j$(N) --make -threaded -rtsopts $@
+	ghc $(GHCFLAGS) --make -threaded -rtsopts $@
 
 runtests: ParserTest
 	./ParserTest
 
+MODULES = Sed Parser AST Bus ParserTest Optimize ConstPred IR RedundantBranches
+
 clean:
-	rm -f sed Sed Sed.o Sed.hi Parser.o Parser.hi AST.hi AST.o Bus.hi Bus.o
-	rm -f ParserTest ParserTest.hi ParserTest.o
+	rm -f sed Sed ParserTest
+	rm -f $(MODULES:%=%.o) $(MODULES:%=%.hi)
 	rm -f README.html
 
 .PHONY: force runtests clean

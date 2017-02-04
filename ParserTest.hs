@@ -59,10 +59,7 @@ tests =
   , ("m  ", [Sed Always (Message Nothing)])
   ]
 
--- tests that should not succeed
-failtests =
-  [ "A12" ] -- whitespace required between first and second argument
-
+counts :: [Bool] -> (Int,Int)
 counts [] = (0,0)
 counts (x:xs) | x = (trues + 1, falses)
               | otherwise = (trues, falses + 1)
@@ -70,7 +67,7 @@ counts (x:xs) | x = (trues + 1, falses)
 
 main = do
     results <- doTests tests
-    let (passes, fails) = counts results
+    let (_passes, fails) = counts results
     case fails of
       0 -> putStrLn "OK" >> exitSuccess
       -- putStrLn ("Finished " ++ show (length tests) ++ " tests")

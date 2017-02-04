@@ -8,6 +8,7 @@ This is a dialect of sed, extended with some useful features:
   run in a new thread
 * Inter-thread communications
 * Extended hold space, a key/value store extending the normal single hold space
+* Built-in optimizer and (eventually) compiler
 
 Some GNU sed features have been included, and the regular expressions are
 always the extended variety (as if the -r flag was passed to sed). There may
@@ -16,8 +17,8 @@ package used though.
 
 ## Building and Getting Started
 
-* Install ghc and cabal-install (from distro packages or hvr's PPA). The exact
-  versions shouldn't be terribly important.
+* Install ghc (>= 8.0.2 for a working version of hoopl) and cabal-install, make
+  sure they're in your PATH.
 * Install Haskell prerequisites: `./boot.sh`
 * Build with `make`
 

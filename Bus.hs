@@ -1,19 +1,19 @@
 {-# LANGUAGE CPP #-}
 
+#define DEBUG 0
+#define TEST 0
+
 module Bus (
-    Bus(..), newBus, Passenger(..), board, drive, ride, wait, tryride
+    Bus(..), newBus, Passenger(..), board, drive, ride, wait, tryride, unboard
     ) where
 
 import Control.Concurrent
-import Control.Concurrent.Chan
 import Control.Monad
 
 import Data.Either
 import Data.Map.Strict (Map)
 import qualified Data.Map.Strict as M
-import Data.Maybe
 
-import System.IO.Unsafe
 import System.Mem.Weak
 
 newtype Bus a = Bus (MVar (Int, Map Int (Weak (MVar a))))
@@ -41,9 +41,11 @@ passengerLeft bus id = modifyMVar_ bus $ \(next,pid) -> do
   debug (show t ++ ": passenger " ++ show id ++ " left the bus")
   return (next, M.delete id pid)
 
--- Actually we rely on the weak vars stuff to get rid of passenger corpses.
+-- | Explicitly remove a passenger from the bus, so that it doesn't receive
+-- | future messages.
 unboard :: Bus a -> Passenger a -> IO ()
-unboard bus passenger = return ()
+unboard _bus _passenger = return ()
+-- Actually we rely on the weak vars stuff to get rid of passenger corpses.
 
 activePassengers :: Bus a -> IO [MVar a]
 activePassengers (Bus bus) = do
@@ -79,15 +81,18 @@ wait (Passenger v) = readMVar v >> return ()
 tryride :: Passenger a -> IO (Maybe a)
 tryride (Passenger v) = tryTakeMVar v
 
+#if DEBUG || TEST
 putstrlock = unsafePerformIO (newMVar ())
 lockedPutStrLn s = withMVar putstrlock $ \() -> do
     putStrLn s
-#if 0
+#endif
+#if DEBUG
 debug = lockedPutStrLn
 #else
 debug _ = return ()
 #endif
 
+#if TEST
 testBus j n = do
     bus <- newBus
     passengers <- replicateM n (board bus)
@@ -103,3 +108,4 @@ testBus j n = do
 
     lockedPutStrLn ("MAIN: threads should be dead, driving bus to " ++ show (j + 1))
     drive bus (j + 1)
+#endif

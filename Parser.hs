@@ -1,9 +1,8 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module Parser where
+module Parser (parseString, parseOnly, pFile) where
 
 import Control.Applicative
-import Control.Monad
 
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BS
@@ -11,7 +10,7 @@ import Data.Maybe
 
 import System.Exit
 
-import Text.Trifecta
+import Text.Trifecta hiding (parseString)
 import Text.Trifecta.Delta
 
 import AST
@@ -90,8 +89,10 @@ slash re = (char '/' *> slashWith re '/')
 
 -- Reads a "slash"-terminated (the terminator itself already parsed) argument
 -- and consumes the terminator.
+-- The 're' should presumably have some effect on parsing? It's true for the
+-- regexp part and false for replacement part of a s/// command.
 slashWith :: Bool -> Char -> Parser S
-slashWith re term = BS.pack . concat <$> many p <* char term
+slashWith _re term = BS.pack . concat <$> many p <* char term
   where
   p = choice $
     [ (:[]) <$> noneOf [term,'\n','\\']
@@ -108,9 +109,8 @@ slashWith re term = BS.pack . concat <$> many p <* char term
 maybeP p = option Nothing (Just <$> p)
 maybeNonEmpty s | BS.null s = Nothing | otherwise = Just s
 
-flags accepted = oneOf accepted
-setSubstType   t   (Subst pat rep _ act) = Subst pat rep t act
-setSubstAction act (Subst pat rep t _  ) = Subst pat rep t act
+setSubstType   t   (_,act) = (t,act)
+setSubstAction act (t,_) = (t,act)
 sFlag = charSwitch $
   -- First, flags: control or tweak the matching
   [ ('g', setSubstType SubstAll)
@@ -128,7 +128,9 @@ sFlag = charSwitch $
   -- w file: write result to file
   ]
 
-mkSubst pat rep flags = foldr (.) id flags (Subst pat rep SubstFirst SActionNone)
+mkSubst pat rep flags = Subst pat rep subst action
+  where
+    (subst,action) = foldr (.) id flags (SubstFirst, SActionNone)
 
 pQuit print = Quit print . intToExit <$> option 0 wsInt
 
@@ -174,7 +176,3 @@ parseString input = case parseOnly pFile input of
 -- proper file/line messaages.
 
 parseOnly p = parseByteString p (Lines 0 0 0 0)
-testParseString input = print (parseOnly pFile input)
-testParseFile = print . parseOnly pFile <=< BS.readFile
-testParseLines = mapM_ testParseString . BS.lines <=< BS.readFile
-

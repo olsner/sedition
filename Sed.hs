@@ -1,10 +1,12 @@
-{-# LANGUAGE OverloadedStrings, CPP #-}
+{-# LANGUAGE OverloadedStrings, CPP, TypeFamilies #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 
-#define DEBUG 0
-#define IPC 1
+module Main (main) where
 
-import Control.Applicative
+#define DEBUG 0
+
+import Compiler.Hoopl as H
+
 import Control.Concurrent
 import Control.Monad
 import Control.Monad.IO.Class
@@ -26,152 +28,206 @@ import System.Console.GetOpt
 import System.Environment
 import System.Exit
 import System.IO
+#if DEBUG
 import System.IO.Unsafe
+#endif
 
 import Text.Regex.TDFA hiding (match)
 
 import AST
 import Bus
 import Parser
+import IR (toIR)
+import qualified IR
+import Optimize
 
--- Just to make SedState Showable
 newtype Mailbox a = Mailbox (MVar a)
+-- Just to make SedState Showable
 instance Show (Mailbox a) where
     show _ = "Mailbox {}"
+data IPCState = IPCState
+  { box :: Mailbox (Either (Maybe S) S)
+  , bus :: Bus S
+  , passenger :: Passenger S }
+  deriving (Show)
 
-data BlockState = BlockN | BlockI | Block0 deriving (Show, Eq)
 data File
   = HandleFile { fileHandle :: Handle }
-  | SocketFile { fileSocket :: Socket }
+  | SocketFile Socket
   deriving (Show, Eq)
-data SedState = SedState {
-  program :: [Sed],
-  files :: Map Int File,
-  lineNumber :: Int,
-  pattern :: Maybe S,
-  -- hold "" is classic hold space
-  hold :: Map S S,
-  activeAddresses :: Set MaybeAddress,
+data SedState program = SedState
+  { program :: program
+  , files :: Map Int File
+  , lineNumber :: Int
+  , pattern :: Maybe S
+  , hold :: Map S S
 
-  lastRegex :: Maybe RE,
+  , lastRegex :: Maybe RE
 
-  autoprint :: Bool,
-  block :: BlockState,
+  , autoprint :: Bool
 
-#if IPC
-  box :: Mailbox (Either (Maybe S) S),
-  bus :: Bus S,
-  passenger :: Passenger S,
-#endif
-  irq :: Bool
+  , predicates :: Set Int
+
+  , ipcState :: Maybe IPCState
 
   -- Pending output? Other tricky stuff?
 }
   deriving (Show)
 
+debug :: MonadIO m => String -> m ()
 #if DEBUG
-putstrlock = unsafePerformIO (newMVar ())
-debug s = withMVar putstrlock $ \() -> do
+debug s = liftIO $ withMVar putstrlock $ \() -> do
     t <- myThreadId
     System.IO.putStrLn (show t ++ ": " ++ s)
+putstrlock = unsafePerformIO (newMVar ())
 #else
 debug _ = return ()
 #endif
-debugPrint x = debug (show x)
 
 fatal msg = error ("ERROR: " ++ msg)
 
--- The wheels on the bus goes round and round...
+-- The wheels on the bus go round and round...
 busRider p b = forever $ putMVar b . Right =<< ride p
 
-initialState autoprint pgm = do
+newIPCState = do
   bus <- newBus
   passenger <- board bus
   box <- newEmptyMVar
-  forkIO (busRider passenger box)
-  return SedState {
-    program = pgm,
-    files = M.empty,
-    lineNumber = 0,
-    pattern = Nothing,
-    hold = M.empty,
-    activeAddresses = S.empty,
-    lastRegex = Nothing,
-    autoprint = autoprint,
-    block = BlockN,
-#if IPC
-    box = Mailbox box,
-    bus = bus,
-    passenger = passenger,
-#endif
-    irq = False }
-forkState pgm = get >>= \state -> liftIO $ do
-#if IPC
+  _ <- forkIO (busRider passenger box)
+  return IPCState { box = Mailbox box, bus = bus, passenger = passenger }
+
+forkIPCState Nothing = return Nothing
+forkIPCState (Just state) = do
   passenger <- board (bus state)
   box <- newEmptyMVar
-  forkIO (busRider passenger box)
-#endif
+  _ <- forkIO (busRider passenger box)
+  return $ Just state { passenger = passenger, box = Mailbox box }
+
+initialState autoprint ipc pgm = do
+  ipcState <- if ipc then Just <$> newIPCState else return Nothing
+  return SedState {
+    program = pgm
+  , files = M.empty
+  , lineNumber = 0
+  , pattern = Nothing
+  , hold = M.empty
+  , lastRegex = Nothing
+  , autoprint = autoprint
+  , predicates = S.empty
+  , ipcState = ipcState
+  }
+forkState pgm = get >>= \state -> liftIO $ do
+  ipcState' <- forkIPCState (ipcState state)
   return state {
     program = pgm
   , pattern = Nothing
-  , activeAddresses = S.empty
   , lineNumber = 0
-  , block = BlockN
-#if IPC
-  , passenger = passenger
-  , box = Mailbox box
-#endif
+  , predicates = S.empty
+  , ipcState = ipcState'
  }
 
-runSed :: Bool -> [Sed] -> IO ()
-runSed autoprint seds = evalStateT runProgram =<< initialState autoprint seds
+setPred (IR.Pred n) b = modify $ \s -> s { predicates = f (predicates s) }
+  where
+    f | b = S.insert n
+      | otherwise = S.delete n
+getPred (IR.Pred n) = S.member n . predicates <$> get
 
-addressActive addr = S.member addr . activeAddresses <$> get
-modifyActiveAddresses f =
-  modify $ \state -> state { activeAddresses = f (activeAddresses state) }
-activateAddress addr = modifyActiveAddresses (S.insert addr)
-deactivateAddress addr = modifyActiveAddresses (S.delete addr)
+runSed :: Bool -> Bool -> [Sed] -> IO ()
+runSed autoprint ipc seds = do
+    let program = toIR autoprint seds
+    let program' = optimize program
+    let body@(GMany (JustO e) _ _) = program'
+    debug ("\n\n*** ORIGINAL: \n" ++ show program)
+    debug ("\n\n*** OPTIMIZED: \n" ++ show program')
+    state <- initialState autoprint ipc body
+    evalStateT (runIRBlock e) state
+
+runIRLabel :: H.Label -> SedM ()
+runIRLabel entry = do
+  GMany _ blocks _ <- program <$> get
+  block <- case mapLookup entry blocks of
+    Nothing -> error ("Entry " ++ show entry ++ " not found in graph?")
+    Just block -> return block
+  runIRBlock block
+runIRBlock block = do
+  let lift f n z = z >> f n
+  foldBlockNodesF (lift runIR_debug) block (return ())
+
+runIR_debug :: IR.Insn e x -> SedM ()
+runIR_debug i@(IR.Comment _) = runIR i
+runIR_debug i = do
+  debug (show i)
+  runIR i
+
+runIR :: IR.Insn e x -> SedM ()
+runIR (IR.Label _) = return ()
+runIR (IR.Branch l) = runIRLabel l
+runIR (IR.Line l p) = do
+  state <- get
+  setPred p (l == lineNumber state)
+runIR (IR.Set p v) = setPred p v
+runIR (IR.If p t f) = do
+  b <- getPred p
+  runIRLabel (if b then t else f)
+runIR (IR.Listen i maybeHost port) = doListen i maybeHost port
+runIR (IR.Accept s c) = doAccept s c
+runIR (IR.Fork entry next) = do
+    pgm <- program <$> get
+    state <- forkState pgm
+    forkIO_ $ do
+        debug ("start of fork")
+        put state
+        runIRLabel entry
+        debug ("end of fork")
+    debug ("parent is after fork")
+    runIRLabel next
+runIR (IR.Redirect i j) = redirectFile i j
+runIR (IR.CloseFile i) = closeFile i
+
+runIR (IR.Match re p) = setPred p =<< checkRE re
+runIR (IR.MatchLastRE p) = do
+  Just re <- lastRegex <$> get
+  setPred p =<< checkRE re
+runIR (IR.SetLastRE re) = setLastRegex re
+
+runIR (IR.Subst sub stype) = do
+  state <- get
+  case pattern state of
+    Just p
+      | Just (RE _ pat) <- lastRegex state
+      , matches@(_:_) <- match stype pat p -> do
+          let newp = subst p sub matches
+          debug ("Subst: " ++ show p ++ " => " ++ show newp)
+          modify $ \state -> state { pattern = Just newp }
+    _ -> fatal "Subst: no match when substituting?"
+
+runIR (IR.Message Nothing) = doMessage . fromJust =<< gets pattern
+runIR (IR.Message (Just s)) = doMessage s
+
+runIR (IR.PrintS i s) = printTo i s
+runIR (IR.Print i) = get >>= \state ->
+    case pattern state of
+        Just p -> printTo i p
+        _ -> return ()
+runIR (IR.Clear) = modify $ \state -> state { pattern = Just "" }
+runIR (IR.Hold reg) = doHold reg
+runIR (IR.Get reg) = doGet reg
+runIR (IR.GetA reg) = doGetAppend reg
+runIR (IR.Cycle i intr cont eof) = do
+    res <- getLineOrEvent i
+    let (pat,l,k) = case res of
+          Left Nothing -> (Nothing, 0, eof)
+          Left (Just s) -> (Just s, 1, cont)
+          Right s -> (Just s, 0, intr)
+    modify $ \state -> state { pattern = pat, lineNumber = lineNumber state + l }
+    runIRLabel k
+runIR (IR.AtEOF p) = setPred p =<< liftIH 0 hIsEOF
+runIR (IR.Quit code) = liftIO (exitWith code)
+runIR (IR.Comment s) = debug ("*** " ++ s)
+
+runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
 
 setLastRegex re = modify $ \state -> state { lastRegex = Just re }
-
-check :: MaybeAddress -> SedM Bool
--- A bit of special casing here - unconditional statements should not be run
--- in the before-first or IRQ state unless they're inside a 0{} or I{} block.
--- runBlock updates and restores the BlockI/Block0 state.
--- This doesn't apply for unconditional *blocks* though - see runBlock below.
-check Always = do
-  state <- get
-  case state of
-   _ | irq state -> return (block state == BlockI)
-     | 0 <- lineNumber state -> return (block state == Block0)
-     -- On non-first lines, a missing pattern happens after 'd' (for example)
-     -- treat these as matching too.
-     | otherwise -> return True
-check (At addr) = check1 addr
--- if active: check for end, deactivate, return true
--- if not active: check for start => activate, return true
--- otherwise: return false
-check addr@(Between start end) = do
-  active <- addressActive addr
-  change <- check1 (if active then end else start)
-  when change $ (if active then deactivateAddress else activateAddress) addr
-  return (active || change)
-
--- EOF is checked lazily to avoid the start of each cycle blocking until after
--- at least one character of the next line has been read.
-check1 EOF = liftIH 0 hIsEOF
-check1 (Line expectedLine) = do
-  state <- get
-  return (lineNumber state == expectedLine && not (irq state))
-check1 IRQ = irq <$> get
-check1 (Match Nothing) = do
-  lre <- lastRegex <$> get
-  case lre of
-    Just re -> checkRE re
-    Nothing -> return False
-check1 (Match (Just re)) = do
-  setLastRegex re
-  checkRE re
 
 checkRE (RE _ re) = do
   p <- pattern <$> get
@@ -179,165 +235,51 @@ checkRE (RE _ re) = do
     Just p -> return (matchTest re p)
     _ -> return False
 
--- Only the first one negates - series of ! don't double-negate.
--- run will traverse and ignore all NotAddr prefixes.
-applyNot (NotAddr cmd) t = not t
-applyNot cmd t = t
+type SedPM p a = StateT (SedState p) IO a
+type SedM a = SedPM (Graph IR.Insn O C) a
 
-runProgram :: SedM ()
-runProgram = do
-  prog <- program <$> get
-  runBlock prog (return ())
+doListen i maybeHost port = do
+    let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
+    let maybeHost' = fmap C.unpack maybeHost
+    s <- liftIO $ do
+        addr:_ <- getAddrInfo (Just hints) maybeHost' (Just (show port))
+        s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
+        setSocketOption s ReuseAddr 1
+        bind s (addrAddress addr)
+        listen s 7
+        return s
+    debug ("now listening on " ++ show i)
+    replaceFile i (SocketFile s)
 
-type SedM a = StateT SedState IO a
+doAccept i j = do
+    Just (SocketFile s) <- getFile i
+    debug ("accepting from " ++ show i ++ " to " ++ show j)
+    (c,addr) <- liftIO $ accept s
+    debug ("accepted: " ++ show addr)
+    h <- liftIO $ socketToHandle c ReadWriteMode
+    replaceFile j (HandleFile h)
 
-runBlock :: [Sed] -> SedM () -> SedM ()
-runBlock [] k = newCycle 0 runProgram
--- Would be nice not to need this hack here, the rest of the conditional stuff
--- should be updated to work with this.
--- This makes it so that unconditional blocks are run even if the BlockI/0
--- state check would *not* run an unconditional statement now. The block might
--- then contain conditionals that do match.
-runBlock (Sed Always (Block seds):ss) k =
-    runBlock seds (runBlock ss k)
-runBlock (Sed cond c:ss) k = do
-    dorun <- check cond
-    debug (show cond ++ " => " ++ show dorun ++ ": " ++ show c)
-    -- If the address is one of these special addresses, then change the block
-    -- state, then make sure to reset it to its previous value before running
-    -- the next statement.
-    -- Blocks run inside this block will inherit it and get the block-state
-    -- popped once it gets back to the outer continuation.
-    let setBlock b = modify $ \state -> state { block = b }
-    oldBlock <- block <$> get
-    setBlock $ case cond of
-        At (Line 0) -> Block0
-        At IRQ -> BlockI
-        _ -> oldBlock
-    let k' = setBlock oldBlock >> runBlock ss k
-    if applyNot c dorun then run c k' else k'
-
-run :: Cmd -> SedM () -> SedM ()
-run c k = case c of
-    Block seds -> runBlock seds k
-    Fork sed -> do
-        state <- forkState [sed]
-        forkIO_ $ do
-            debug ("start of fork")
-            put state
-            runProgram
-            debug ("end of fork")
-        debug ("parent is after fork")
-        k
-    NotAddr c -> run c k
-    Label l -> k
-    Branch Nothing -> do
-        debug "branch: nothing"
-        newCycle 0 runProgram
-    Branch (Just l) -> runBranch l =<< program <$> get
-    Next i -> newCycle i k
-    Print i -> get >>= \state ->
-        case pattern state of
-          Just p -> printTo i p >> k
-          _ -> k
-    -- Delete should clear pattern space and start a new cycle (this avoids
-    -- printing anything).
-    Delete -> do
-      modify $ \state -> state { pattern = Nothing }
-      newCycle 0 runProgram
-    Clear -> do
-      modify $ \state -> state { pattern = Just "" }
-      k
-
-    Insert s -> do
-      printTo 0 s
-      k
-
-    Listen i maybeHost port -> do
-        let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
-        let maybeHost' = fmap C.unpack maybeHost
-        s <- liftIO $ do
-            addr:_ <- getAddrInfo (Just hints) maybeHost' (Just (show port))
-            s <- socket (addrFamily addr) (addrSocketType addr) (addrProtocol addr)
-            setSocketOption s ReuseAddr 1
-            bind s (addrAddress addr)
-            listen s 7
-            return s
-        debug ("now listening on " ++ show i)
-        replaceFile i (SocketFile s)
-        k
-
-    Accept i j -> do
-        Just (SocketFile s) <- getFile i
-        debug ("accepting from " ++ show i ++ " to " ++ show j)
-        (c,addr) <- liftIO $ accept s
-        debug ("accepted: " ++ show addr)
-        h <- liftIO $ socketToHandle c ReadWriteMode
-        replaceFile j (HandleFile h)
-        k
-
-    Redirect i (Just j) -> do
-        f <- getFile j
-        case f of
-           Just f -> replaceFile i f >> delFile j
-           Nothing -> closeFile i
-        k
-    Redirect i Nothing -> do
-        f <- getFile i
-        debug ("Closing " ++ show i ++ ": " ++ show f)
-        closeFile i
-        k
-
-#if IPC
-    Message msg -> do
-        state <- get
-        let m = case msg of
-              Just m -> m
-              Nothing -> fromJust (pattern state)
+doMessage m = gets ipcState >>= f
+  where
+    f Nothing = return ()
+    f (Just ipcState) =
+      do
         debug ("Messaging " ++ show m)
-        liftIO (drive (bus state) m)
-        k
-#endif
+        liftIO (drive (bus ipcState) m)
 
-    Subst mre rep t action -> do
-      state <- get
-      -- Still a Maybe RE in case there was no previous regexp at all
-      mre <- case mre of
-           Just re -> setLastRegex re >> return (Just re)
-           Nothing -> return (lastRegex state)
-      case pattern state of
-        -- matchAll if SubstGlobal is in flags
-        Just p | Just (RE _ pat) <- mre, matches@(_:_) <- match t pat p -> do
-          let newp = subst p rep matches
-          debug ("Subst: " ++ show p ++ " => " ++ show newp)
-          runSubAction action newp
-          modify $ \state -> state { pattern = Just newp }
-          k
-        _ -> do
-          debug ("Subst: no match in " ++ show (pattern state))
-          k
+doHold reg = do
+  pat <- fromMaybe "" . pattern <$> get
+  debug ("Hold: holding " ++ show pat ++ " in " ++ show reg)
+  modify $ \s -> s { hold = M.insert (fromMaybe "" reg) pat (hold s) }
+doGet reg =
+  modify $ \s -> s { pattern = Just (fromMaybe "" (M.lookup (fromMaybe "" reg) (hold s))) }
 
-    Quit print status -> do
-      let exit = liftIO (exitWith status)
-      if print then run (Print 0) exit else exit
-
-    Hold reg -> do
-      pat <- fromMaybe "" . pattern <$> get
-      debug ("GetA: holding " ++ show pat ++ " in " ++ show reg)
-      modify $ \state -> state { hold = M.insert (fromMaybe "" reg) pat (hold state) }
-      k
-    Get reg -> do
-      modify $ \state -> state { pattern = Just (fromMaybe "" (M.lookup (fromMaybe "" reg) (hold state))) }
-      k
-    GetA reg -> do
-      state <- get
-      let p = fromMaybe "" (pattern state)
-      let got = fromMaybe "" (M.lookup (fromMaybe "" reg) (hold state))
-      debug ("GetA: appending " ++ show got ++ " to " ++ show p)
-      modify $ \state -> state { pattern = Just (p <> "\n" <> got) }
-      k
-
-    _ -> liftIO (System.IO.putStrLn ("Unhandled command: " ++ show c) >> exitFailure)
+doGetAppend reg = do
+  state <- get
+  let p = fromMaybe "" (pattern state)
+  let got = fromMaybe "" (M.lookup (fromMaybe "" reg) (hold state))
+  debug ("GetA: appending " ++ show got ++ " to " ++ show p)
+  modify $ \state -> state { pattern = Just (p <> "\n" <> got) }
 
 -- This could be preprocessed a bit better, e.g. having the parser parse the
 -- replacement into a list of (Literal|Ref Int).
@@ -364,20 +306,15 @@ subst p rep matches = go "" 0 matches
           c -> go (C.snoc acc c) (i + 1)
         matchN n = (uncurry substr) (match ! n)
 
-runSubAction SActionNone _ = return ()
-runSubAction SActionExec s = do
-    debug ("TODO: Actually execute " ++ show s)
-    return ()
-runSubAction (SActionPrint i) s = printTo i s
-
 match SubstFirst re p = case matchOnce re p of Just x -> [x]; Nothing -> []
 match SubstAll re p = matchAll re p
 -- TODO Handle not finding enough matches for match i. Should be handled the
 -- same as a nonmatch.
 match (SubstNth i) re p = [matchAll re p !! i]
 
-getFile i = M.lookup i . files <$> get
 closeFile i = do
+    f <- getFile i
+    debug ("Closing " ++ show i ++ ": " ++ show f)
     {- The underlying socket/files may be used by other threads, so don't
     -- actually close them. Let them be garbage collected instead.
     case M.lookup i (files state) of
@@ -389,8 +326,16 @@ closeFile i = do
 replaceFile i f = do
     closeFile i
     setFile i f
+redirectFile i j = do
+    f <- getFile j
+    case f of
+       Just f -> replaceFile i f >> delFile j
+       Nothing -> closeFile i
+
+getFile i = M.lookup i . files <$> get
 setFile i f = modify $ \state -> state { files = M.insert i f (files state) }
 delFile i = modify $ \state -> state { files = M.delete i (files state) }
+
 ifile i state = fileHandle (M.findWithDefault (HandleFile stdin) i (files state))
 ofile i state = fileHandle (M.findWithDefault (HandleFile stdout) i (files state))
 
@@ -407,73 +352,30 @@ hMaybeGetLine h = do
     if eof then pure Nothing
            else Just <$> C.hGetLine h
 
-forkIO_ :: SedM () -> SedM ()
+forkIO_ :: StateT s IO () -> StateT s IO ()
 forkIO_ m = unliftIO forkIO m >> return ()
 
-unliftIO :: (IO b -> IO a) -> SedM b -> SedM a
+unliftIO :: (IO b -> IO a) -> StateT s IO b -> StateT s IO a
 unliftIO f m = do
   state <- get
   liftIO (f (evalStateT m state))
 
--- Read a new input line, then run k if input was available or return ()
--- directly if we've reached EOF.
--- For 'n' (read input and continue execution), k is the next-command
--- continuation. For the end-of-cycle or 'b' (t/T) without target, k is instead
--- runProgram so that it restarts the whole program.
-newCycle i k = do
-    get >>= \state -> debug ("new cycle: -- state = " ++ show state)
-    next i $ do
-        get >>= \state -> debug ("new cycle: => state = " ++ show state)
-        k
-    debug ("new cycle: exiting")
-
-next i k = do
-    state <- get
-    case pattern state of
-        Just t | autoprint state && not (irq state) ->
-            printTo 0 t
-        _ -> return ()
-#if IPC
-    -- if we successfully got an IRQ for last cycle, that means we're already
-    -- running an asynchronous getLine and shouldn't start another.
-    let Mailbox v = box state
-    when (not (irq state)) $
-      forkIO_ (liftIO . putMVar v . Left =<< maybeGetLine i)
-    lineOrEvent <- liftIO $ takeMVar v
-#else
-    lineOrEvent <- Left <$> maybeGetLine i
-#endif
-    debug ("next: " ++ show lineOrEvent)
-    case lineOrEvent of
-      Left Nothing -> return ()
-      Left (Just l) -> do
-            modify $ \state -> state { pattern = Just l, lineNumber = 1 + lineNumber state,
-                        irq = False }
-            k
-      Right l -> do
-            modify $ \state -> state { pattern = Just l, irq = True }
-            k
-
-runBranch l ss = go ss failed
-  where
-    go (s:ss) fail = case s of
-      Sed _ (Label m) | l == m -> runBlock ss (return ())
-      Sed _ (Block ss') -> go ss' (go ss fail)
-      _ -> go ss fail
-    go [] fail = fail
-    failed = fatal ("Label " ++ show l ++ " not found")
-
-runSedString autoprint = runSed autoprint . parseString
-
-runSedFile autoprint f = do
-    pgm <- parseString <$> C.readFile f
-    debugPrint pgm
-    runSed autoprint pgm
+getLineOrEvent :: Int -> StateT (SedState p) IO (Either (Maybe S) S)
+getLineOrEvent i = do
+    state <- gets ipcState
+    case state of
+      Just state -> do
+        let Mailbox v = box state
+        forkIO_ (liftIO . putMVar v . Left =<< maybeGetLine i)
+        liftIO $ takeMVar v
+      Nothing -> do
+        Left <$> maybeGetLine i
 
 data Flag =
     -- Accepted but ignored, since this is already the default.
     ExtendedRegexps
   | Autoprint Bool
+  | EnableIPC Bool
   | Script S
   | ScriptFile FilePath
   -- | Sandbox
@@ -484,6 +386,7 @@ sedOptions =
   , Option ['n'] ["quiet", "silent"] (NoArg (Autoprint False)) "suppress automatic printing of pattern space"
   , Option ['e'] ["expression"] (ReqArg (Script . C.pack) "SCRIPT") "add the script to the commands to be executed"
   , Option ['f'] ["file"] (ReqArg ScriptFile "SCRIPT_FILE") "add the contents of script-file ot the commands to be executed"
+  , Option ['I'] ["no-ipc"] (NoArg (EnableIPC False)) "disable IPC"
   -- Not implemented!
   -- , Option ['s'] ["sandbox"] (NoArg Sandbox) "Disable unsafe commands (WAR"
   ]
@@ -505,8 +408,12 @@ getAutoprint [] def = def
 getAutoprint (Autoprint ap:xs) _ = getAutoprint xs ap
 getAutoprint (_:xs) def = getAutoprint xs def
 
-main = do
-  args <- getArgs
+getIPC [] def = def
+getIPC (EnableIPC b:xs) _ = getIPC xs b
+getIPC (_:xs) def = getIPC xs def
+
+main = do_main =<< getArgs
+do_main args = do
   let (opts,nonOpts,errors) = getOpt Permute sedOptions args
   let usage = usageInfo "Usage: sed [OPTION]... [SCRIPT] [INPUT]..." sedOptions
   when (not (null errors)) $ do
@@ -517,4 +424,5 @@ main = do
   let pgm = parseString (C.unlines scriptLines)
   when (not (null inputs)) $ fatal "Input files not handled yet, only stdin"
   let autoprint = getAutoprint opts True
-  runSed autoprint pgm
+  let ipc = getIPC opts True
+  runSed autoprint ipc pgm
