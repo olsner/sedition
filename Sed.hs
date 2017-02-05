@@ -61,11 +61,7 @@ data SedState program = SedState
   , lineNumber :: Int
   , pattern :: Maybe S
   , hold :: Map S S
-
   , lastRegex :: Maybe RE
-
-  , autoprint :: Bool
-
   , predicates :: Set Int
 
   , ipcState :: Maybe IPCState
@@ -103,7 +99,7 @@ forkIPCState (Just state) = do
   _ <- forkIO (busRider passenger box)
   return $ Just state { passenger = passenger, box = Mailbox box }
 
-initialState autoprint ipc pgm = do
+initialState ipc pgm = do
   ipcState <- if ipc then Just <$> newIPCState else return Nothing
   return SedState {
     program = pgm
@@ -112,7 +108,6 @@ initialState autoprint ipc pgm = do
   , pattern = Nothing
   , hold = M.empty
   , lastRegex = Nothing
-  , autoprint = autoprint
   , predicates = S.empty
   , ipcState = ipcState
   }
@@ -131,16 +126,6 @@ setPred (IR.Pred n) b = modify $ \s -> s { predicates = f (predicates s) }
     f | b = S.insert n
       | otherwise = S.delete n
 getPred (IR.Pred n) = S.member n . predicates <$> get
-
-runSed :: Bool -> Bool -> [Sed] -> IO ()
-runSed autoprint ipc seds = do
-    let program = toIR autoprint seds
-    let program' = optimize program
-    let body@(GMany (JustO e) _ _) = program'
-    debug ("\n\n*** ORIGINAL: \n" ++ show program)
-    debug ("\n\n*** OPTIMIZED: \n" ++ show program')
-    state <- initialState autoprint ipc body
-    evalStateT (runIRBlock e) state
 
 runIRLabel :: H.Label -> SedM ()
 runIRLabel entry = do
@@ -233,7 +218,8 @@ checkRE (RE _ re) = do
     _ -> return False
 
 type SedPM p a = StateT (SedState p) IO a
-type SedM a = SedPM (Graph IR.Insn O C) a
+type Program = Graph IR.Insn O C
+type SedM a = SedPM Program a
 
 doListen i maybeHost port = do
     let hints = defaultHints { addrFlags = [AI_PASSIVE], addrSocketType = Stream }
@@ -375,8 +361,9 @@ data Flag =
   | EnableIPC Bool
   | Script S
   | ScriptFile FilePath
+  | DumpIR
   -- | Sandbox
-  deriving Show
+  deriving (Show,Eq)
 
 sedOptions =
   [ Option ['r', 'E'] ["regexp-extended"] (NoArg ExtendedRegexps) "Use extended regexps (default, always enabled, only parsed for sed compatibility"
@@ -384,6 +371,7 @@ sedOptions =
   , Option ['e'] ["expression"] (ReqArg (Script . C.pack) "SCRIPT") "add the script to the commands to be executed"
   , Option ['f'] ["file"] (ReqArg ScriptFile "SCRIPT_FILE") "add the contents of script-file ot the commands to be executed"
   , Option ['I'] ["no-ipc"] (NoArg (EnableIPC False)) "disable IPC"
+  , Option [] ["dump-ir"] (NoArg DumpIR) "don't run script, just compile and print pre/post-optimization IR"
   -- Not implemented!
   -- , Option ['s'] ["sandbox"] (NoArg Sandbox) "Disable unsafe commands (WAR"
   ]
@@ -409,7 +397,11 @@ getIPC [] def = def
 getIPC (EnableIPC b:xs) _ = getIPC xs b
 getIPC (_:xs) def = getIPC xs def
 
-main = do_main =<< getArgs
+runProgram :: Bool -> Program -> IO ()
+runProgram ipc program@(GMany (JustO e) _ _) = do
+    state <- initialState ipc program
+    evalStateT (runIRBlock e) state
+
 do_main args = do
   let (opts,nonOpts,errors) = getOpt Permute sedOptions args
   let usage = usageInfo "Usage: sed [OPTION]... [SCRIPT] [INPUT]..." sedOptions
@@ -418,8 +410,17 @@ do_main args = do
     exitFailure
 
   (scriptLines,inputs) <- getScript opts (map C.pack nonOpts)
-  let pgm = parseString (C.unlines scriptLines)
+  let seds = parseString (C.unlines scriptLines)
   when (not (null inputs)) $ fatal "Input files not handled yet, only stdin"
   let autoprint = getAutoprint opts True
+  let program = toIR autoprint seds
+  let program' = optimize program
+  let dumpIR = elem DumpIR opts
+  when dumpIR $ do
+      putStrLn ("\n\n*** ORIGINAL: \n" ++ show program)
+      putStrLn ("\n\n*** OPTIMIZED: \n" ++ show program')
+      exitSuccess
   let ipc = getIPC opts True
-  runSed autoprint ipc pgm
+  runProgram ipc program'
+
+main = do_main =<< getArgs
