@@ -361,7 +361,8 @@ data Flag =
   | EnableIPC Bool
   | Script S
   | ScriptFile FilePath
-  | DumpIR
+  | DumpIROpt
+  | DumpIROrg
   -- | Sandbox
   deriving (Show,Eq)
 
@@ -371,7 +372,8 @@ sedOptions =
   , Option ['e'] ["expression"] (ReqArg (Script . C.pack) "SCRIPT") "add the script to the commands to be executed"
   , Option ['f'] ["file"] (ReqArg ScriptFile "SCRIPT_FILE") "add the contents of script-file ot the commands to be executed"
   , Option ['I'] ["no-ipc"] (NoArg (EnableIPC False)) "disable IPC"
-  , Option [] ["dump-ir"] (NoArg DumpIR) "don't run script, just compile and print pre/post-optimization IR"
+  , Option [] ["dump-ir"] (NoArg DumpIROpt) "don't run script, just compile and print post-optimization IR"
+  , Option [] ["dump-ir-pre"] (NoArg DumpIROrg) "don't run script, just compile and print pre-optimization IR"
   -- Not implemented!
   -- , Option ['s'] ["sandbox"] (NoArg Sandbox) "Disable unsafe commands (WAR"
   ]
@@ -415,11 +417,11 @@ do_main args = do
   let autoprint = getAutoprint opts True
   let program = toIR autoprint seds
   let program' = optimize program
-  let dumpIR = elem DumpIR opts
-  when dumpIR $ do
+  when (elem DumpIROrg opts) $
       putStrLn ("\n\n*** ORIGINAL: \n" ++ show program)
+  when (elem DumpIROpt opts) $
       putStrLn ("\n\n*** OPTIMIZED: \n" ++ show program')
-      exitSuccess
+  when (elem DumpIROrg opts || elem DumpIROpt opts) exitSuccess
   let ipc = getIPC opts True
   runProgram ipc program'
 
