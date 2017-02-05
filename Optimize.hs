@@ -16,12 +16,6 @@ import ConstPred (constPredPass)
 import LivePred (livePredPass)
 import RedundantBranches (redundantBranchesPass)
 
--- More passes:
---  dead pred elimination, as Ifs get removed some predicates become unused too
---    and could be removed
---  line number counting
---
-
 --debugBwd = debugBwdJoins trace (const True)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
 
