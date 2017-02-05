@@ -33,10 +33,6 @@ livePredTransfer = mkBTransfer3 first middle last
     -- O O
     middle :: Insn O O -> LivePredFact -> LivePredFact
     middle (Set p _)       f = S.delete p f
-    middle (AtEOF p)       f = S.delete p f
-    middle (Line _ p)      f = S.delete p f
-    middle (Match _ p)     f = S.delete p f
-    middle (MatchLastRE p) f = S.delete p f
 
     middle _insn f = {-trace ("Unhandled instruction " ++ show insn)-} f
 
@@ -48,11 +44,10 @@ livePredTransfer = mkBTransfer3 first middle last
     last (Quit _) _ = S.empty
     -- All predicates are reset in the child, so only the "next"-label needs
     -- to be present in the output fact.
-    last (Fork a b) f = fact f b
+    last (Fork _ b) f = fact f b
 
     fact f l = fromMaybe S.empty (mapLookup l f)
     facts f ls = S.unions (map (fact f) ls)
-    boringFactBase f ls = mkFactBase liveLattice [(l, f) | l <- ls]
 
 livePred :: FuelMonad m => BwdRewrite m Insn LivePredFact
 livePred = mkBRewrite rw

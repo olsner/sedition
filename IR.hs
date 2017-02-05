@@ -20,6 +20,18 @@ import qualified AST
 newtype Pred = Pred Int deriving (Ord,Eq)
 type FD = Int
 
+data Cond
+  = AtEOF
+  | Line Int
+  -- Possible extension: explicit "match" registers to track several precomputed
+  -- matches at once.
+  | Match RE
+  | MatchLastRE
+  | Bool Bool
+  deriving (Show,Eq)
+cTrue = Bool True
+cFalse = Bool False
+
 data Insn e x where
   Label         :: Label                    -> Insn C O
   Branch        :: Label                    -> Insn O C
@@ -30,7 +42,7 @@ data Insn e x where
   -- labels are interrupt, line successfully read, EOF
   Cycle         :: FD -> Label -> Label -> Label -> Insn O C
 
-  Set           :: Pred -> Bool             -> Insn O O
+  Set           :: Pred -> Cond             -> Insn O O
   -- Clear pattern space
   Clear         ::                             Insn O O
   -- for N (which can never accept interrupts)
@@ -45,14 +57,7 @@ data Insn e x where
   Get           :: (Maybe S)                -> Insn O O
   GetA          :: (Maybe S)                -> Insn O O
 
-  -- TODO Change all predicate assignments to something like (Assign pred AtEOF)
-  AtEOF         :: Pred                     -> Insn O O
-  Line          :: Int -> Pred              -> Insn O O
-  -- Possible extension: explicit "match" registers to track several precomputed
-  -- matches at once.
-  Match         :: RE -> Pred               -> Insn O O
   SetLastRE     :: RE                       -> Insn O O
-  MatchLastRE   :: Pred                     -> Insn O O
   -- Subst last match against current pattern. See Match TODO about match regs.
   Subst         :: S -> SubstType           -> Insn O O
 
@@ -200,21 +205,21 @@ tProgram seds = do
   oldNextCycle <- gets nextCycleLabel
 
   modify $ \state -> state { nextCycleLabel = newCycle }
-  emit (Set pPreFirst True)
-  emit (Set pRunNormal False)
+  emit (Set pPreFirst cTrue)
+  emit (Set pRunNormal cFalse)
   emitLabel entry
   -- Actual normal program here
   tSeds seds
 
   emitLabel newCycle
-  emit (Set pRunNormal True)
-  emit (Set pPreFirst False)
-  emit (Set pIntr False)
+  emit (Set pRunNormal cTrue)
+  emit (Set pPreFirst cFalse)
+  emit (Set pIntr cFalse)
   get >>= \s -> when (autoprint s) (emit (Print 0))
   Cycle 0 intr entry exit `thenLabel` intr
 
-  emit (Set pIntr True)
-  emit (Set pRunNormal False)
+  emit (Set pIntr cTrue)
+  emit (Set pRunNormal cFalse)
 
   Branch entry `thenLabel` exit
 
@@ -252,8 +257,8 @@ withCond (Between start end) x = do
 
   let run = emitBranch' t
       skip = emitBranch' f
-      set = emit (Set pActive True)
-      clear = emit (Set pActive False)
+      set = emit (Set pActive cTrue)
+      clear = emit (Set pActive cFalse)
 
   tIf pActive (do comment "between/active"
                   ifCheck end (do comment "between/last"
@@ -270,11 +275,11 @@ withCond (Between start end) x = do
 withNewPred f = newPred >>= \p -> f p >> return p
 
 tCheck (AST.Line 0) = return pPreFirst
-tCheck (AST.Line n) = withNewPred $ \p -> emit (Line n p)
+tCheck (AST.Line n) = withNewPred $ \p -> emit (Set p (Line n))
 tCheck (AST.Match (Just re)) = withNewPred $ \p -> do
-    emit (Match re p)
+    emit (Set p (Match re))
     emit (SetLastRE re)
-tCheck (AST.Match Nothing) = withNewPred $ \p -> emit (MatchLastRE p)
+tCheck (AST.Match Nothing) = withNewPred $ \p -> emit (Set p MatchLastRE)
 tCheck (AST.IRQ) = return pIntr
 tCheck addr = error ("tCheck: Unmatched case " ++ show addr)
 
@@ -283,20 +288,20 @@ tSed (Sed cond@(At (AST.Line 0)) x) = withCond cond $ do
   -- While running a 0-conditional line, also run all normal lines until we
   -- either reach the "fall-through" from that line, or until we start a new
   -- cycle, then reset it back to... its original value, hmm...
-  emit (Set pRunNormal True)
+  emit (Set pRunNormal cTrue)
   tCmd x
   -- FIXME This may need to keep a counter or something rather than just set
   -- to false. Or assign a fresh predicate to push/copy the value into?
-  emit (Set pRunNormal False)
+  emit (Set pRunNormal cFalse)
 tSed (Sed cond@(At AST.IRQ) x) = withCond cond $ do
   -- While running a 0-conditional line, also run all normal lines until we
   -- either reach the "fall-through" from that line, or until we start a new
   -- cycle, then reset it back to... its original value, hmm...
-  emit (Set pRunNormal True)
+  emit (Set pRunNormal cTrue)
   tCmd x
   -- FIXME This may need to keep a counter or something rather than just set
   -- to false. Or assign a fresh predicate to push/copy the value into?
-  emit (Set pRunNormal False)
+  emit (Set pRunNormal cFalse)
 tSed (Sed cond x) = tWhen pRunNormal $ withCond cond $ tCmd x
 
 tCmd (AST.Block xs) = tSeds xs

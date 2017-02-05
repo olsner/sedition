@@ -162,10 +162,12 @@ runIR_debug i = do
 runIR :: IR.Insn e x -> SedM ()
 runIR (IR.Label _) = return ()
 runIR (IR.Branch l) = runIRLabel l
-runIR (IR.Line l p) = do
-  state <- get
-  setPred p (l == lineNumber state)
-runIR (IR.Set p v) = setPred p v
+runIR (IR.Set p cond) = setPred p =<< case cond of
+  IR.Bool b -> return b
+  IR.Line l -> gets ((l ==) . lineNumber)
+  IR.Match re -> checkRE re
+  IR.MatchLastRE -> checkRE . fromJust =<< gets lastRegex
+  IR.AtEOF -> liftIH 0 hIsEOF
 runIR (IR.If p t f) = do
   b <- getPred p
   runIRLabel (if b then t else f)
@@ -184,10 +186,6 @@ runIR (IR.Fork entry next) = do
 runIR (IR.Redirect i j) = redirectFile i j
 runIR (IR.CloseFile i) = closeFile i
 
-runIR (IR.Match re p) = setPred p =<< checkRE re
-runIR (IR.MatchLastRE p) = do
-  Just re <- lastRegex <$> get
-  setPred p =<< checkRE re
 runIR (IR.SetLastRE re) = setLastRegex re
 
 runIR (IR.Subst sub stype) = do
@@ -221,7 +219,6 @@ runIR (IR.Cycle i intr cont eof) = do
           Right s -> (Just s, 0, intr)
     modify $ \state -> state { pattern = pat, lineNumber = lineNumber state + l }
     runIRLabel k
-runIR (IR.AtEOF p) = setPred p =<< liftIH 0 hIsEOF
 runIR (IR.Quit code) = liftIO (exitWith code)
 runIR (IR.Comment s) = debug ("*** " ++ s)
 
