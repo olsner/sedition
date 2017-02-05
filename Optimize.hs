@@ -13,6 +13,7 @@ import qualified Data.Map as M
 import IR
 
 import ConstPred (constPredPass)
+import LivePred (livePredPass)
 import RedundantBranches (redundantBranchesPass)
 
 -- More passes:
@@ -41,6 +42,7 @@ optimizeOnce :: (CheckpointMonad m, FuelMonad m) => Graph Insn O C -> m (Graph I
 optimizeOnce program = do
   (program,_,_) <- analyzeAndRewriteFwdOx constPredPass program M.empty
   (program,_,_) <- analyzeAndRewriteBwdOx redundantBranchesPass program mapEmpty
+  (program,_,_) <- analyzeAndRewriteBwdOx livePredPass program mapEmpty
   return (stripUnused program)
 
 optimize' :: (CheckpointMonad m, FuelMonad m) => Graph Insn O C -> m (Graph Insn O C)

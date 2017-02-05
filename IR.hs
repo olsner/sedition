@@ -45,6 +45,7 @@ data Insn e x where
   Get           :: (Maybe S)                -> Insn O O
   GetA          :: (Maybe S)                -> Insn O O
 
+  -- TODO Change all predicate assignments to something like (Assign pred AtEOF)
   AtEOF         :: Pred                     -> Insn O O
   Line          :: Int -> Pred              -> Insn O O
   -- Possible extension: explicit "match" registers to track several precomputed

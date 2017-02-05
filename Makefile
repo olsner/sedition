@@ -18,7 +18,8 @@ ParserTest: force sed
 runtests: ParserTest
 	./ParserTest
 
-MODULES = Sed Parser AST Bus ParserTest Optimize ConstPred IR RedundantBranches
+MODULES = Sed Parser AST Bus ParserTest IR \
+	Optimize ConstPred RedundantBranches LivePred
 
 clean:
 	rm -f sed Sed ParserTest
