@@ -45,8 +45,12 @@ optimizeOnce program = do
   (program,_,_) <- analyzeAndRewriteBwdOx livePredPass program mapEmpty
   return (stripUnused program)
 
+rep :: Monad m => Int -> (a -> m a) -> (a -> m a)
+rep 0 _ = return
+rep n f = f >=> rep (n-1) f
+
 optimize' :: (CheckpointMonad m, FuelMonad m) => Graph Insn O C -> m (Graph Insn O C)
-optimize' = optimizeOnce >=> optimizeOnce
+optimize' = rep 5 optimizeOnce
 
 runSFM :: Fuel -> SimpleFuelMonad a -> a
 runSFM fuel m = runSimpleUniqueMonad (runWithFuel fuel m)
