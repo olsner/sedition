@@ -49,4 +49,4 @@ optimize' = rep 5 optimizeOnce
 runSFM :: Fuel -> SimpleFuelMonad a -> a
 runSFM fuel m = runSimpleUniqueMonad (runWithFuel fuel m)
 
-optimize p = runSFM 10000000 (optimize' p)
+optimize fuel p = runSFM fuel (optimize' p)

@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, CPP, TypeFamilies #-}
+{-# LANGUAGE OverloadedStrings, CPP, TypeFamilies, NamedFieldPuns, RecordWildCards #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 
 module Main (main) where
@@ -354,50 +354,46 @@ getLineOrEvent i = do
       Nothing -> do
         Left <$> maybeGetLine i
 
-data Flag =
-    -- Accepted but ignored, since this is already the default.
-    ExtendedRegexps
-  | Autoprint Bool
-  | EnableIPC Bool
-  | Script S
-  | ScriptFile FilePath
-  | DumpIROpt
-  | DumpIROrg
-  -- | Sandbox
-  deriving (Show,Eq)
+data Options = Options
+  { extendedRegexps :: Bool
+  , autoprint :: Bool
+  , enableIPC :: Bool
+  , scripts :: [Either S FilePath]
+  , dumpOptimizedIR :: Bool
+  , dumpOriginalIR :: Bool
+  , fuel :: Int
+  } deriving (Show, Eq)
+defaultOptions = Options { extendedRegexps = True, autoprint = True, enableIPC = True, scripts = [], dumpOptimizedIR = False, dumpOriginalIR = False, fuel = 1000000 }
+addScript s o = o { scripts = scripts o ++ [Left (C.pack s)] }
+addScriptFile f o = o { scripts = scripts o ++ [Right f] }
+setFuel f o = o { fuel = f }
 
 sedOptions =
-  [ Option ['r', 'E'] ["regexp-extended"] (NoArg ExtendedRegexps) "Use extended regexps (default, always enabled, only parsed for sed compatibility"
-  , Option ['n'] ["quiet", "silent"] (NoArg (Autoprint False)) "suppress automatic printing of pattern space"
-  , Option ['e'] ["expression"] (ReqArg (Script . C.pack) "SCRIPT") "add the script to the commands to be executed"
-  , Option ['f'] ["file"] (ReqArg ScriptFile "SCRIPT_FILE") "add the contents of script-file ot the commands to be executed"
-  , Option ['I'] ["no-ipc"] (NoArg (EnableIPC False)) "disable IPC"
-  , Option [] ["dump-ir"] (NoArg DumpIROpt) "don't run script, just compile and print post-optimization IR"
-  , Option [] ["dump-ir-pre"] (NoArg DumpIROrg) "don't run script, just compile and print pre-optimization IR"
+  [ Option ['r', 'E'] ["regexp-extended"] (NoArg $ \o -> o { extendedRegexps = True }) "Use extended regexps (default, always enabled, only parsed for sed compatibility"
+  , Option ['n'] ["quiet", "silent"] (NoArg $ \o -> o { autoprint = False }) "suppress automatic printing of pattern space"
+  , Option ['e'] ["expression"] (ReqArg addScript "SCRIPT") "add the script to the commands to be executed"
+  , Option ['f'] ["file"] (ReqArg addScriptFile "SCRIPT_FILE") "add the contents of script-file ot the commands to be executed"
+  , Option ['I'] ["no-ipc"] (NoArg $ \o -> o { enableIPC = False}) "disable IPC"
+  , Option [] ["dump-ir"] (NoArg $ \o -> o { dumpOptimizedIR = True }) "don't run script, just compile and print post-optimization IR"
+  , Option [] ["dump-ir-pre"] (NoArg $ \o -> o { dumpOriginalIR = True }) "don't run script, just compile and print pre-optimization IR"
+  , Option [] ["opt-fuel"] (ReqArg (setFuel . read) "FUEL") "override amount of optimization fuel for optimizations"
   -- Not implemented!
   -- , Option ['s'] ["sandbox"] (NoArg Sandbox) "Disable unsafe commands (WAR"
   ]
 
 -- TODO Include source file/line info here, thread through to the parser...
-flagScript :: Flag -> IO [S]
-flagScript (Script e) = return [e]
-flagScript (ScriptFile f) = C.lines <$> C.readFile f
-flagScript _ = return []
+flagScript :: Options -> IO [S]
+flagScript Options { scripts = ss } = concat <$> mapM f ss
+  where
+    f (Left e) = return [e]
+    f (Right f) = C.lines <$> C.readFile f
 
-getScript :: [Flag] -> [S] -> IO ([S], [S])
-getScript flags inputs = do
-  scripts <- concat <$> mapM flagScript flags
-  if null scripts
-    then return ([head inputs], tail inputs)
-    else return (scripts, inputs)
-
-getAutoprint [] def = def
-getAutoprint (Autoprint ap:xs) _ = getAutoprint xs ap
-getAutoprint (_:xs) def = getAutoprint xs def
-
-getIPC [] def = def
-getIPC (EnableIPC b:xs) _ = getIPC xs b
-getIPC (_:xs) def = getIPC xs def
+getScript :: Options -> [S] -> IO ([S], [S])
+getScript options inputs = case scripts options of
+  [] -> return ([head inputs], tail inputs)
+  _ -> do
+    ss <- flagScript options
+    return (ss, inputs)
 
 runProgram :: Bool -> Program -> IO ()
 runProgram ipc program@(GMany (JustO e) _ _) = do
@@ -405,24 +401,23 @@ runProgram ipc program@(GMany (JustO e) _ _) = do
     evalStateT (runIRBlock e) state
 
 do_main args = do
-  let (opts,nonOpts,errors) = getOpt Permute sedOptions args
+  let (optFuns,nonOpts,errors) = getOpt Permute sedOptions args
   let usage = usageInfo "Usage: sed [OPTION]... [SCRIPT] [INPUT]..." sedOptions
   when (not (null errors)) $ do
     mapM_ putStrLn (errors ++ [usage])
     exitFailure
+  let opts@Options {..} = foldl (.) id optFuns defaultOptions
 
   (scriptLines,inputs) <- getScript opts (map C.pack nonOpts)
   let seds = parseString (C.unlines scriptLines)
   when (not (null inputs)) $ fatal "Input files not handled yet, only stdin"
-  let autoprint = getAutoprint opts True
   let program = toIR autoprint seds
-  let program' = optimize program
-  when (elem DumpIROrg opts) $
+  let program' = optimize fuel program
+  when (dumpOriginalIR) $
       putStrLn ("\n\n*** ORIGINAL: \n" ++ show program)
-  when (elem DumpIROpt opts) $
+  when (dumpOptimizedIR) $
       putStrLn ("\n\n*** OPTIMIZED: \n" ++ show program')
-  when (elem DumpIROrg opts || elem DumpIROpt opts) exitSuccess
-  let ipc = getIPC opts True
-  runProgram ipc program'
+  when (dumpOptimizedIR || dumpOriginalIR) exitSuccess
+  runProgram enableIPC program'
 
 main = do_main =<< getArgs
