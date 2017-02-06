@@ -36,7 +36,7 @@ optimizeOnce :: (CheckpointMonad m, FuelMonad m) => Graph Insn O C -> m (Graph I
 optimizeOnce program = do
   (program,_,_) <- analyzeAndRewriteFwdOx constPredPass program M.empty
   (program,_,_) <- analyzeAndRewriteBwdOx redundantBranchesPass program mapEmpty
-  (program,_,_) <- analyzeAndRewriteBwdOx livePredPass program mapEmpty
+  --(program,_,_) <- analyzeAndRewriteBwdOx livePredPass program mapEmpty
   return (stripUnused program)
 
 rep :: Monad m => Int -> (a -> m a) -> (a -> m a)
