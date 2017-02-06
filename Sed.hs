@@ -412,11 +412,11 @@ do_main args = do
   let seds = parseString (C.unlines scriptLines)
   when (not (null inputs)) $ fatal "Input files not handled yet, only stdin"
   let program = toIR autoprint seds
-  let program' = optimize fuel program
   when (dumpOriginalIR) $
-      putStrLn ("\n\n*** ORIGINAL: \n" ++ show program)
+      hPutStrLn stderr ("\n\n*** ORIGINAL: \n" ++ show program)
+  let program' = optimize fuel program
   when (dumpOptimizedIR) $
-      putStrLn ("\n\n*** OPTIMIZED: \n" ++ show program')
+      hPutStrLn stderr ("\n\n*** OPTIMIZED: \n" ++ show program')
   when (dumpOptimizedIR || dumpOriginalIR) exitSuccess
   runProgram enableIPC program'
 
