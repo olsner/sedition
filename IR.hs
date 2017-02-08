@@ -199,12 +199,14 @@ toIR autoprint seds = program (execState (tProgram seds) (startState autoprint))
 tProgram seds = do
   entry <- newLabel
   newCycle <- newLabel
+  line <- newLabel
   intr <- newLabel
   exit <- newLabel
 
   oldNextCycle <- gets nextCycleLabel
 
   modify $ \state -> state { nextCycleLabel = newCycle }
+  emit (Set pIntr cFalse)
   emit (Set pPreFirst cTrue)
   emit (Set pRunNormal cFalse)
   emitLabel entry
@@ -212,13 +214,17 @@ tProgram seds = do
   tSeds seds
 
   emitLabel newCycle
-  emit (Set pRunNormal cTrue)
-  emit (Set pPreFirst cFalse)
-  emit (Set pIntr cFalse)
   get >>= \s -> when (autoprint s) (emit (Print 0))
-  Cycle 0 intr entry exit `thenLabel` intr
+  Cycle 0 intr line exit `thenLabel` line
+
+  emit (Set pIntr cFalse)
+  emit (Set pPreFirst cFalse)
+  emit (Set pRunNormal cTrue)
+
+  Branch entry `thenLabel` intr
 
   emit (Set pIntr cTrue)
+  emit (Set pPreFirst cFalse)
   emit (Set pRunNormal cFalse)
 
   Branch entry `thenLabel` exit
@@ -294,13 +300,9 @@ tSed (Sed cond@(At (AST.Line 0)) x) = withCond cond $ do
   -- to false. Or assign a fresh predicate to push/copy the value into?
   emit (Set pRunNormal cFalse)
 tSed (Sed cond@(At AST.IRQ) x) = withCond cond $ do
-  -- While running a 0-conditional line, also run all normal lines until we
-  -- either reach the "fall-through" from that line, or until we start a new
-  -- cycle, then reset it back to... its original value, hmm...
+  -- See comment/fixme for saving/restrogin pRunNormal above
   emit (Set pRunNormal cTrue)
   tCmd x
-  -- FIXME This may need to keep a counter or something rather than just set
-  -- to false. Or assign a fresh predicate to push/copy the value into?
   emit (Set pRunNormal cFalse)
 tSed (Sed cond x) = tWhen pRunNormal $ withCond cond $ tCmd x
 
