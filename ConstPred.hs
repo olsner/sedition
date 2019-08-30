@@ -31,9 +31,7 @@ constPredTransfer = mkFTransfer3 first middle last
     -- O O
     middle :: Insn O O -> ConstPredFact -> ConstPredFact
     middle (Set p (Bool x)) f = M.insert p (PElem x) f
-    -- Or should this be M.insert p Top since we know the value is
-    -- indeterminate?
-    middle (Set p _)        f = M.delete p f
+    middle (Set p _)        f = M.insert p Top f
 
     middle _insn f = {-trace ("Unhandled instruction " ++ show insn)-} f
 
@@ -51,7 +49,7 @@ constPredTransfer = mkFTransfer3 first middle last
     boringFactBase f ls = mkFactBase constLattice [(l, f) | l <- ls]
 
 constPred :: FuelMonad m => FwdRewrite m Insn ConstPredFact
-constPred = mkFRewrite rw
+constPred = deepFwdRw rw
   where
     rw :: FuelMonad m => Insn e x -> ConstPredFact -> m (Maybe (Graph Insn e x))
     rw (If p tl fl) f =
@@ -65,6 +63,6 @@ constPredPass :: FuelMonad m => FwdPass m Insn ConstPredFact
 constPredPass = FwdPass
   { fp_lattice = constLattice
   , fp_transfer = constPredTransfer
-  , fp_rewrite = constPred {- `thenFwdRw` simplify -} }
+  , fp_rewrite = constPred }
 
 
