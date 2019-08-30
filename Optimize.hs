@@ -2,7 +2,7 @@
 
 module Optimize (optimize) where
 
-import Compiler.Hoopl as H
+import Compiler.Hoopl as H hiding ((<*>))
 
 import Control.Monad
 
@@ -46,7 +46,7 @@ rep n f = f >=> rep (n-1) f
 optimize' :: (CheckpointMonad m, FuelMonad m) => Graph Insn O C -> m (Graph Insn O C)
 optimize' = rep 5 optimizeOnce
 
-runSFM :: Fuel -> SimpleFuelMonad a -> a
-runSFM fuel m = runSimpleUniqueMonad (runWithFuel fuel m)
+runSFM :: Fuel -> SimpleFuelMonad a -> (a, Fuel)
+runSFM fuel m = runSimpleUniqueMonad (runWithFuel fuel ((,) <$> m <*> fuelRemaining))
 
 optimize fuel p = runSFM fuel (optimize' p)

@@ -414,9 +414,12 @@ do_main args = do
   let program = toIR autoprint seds
   when (dumpOriginalIR) $
       hPutStrLn stderr ("\n\n*** ORIGINAL: \n" ++ show program)
-  let program' = optimize fuel program
-  when (dumpOptimizedIR) $
-      hPutStrLn stderr ("\n\n*** OPTIMIZED: \n" ++ show program')
+  let (program', remainingFuel) = optimize fuel program
+  when (dumpOptimizedIR) $ do
+      hPutStr stderr "\n\n*** OPTIMIZED: \n"
+      hPutStrLn stderr (show program')
+      hPutStrLn stderr ("Remaining fuel: " ++ show remainingFuel)
+      hPutStrLn stderr ("Used fuel: " ++ show (fuel - remainingFuel))
   when (dumpOptimizedIR || dumpOriginalIR) exitSuccess
   runProgram enableIPC program'
 
