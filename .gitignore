@@ -1,5 +1,4 @@
 /sed
 /ParserTest
-/*.hi
-/*.o
+/out/
 /README.html
