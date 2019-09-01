@@ -1,8 +1,8 @@
 N = 12
 
-OBJDIR = out
+OUTDIR = out
 WARNINGS = -Widentities -Wcompat -Wall -Wno-name-shadowing -Wno-missing-signatures
-GHCFLAGS = -j$(N) -odir $(OBJDIR) -hidir $(OBJDIR) -O2 -threaded -rtsopts $(WARNINGS)
+GHCFLAGS = -j$(N) -odir $(OUTDIR) -hidir $(OUTDIR) -O2 -threaded -rtsopts $(WARNINGS)
 GHC ?= ghc
 
 all: sed runtests README.html
@@ -11,13 +11,18 @@ all: sed runtests README.html
 	markdown $< >$@
 
 sed: Sed.hs force
-	@mkdir -p $(OBJDIR)
+	@mkdir -p $(OUTDIR)
+# Work around for GHC always compiling the main module into Main.hi/o
+	@ln -sf Sed.hi $(OUTDIR)/Main.hi
+	@ln -sf Sed.o  $(OUTDIR)/Main.o
 	$(GHC) $(GHCFLAGS) --make -o $@ $<
 
 # Compiles after 'sed' because they're sharing modules.
 ParserTest: force sed
-	@mkdir -p $(OBJDIR)
-	$(GHC) $(GHCFLAGS) --make -threaded -rtsopts $@
+	@mkdir -p $(OUTDIR)
+	@ln -sf ParserTest.hi $(OUTDIR)/Main.hi
+	@ln -sf ParserTest.o  $(OUTDIR)/Main.o
+	$(GHC) $(GHCFLAGS) --make $@
 
 runtests: ParserTest
 	./ParserTest
