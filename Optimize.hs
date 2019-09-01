@@ -33,7 +33,9 @@ optToFix f original = do
   optimized <- f original
   newFuel <- fuelRemaining
   --trace ("optToFix: " ++ show (oldFuel - newFuel) ++ " fuel consumed") $ return ()
-  if oldFuel == newFuel
+  -- Ugly workaround, but compare the optimized text program to see if optimization changed something.
+  -- Looks like we have optimizations that toggle and consume fuel to produce the same output.
+  if oldFuel == newFuel || show original == show optimized
     then return optimized
     else optToFix f optimized
 
