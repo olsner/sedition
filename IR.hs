@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving, CPP #-}
+{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving, CPP, RecursiveDo #-}
 
 #define DEBUG 0
 
@@ -130,20 +130,22 @@ getLabelMapping name = do
   res <- M.lookup name . sourceLabels <$> get
   case res of
     Just l -> return l
-    Nothing -> do
-      l <- newLabel
-      addLabelMapping name l
-      return l
+    Nothing -> withNewLabel (addLabelMapping name)
 
 emitOCO :: Insn O C -> Insn C O -> IRM ()
 emitOCO last first =
     modify $ \s -> s { program = program s H.<*> mkLast last |*><*| mkFirst first }
 
+-- This system of "splitting" the current block and starting a new block with a
+-- label is pretty ugly, it would probalby be neater to emit whole blocks (for
+-- most cases), e.g. label <- somethingEmitsWholeBlock to get a label to refer
+-- to and then emit an (If p trueBlock falseBlock).
 thenLabel :: Insn O C -> Label -> IRM ()
 thenLabel last next = emitOCO last (Label next)
 
 finishBlock = thenLabel
-finishBlock' b = newLabel >>= finishBlock b
+finishBlock' :: Insn O C -> IRM Label
+finishBlock' b = withNewLabel (finishBlock b)
 
 emit :: Insn O O -> IRM ()
 emit insn =
@@ -156,29 +158,35 @@ comment s = emit (Comment s)
 comment _ = return ()
 #endif
 
-emitBranch' l = newLabel >>= emitBranch l
+withNewLabel :: (Label -> IRM a) -> IRM Label
+withNewLabel x = do
+    next <- newLabel
+    x next
+    return next
+
 emitBranch l next = Branch l `thenLabel` next
-branchNextCycle = emitBranch' =<< nextCycleLabel <$> get
+emitBranch' :: Label -> IRM Label
+emitBranch' l = withNewLabel (emitBranch l)
+branchNextCycle = () <$ (emitBranch' =<< gets nextCycleLabel)
 
 emitLabel l = Branch l `thenLabel` l
+-- likely to require mdo unless the first use is afterwards
+label :: IRM Label
+label = withNewLabel emitLabel
 
 printIfAuto = do
     ap <- autoprint <$> get
     when ap (emit (Print 0))
 
--- emitIf branch th el = graphFromAGraph (mkIfThenElse branch th el)
-
-tIf p tx fx = do
-    f <- newLabel
-    t <- newLabel
-    e <- newLabel
-    finishBlock (If p t f) t
+tIf :: Pred -> IRM a -> IRM b -> IRM ()
+tIf p tx fx = mdo
+    t <- finishBlock' (If p t f)
     comment "tIf/true"
     tx
-    emitBranch e f
+    f <- emitBranch' e
     comment "tIf/false"
     fx
-    emitLabel e
+    e <- label
     comment "tIf/end"
 
 ifCheck c tx fx = do
@@ -200,13 +208,7 @@ toIR autoprint seds = evalState go (startState autoprint)
 -- * pre-first line code (if any)
 -- * interrupt reception (for new-cycle code)
 -- * new cycle label
-tProgram seds = do
-  start <- newLabel
-  newCycle <- newLabel
-  line <- newLabel
-  intr <- newLabel
-  exit <- newLabel
-
+tProgram seds = mdo
   oldNextCycle <- gets nextCycleLabel
 
   modify $ \state -> state { nextCycleLabel = newCycle }
@@ -215,57 +217,51 @@ tProgram seds = do
   emit (Set pPreFirst cTrue)
   emit (Set pRunNormal cFalse)
 
-  emitLabel start
+  start <- label
   -- Actual normal program here
   tSeds seds
 
-  emitLabel newCycle
+  newCycle <- label
   get >>= \s -> when (autoprint s) (emit (Print 0))
-  Cycle 0 intr line exit `thenLabel` line
+  line <- finishBlock' (Cycle 0 intr line exit)
 
   emit (Set pIntr cFalse)
   emit (Set pPreFirst cFalse)
   emit (Set pRunNormal cTrue)
 
-  Branch start `thenLabel` intr
+  intr <- emitBranch' start
 
   emit (Set pIntr cTrue)
   emit (Set pPreFirst cFalse)
   emit (Set pRunNormal cFalse)
 
-  Branch start `thenLabel` exit
+  exit <- emitBranch' start
 
   modify $ \state -> state { nextCycleLabel = oldNextCycle }
 
 tSeds = mapM_ tSed
 
-tWhenNot :: Pred -> IRM () -> IRM ()
-tWhenNot p x = do
-  t <- newLabel
-  f <- newLabel
-  If p t f `thenLabel` f
+tWhenNot p x = mdo
+  f <- finishBlock' (If p t f)
   x
-  emitLabel t
+  t <- label
+  return ()
 
-tWhen p x = do
-  t <- newLabel
-  f <- newLabel
-  If p t f `thenLabel` t
-  x
-  emitLabel f
+tWhen p x = mdo
+  t <- finishBlock' (If p t f)
+  res <- x
+  f <- label
+  return res
 
 withCond Always x = x
-withCond (At c) x = do
-  f <- newLabel
-  t <- newLabel
+withCond (At c) x = mdo
   p <- tCheck c
-  finishBlock (If p t f) t
-  x
-  emitLabel f
-withCond (Between start end) x = do
+  t <- finishBlock' (If p t f)
+  res <- x
+  f <- label
+  return res
+withCond (Between start end) x = mdo
   pActive <- newPred
-  f <- newLabel
-  t <- newLabel
 
   let run = emitBranch' t
       skip = emitBranch' f
@@ -279,10 +275,11 @@ withCond (Between start end) x = do
               (do comment "between/inactive"
                   ifCheck start (comment "between/first" >> set >> run) skip)
 
-  emitLabel t
-  x
+  t <- label
+  res <- x
   comment "between/end of code"
-  emitLabel f
+  f <- label
+  return res
 
 withNewPred f = newPred >>= \p -> f p >> return p
 
@@ -295,6 +292,7 @@ tCheck (AST.Match Nothing) = withNewPred $ \p -> emit (Set p MatchLastRE)
 tCheck (AST.IRQ) = return pIntr
 tCheck addr = error ("tCheck: Unmatched case " ++ show addr)
 
+tSed :: Sed -> IRM ()
 tSed (Sed Always (AST.Block xs)) = tSeds xs
 tSed (Sed cond@(At (AST.Line 0)) x) = withCond cond $ do
   -- While running a 0-conditional line, also run all normal lines until we
@@ -312,6 +310,7 @@ tSed (Sed cond@(At AST.IRQ) x) = withCond cond $ do
   emit (Set pRunNormal cFalse)
 tSed (Sed cond x) = tWhen pRunNormal $ withCond cond $ tCmd x
 
+tCmd :: AST.Cmd -> IRM ()
 tCmd (AST.Block xs) = tSeds xs
 tCmd (AST.Print fd) = emit (Print fd)
 tCmd (AST.Message m) = emit (Message m)
@@ -329,19 +328,18 @@ tCmd (AST.Label name) = do
 tCmd (AST.Branch (Just name)) = do
   comment ("branch " ++ show name)
   emitBranch' =<< getLabelMapping name
+  return ()
 tCmd (AST.Branch Nothing) = branchNextCycle
-tCmd (AST.Fork sed) = do
-  exit <- newLabel
-  entry <- newLabel
-
-  Fork entry exit `thenLabel` entry
+tCmd (AST.Fork sed) = mdo
+  entry <- finishBlock' (Fork entry exit)
 
   oldNextCycle <- nextCycleLabel <$> get
   tProgram [sed]
   modify $ \state -> state { nextCycleLabel = oldNextCycle }
 
   -- End of thread (quit)
-  Quit ExitSuccess `thenLabel` exit
+  exit <- finishBlock' (Quit ExitSuccess)
+  return ()
 
 tCmd (AST.Delete) = branchNextCycle
 tCmd (AST.Clear) = emit Clear
@@ -356,7 +354,7 @@ tCmd (AST.GetA maybeReg) = emit (GetA maybeReg)
 tCmd (AST.Insert s) = emit (PrintS 0 s)
 -- TODO append ('a'/'A') needs to save data to be printed at the start of the
 -- next cycle (or the end of this one).
-tCmd (AST.Quit print status) = do
+tCmd (AST.Quit print status) = () <$ do
   when print $ emit (Print 0)
   finishBlock' (Quit status)
 tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
