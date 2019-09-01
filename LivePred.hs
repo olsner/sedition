@@ -7,9 +7,12 @@ import Compiler.Hoopl as H
 import Data.Maybe
 import Data.Set (Set)
 import qualified Data.Set as S
---import Debug.Trace
+import Debug.Trace
 
 import IR
+
+trace_ = trace
+--trace_ = flip const
 
 type LivePredFact = Set Pred
 liveLattice :: DataflowLattice LivePredFact
@@ -17,43 +20,45 @@ liveLattice = DataflowLattice
  { fact_name = "Live predicate"
  , fact_bot  = S.empty
  , fact_join = add }
- where add _ (OldFact old) (NewFact new) = (ch, j)
+ where add _ (OldFact old) (NewFact new) = (ch', j)
             where
               j = new `S.union` old
               ch = changeIf (S.size j > S.size old)
+              ch' | SomeChange <- ch = trace_ ("Added " ++ show new ++ " to " ++ show old) ch
+                  | otherwise        = ch
 
+
+kill :: Insn e x -> LivePredFact -> LivePredFact
+kill (Set p _) f = S.delete p f
+kill _         f = f
+
+gen :: Insn e x -> LivePredFact -> LivePredFact
+gen (If p _ _) f = S.insert p f
+gen _          f = f
 
 livePredTransfer :: BwdTransfer Insn LivePredFact
 livePredTransfer = mkBTransfer3 first middle last
   where
     first :: Insn C O -> LivePredFact -> LivePredFact
-    -- C O
     first (Label _)  f = f
-
-    -- O O
     middle :: Insn O O -> LivePredFact -> LivePredFact
-    middle (Set p _)       f = S.delete p f
-
-    middle _insn f = {-trace ("Unhandled instruction " ++ show insn)-} f
-
-    -- O C
+    middle insn = kill insn . gen insn
     last :: Insn O C -> FactBase LivePredFact -> LivePredFact
-    last (Branch l) f = fact f l
-    last (If p tl fl) f = S.insert p (facts f [fl,tl])
-    last (Cycle _ intr read eof) f = facts f [intr,read,eof]
-    last (Quit _) _ = S.empty
-    -- All predicates are reset in the child, so only the "next"-label needs
-    -- to be present in the output fact.
-    last (Fork _ b) f = fact f b
+    last insn = kill insn . gen insn . facts (successors insn)
 
-    fact f l = fromMaybe S.empty (mapLookup l f)
-    facts f ls = S.unions (map (fact f) ls)
+    -- TODO This might be the issue: S.empty is not the same as "we don't know about those labels yet"
+    -- Terminal nodes like Quit are handled by successors being empty, producing an empty set, that
+    -- should be where we "create" knowledge
+    fact f l = fromMaybe (trace ("Empty map for " ++ show l) S.empty) (mapLookup l f)
+    facts ls f = S.unions (map (fact f) ls)
 
 livePred :: FuelMonad m => BwdRewrite m Insn LivePredFact
 livePred = mkBRewrite rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x LivePredFact -> m (Maybe (Graph Insn e x))
-    rw (Set p _) f | not (S.member p f) = return $ Just emptyGraph
+    rw insn@(Set p _) f | not (S.member p f) =
+        trace_ ("Stripping dead store " ++ show insn ++ " live: " ++ show (S.toList f)) $
+            return (Just emptyGraph)
     rw _ _ = return Nothing
 
 livePredPass :: FuelMonad m => BwdPass m Insn LivePredFact
