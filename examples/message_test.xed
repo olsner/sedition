@@ -9,4 +9,6 @@
     }
     m Started!
 }
+# This only works after a client has connected
+/q/ q
 m
