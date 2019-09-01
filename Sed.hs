@@ -17,10 +17,9 @@ import qualified Data.ByteString.Char8 as C
 import Data.Char
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Maybe
-import Data.Monoid
-import qualified Data.Set as S
 import Data.Set (Set)
+import qualified Data.Set as S
+import Data.Maybe
 
 import Network.Socket
 
@@ -218,7 +217,7 @@ checkRE (RE _ re) = do
     _ -> return False
 
 type SedPM p a = StateT (SedState p) IO a
-type Program = Graph IR.Insn O C
+type Program = Graph IR.Insn C C
 type SedM a = SedPM Program a
 
 doListen i maybeHost port = do
@@ -395,10 +394,10 @@ getScript options inputs = case scripts options of
     ss <- flagScript options
     return (ss, inputs)
 
-runProgram :: Bool -> Program -> IO ()
-runProgram ipc program@(GMany (JustO e) _ _) = do
+runProgram :: Bool -> (H.Label, Program) -> IO ()
+runProgram ipc (label, program) = do
     state <- initialState ipc program
-    evalStateT (runIRBlock e) state
+    evalStateT (runIRLabel label) state
 
 do_main args = do
   let (optFuns,nonOpts,errors) = getOpt Permute sedOptions args
@@ -421,6 +420,6 @@ do_main args = do
       hPutStrLn stderr ("Remaining fuel: " ++ show remainingFuel)
       hPutStrLn stderr ("Used fuel: " ++ show (fuel - remainingFuel))
   when (dumpOptimizedIR || dumpOriginalIR) exitSuccess
-  runProgram enableIPC program'
+  runProgram enableIPC (fst program,program')
 
 main = do_main =<< getArgs

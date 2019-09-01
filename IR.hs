@@ -187,17 +187,21 @@ ifCheck c tx fx = do
 
 type IRM = State IRState
 
-toIR :: Bool -> [Sed] -> Graph Insn O C
-toIR autoprint seds = program (execState (tProgram seds) (startState autoprint)) H.<*> mkLast (Quit ExitSuccess)
+toIR :: Bool -> [Sed] -> (Label, Graph Insn C C)
+toIR autoprint seds = evalState go (startState autoprint)
+  where
+   go = do
+    entry <- newLabel
+    tProgram seds
+    outState <- get
+    return (entry, mkFirst (Label entry) H.<*> program outState H.<*> mkLast (Quit ExitSuccess))
 
--- Returns the entry-point label (pre-first line) of the sed program.
---
 -- Entry points to generate:
 -- * pre-first line code (if any)
 -- * interrupt reception (for new-cycle code)
 -- * new cycle label
 tProgram seds = do
-  entry <- newLabel
+  start <- newLabel
   newCycle <- newLabel
   line <- newLabel
   intr <- newLabel
@@ -206,10 +210,12 @@ tProgram seds = do
   oldNextCycle <- gets nextCycleLabel
 
   modify $ \state -> state { nextCycleLabel = newCycle }
+
   emit (Set pIntr cFalse)
   emit (Set pPreFirst cTrue)
   emit (Set pRunNormal cFalse)
-  emitLabel entry
+
+  emitLabel start
   -- Actual normal program here
   tSeds seds
 
@@ -221,13 +227,13 @@ tProgram seds = do
   emit (Set pPreFirst cFalse)
   emit (Set pRunNormal cTrue)
 
-  Branch entry `thenLabel` intr
+  Branch start `thenLabel` intr
 
   emit (Set pIntr cTrue)
   emit (Set pPreFirst cFalse)
   emit (Set pRunNormal cFalse)
 
-  Branch entry `thenLabel` exit
+  Branch start `thenLabel` exit
 
   modify $ \state -> state { nextCycleLabel = oldNextCycle }
 

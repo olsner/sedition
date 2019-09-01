@@ -7,7 +7,7 @@ import Compiler.Hoopl as H hiding ((<*>))
 import Control.Monad
 
 --import Data.Map (Map)
-import qualified Data.Map as M
+--import qualified Data.Map as M
 --import Debug.Trace
 
 import IR
@@ -18,33 +18,22 @@ import RedundantBranches (redundantBranchesPass)
 
 --debugBwd = debugBwdJoins trace (const True)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
+--debugBwd = id
 
-stripUnused :: Graph Insn e x -> Graph Insn e x
-stripUnused g = deleteLabels g (labelsDefined g `setDifference` labelsUsed g)
-
-deleteLabels :: Graph Insn e x -> LabelSet -> Graph Insn e x
-deleteLabels g ls = case g of
-    GNil -> g
-    GUnit {} -> g
-    GMany e body f -> GMany e body' f
-      where
-        body' = mapDeleteList (setElems ls) body
-
--- Since redundantBranches may produce more opportunities for const predicates
--- (and vice versa), run this at least twice. (Could run to fixpoint instead?)
-optimizeOnce :: (CheckpointMonad m, FuelMonad m) => Graph Insn O C -> m (Graph Insn O C)
-optimizeOnce program = do
-  (program,_,_) <- analyzeAndRewriteFwdOx constPredPass program M.empty
-  (program,_,_) <- analyzeAndRewriteBwdOx redundantBranchesPass program mapEmpty
-  --(program,_,_) <- analyzeAndRewriteBwdOx livePredPass program mapEmpty
-  return (stripUnused program)
+optimizeOnce :: (CheckpointMonad m, FuelMonad m) => Label -> Graph Insn C C -> m (Graph Insn C C)
+optimizeOnce entry program = do
+  let entries = JustC [entry]
+  (program,_,_) <- analyzeAndRewriteBwd livePredPass entries program mapEmpty
+  (program,_,_) <- analyzeAndRewriteFwd constPredPass entries program mapEmpty
+  (program,_,_) <- analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
+  return program
 
 rep :: Monad m => Int -> (a -> m a) -> (a -> m a)
 rep 0 _ = return
 rep n f = f >=> rep (n-1) f
 
-optimize' :: (CheckpointMonad m, FuelMonad m) => Graph Insn O C -> m (Graph Insn O C)
-optimize' = rep 5 optimizeOnce
+optimize' :: (CheckpointMonad m, FuelMonad m) => (Label, Graph Insn C C) -> m (Graph Insn C C)
+optimize' (entry, program) = rep 5 (optimizeOnce entry) program
 
 runSFM :: Fuel -> SimpleFuelMonad a -> (a, Fuel)
 runSFM fuel m = runSimpleUniqueMonad (runWithFuel fuel ((,) <$> m <*> fuelRemaining))
