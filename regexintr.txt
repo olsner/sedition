@@ -1,7 +1,7 @@
 REGEX INTERRUPTS
 
-This is a way for threads in a xed program to communicate between each other
-without adding too un-seddy commands or capabilities.
+This is a way for threads in a sedition program to communicate between each
+other without adding too un-seddy commands or capabilities.
 
 There's a shared "message bus" that receives strings. Each string is sent to
 every running thread, and then run through one cycle.

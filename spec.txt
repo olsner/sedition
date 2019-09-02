@@ -130,7 +130,7 @@ X [reg]             indirect load: load register (reg) into reg
                     e.g. if hold space has "foo", "X" without register replaces
                     hold space with value of foo.
 
-POSIX: (+ xed reg/ifd/ofd arguments)
+POSIX: (+ sedition reg/ifd/ofd arguments)
 Addresses:
 //              regexp
 \%%             regexp with custom delim

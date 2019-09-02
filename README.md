@@ -80,12 +80,16 @@ here.
 
 ### I/O commands
 
-Extending GNU sed, xed supports multiple files to be opened and used. This is
-primarily useful for networking, to replace stdin/stdout with a socket, but
+Extending GNU sed, sedition supports multiple files to be opened and used. This
+is primarily useful for networking, replacing stdin/stdout with a socket, but
 may eventually be used with files as well.
 
 Files are identified by an arbitrary integer assigned by the program. In
 command descriptions, these are usually called `fd`.
+
+Unlike your traditional stdin/stdout file descriptors, all file descriptors are
+bidirectional and the initial state, `0` refers to both stdin and stdout
+depending on the direction of I/O. This neatly maps to sockets.
 
 * `< fd1 [fd2]`
 
