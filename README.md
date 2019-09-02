@@ -137,6 +137,17 @@ command descriptions, these are usually called `fd`.
   the forked program usually starts by redirecting a socket to fd 0 and using
   that as the standard input.
 
+  If the command is a block, reaching the end of the block will start a new
+  cycle of input from that thread's file descriptor 0, restarting at the start
+  of the block rather than the beginning of the program.
+
+  Jumps out of the block should lead to a jump back into the block, but
+  interesting effects can be achieved by not doing that. For example, reaching
+  the end of another thread's block will restart processing at the beginning of
+  *that* block instead of the one that started the thread. Likewise, reaching
+  the end of the program will restart processing at the start of the whole
+  program, not at the start of the thread's block.
+
 * `m [message]`
 
   Broadcast `message` as an IPC message to all running threads. The next cycle
