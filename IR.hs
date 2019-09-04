@@ -161,7 +161,7 @@ comment _ = return ()
 withNewLabel :: (Label -> IRM a) -> IRM Label
 withNewLabel x = do
     next <- newLabel
-    x next
+    _ <- x next
     return next
 
 emitBranch l next = Branch l `thenLabel` next
@@ -182,10 +182,10 @@ tIf :: Pred -> IRM a -> IRM b -> IRM ()
 tIf p tx fx = mdo
     t <- finishBlock' (If p t f)
     comment "tIf/true"
-    tx
+    _ <- tx
     f <- emitBranch' e
     comment "tIf/false"
-    fx
+    _ <- fx
     e <- label
     comment "tIf/end"
 
@@ -243,9 +243,9 @@ tSeds = mapM_ tSed
 
 tWhenNot p x = mdo
   f <- finishBlock' (If p t f)
-  x
+  r <- x
   t <- label
-  return ()
+  return r
 
 tWhen p x = mdo
   t <- finishBlock' (If p t f)
@@ -290,7 +290,7 @@ tCheck (AST.Match (Just re)) = withNewPred $ \p -> do
     emit (SetLastRE re)
 tCheck (AST.Match Nothing) = withNewPred $ \p -> emit (Set p MatchLastRE)
 tCheck (AST.IRQ) = return pIntr
-tCheck addr = error ("tCheck: Unmatched case " ++ show addr)
+tCheck (AST.EOF) = withNewPred $ \p -> emit (Set p AtEOF)
 
 tSed :: Sed -> IRM ()
 tSed (Sed Always (AST.Block xs)) = tSeds xs
@@ -327,7 +327,7 @@ tCmd (AST.Label name) = do
   comment ("at label " ++ show name)
 tCmd (AST.Branch (Just name)) = do
   comment ("branch " ++ show name)
-  emitBranch' =<< getLabelMapping name
+  _ <- emitBranch' =<< getLabelMapping name
   return ()
 tCmd (AST.Branch Nothing) = branchNextCycle
 tCmd (AST.Fork sed) = mdo
