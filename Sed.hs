@@ -399,8 +399,8 @@ data Options = Options
   , fuel :: Int
   } deriving (Show, Eq)
 defaultOptions = Options { extendedRegexps = True, autoprint = True, enableIPC = True, scripts = [], dumpOptimizedIR = False, dumpOriginalIR = False, fuel = 1000000 }
-addScript s o = o { scripts = scripts o ++ [Left (C.pack s)] }
-addScriptFile f o = o { scripts = scripts o ++ [Right f] }
+addScript s o = o { scripts = Left (C.pack s) : scripts o }
+addScriptFile f o = o { scripts = Right f : scripts o }
 setFuel f o = o { fuel = f }
 
 sedOptions =
