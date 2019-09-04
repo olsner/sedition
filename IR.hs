@@ -343,23 +343,26 @@ tCmd (AST.Fork sed) = mdo
   exit <- finishBlock' (Quit ExitSuccess)
   return ()
 
-tCmd (AST.Delete) = branchNextCycle
 tCmd (AST.Clear) = emit Clear
+-- Clear before branchnext?
+tCmd (AST.Delete) = branchNextCycle
 tCmd (AST.Redirect dst (Just src)) = emit (Redirect dst src)
 tCmd (AST.Redirect dst Nothing) = emit (CloseFile dst)
 tCmd (AST.Subst mre sub flags actions) = do
   p <- tCheck (AST.Match mre)
   tIf p (emit (Subst sub flags) >> tSubstAction actions) (return ())
 tCmd (AST.Hold maybeReg) = emit (Hold maybeReg)
+tCmd (AST.HoldA maybeReg) = emit (HoldA maybeReg)
 tCmd (AST.Get maybeReg) = emit (Get maybeReg)
 tCmd (AST.GetA maybeReg) = emit (GetA maybeReg)
 tCmd (AST.Insert s) = emit (PrintS 0 s)
--- TODO append ('a'/'A') needs to save data to be printed at the start of the
+-- TODO append ('a'/'A') should rather save data to be printed at the start of the
 -- next cycle (or the end of this one).
+tCmd (AST.Append s) = emit (PrintS 0 s)
 tCmd (AST.Quit print status) = () <$ do
   when print $ emit (Print 0)
   finishBlock' (Quit status)
-tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
+--tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
 
 tSubstAction SActionNone = return ()
 tSubstAction SActionExec = emit ShellExec
