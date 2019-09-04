@@ -316,7 +316,7 @@ subst p rep matches = go "" 0 matches
             matchend = matchstart + matchlen
             acc' = acc <> substr lastmatch (matchstart - lastmatch)
                        <> replace rep m
-    go acc _ [] = acc
+    go acc lastmatch [] = acc <> C.drop lastmatch p
 
     substr s l = C.take l (C.drop s p)
     replace rep match = go "" 0
@@ -328,7 +328,7 @@ subst p rep matches = go "" 0 matches
           c -> go (C.snoc acc c) (i + 1)
         matchN n = (uncurry substr) (match ! n)
 
-match SubstFirst re p = case matchOnce re p of Just x -> [x]; Nothing -> []
+match SubstFirst re p = take 1 (matchAll re p)
 match SubstAll re p = matchAll re p
 -- TODO Handle not finding enough matches for match i. Should be handled the
 -- same as a nonmatch.
