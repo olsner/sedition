@@ -42,31 +42,29 @@ main()
 {
 	BASE=`type -p sed`
 	BASELOG=sed.out
-	TEST=../sed
+	TEST=${1-../sed}
 	TESTLOG=nsed.out
 	DICT=/usr/share/dict/words
 
-	test_error 3>&0 | more
+	test_error | more
 
 	awk 'END { for (i = 1; i < 15; i++) print "l1_" i}' </dev/null >lines1
 	awk 'END { for (i = 1; i < 10; i++) print "l2_" i}' </dev/null >lines2
 
 	exec 4>&1 5>&2
 
-    echo "Testing base sed $BASE"
 	# Set these flags to get messages about known problems
 	BSD=0
 	GNU=0
 	SUN=0
 	tests $BASE $BASELOG
 
-    echo "Testing new sed $TEST"
 	BSD=0
 	GNU=0
 	SUN=0
 	tests $TEST $TESTLOG
 	exec 1>&4 2>&5
-	diff -c $BASELOG $TESTLOG | more
+	colordiff -c $BASELOG $TESTLOG | less -XFR
 }
 
 tests()
