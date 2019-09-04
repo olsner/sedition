@@ -55,16 +55,18 @@ main()
 
 	# Set these flags to get messages about known problems
 	BSD=0
-	GNU=0
+	GNU=1
 	SUN=0
 	tests $BASE $BASELOG
 
 	BSD=0
-	GNU=0
+	GNU=1
 	SUN=0
 	tests $TEST $TESTLOG
 	exec 1>&4 2>&5
 	colordiff -c $BASELOG $TESTLOG | less -XFR
+
+    # TODO Set exit status to fail when the test fails (of course we'd want to pass all of them first)
 }
 
 tests()
@@ -454,7 +456,7 @@ test_print()
 	fi
 	mark '7.8'
 	if [ $BSD -eq 1 ] ; then
-		echo BSD sed cannot pass 7.7
+		echo BSD sed cannot pass 7.8
 	else
 		echo line1 > lines3
 		echo "" >> lines3
