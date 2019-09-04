@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings, CPP, TypeFamilies, NamedFieldPuns, RecordWildCards #-}
+{-# LANGUAGE OverloadedStrings, CPP, TypeFamilies, NamedFieldPuns, RecordWildCards, ScopedTypeVariables #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 
 module Main (main) where
@@ -51,9 +51,49 @@ data IPCState = IPCState
   deriving (Show)
 
 data File
-  = HandleFile { fileHandle :: Handle }
+  = NormalFile { fileIsEOF :: IO Bool, fileMaybeGetLine :: IO (Maybe S), filePutStrLn :: S -> IO () }
   | SocketFile Socket
-  deriving (Show, Eq)
+
+instance Show File where
+  show (NormalFile _ _ _) = "NormalFile{}"
+  show (SocketFile s) = "SocketFile " ++ show s
+
+handleFile h = NormalFile (hIsEOF h) (hMaybeGetLine h) (C.hPutStrLn h)
+inputListFile :: [FilePath] -> IO File
+inputListFile [] = return (NormalFile (hIsEOF stdin) (hMaybeGetLine stdin) C.putStrLn)
+inputListFile inputs = do
+    current :: MVar Handle <- newEmptyMVar
+    inputs <- newMVar inputs
+
+    let nextFile :: IO a -> a -> IO a
+        nextFile cont eof = do
+            fs <- takeMVar inputs
+            case fs of
+              [] -> putMVar inputs [] >> return eof
+              (f:fs) -> do
+                putMVar inputs fs
+                putMVar current =<< openFile f ReadMode
+                cont
+
+        isEOF :: IO Bool
+        isEOF = do
+            h <- takeMVar current
+            eof <- hIsEOF h
+            if eof
+              then nextFile isEOF True
+              else putMVar current h >> return False
+
+        maybeGetLine :: IO (Maybe S)
+        maybeGetLine = do
+            h <- takeMVar current
+            line <- hMaybeGetLine h
+            case line of
+                Nothing -> nextFile maybeGetLine Nothing
+                Just line -> putMVar current h >> return (Just line)
+
+    nextFile (return ()) ()
+    return (NormalFile isEOF maybeGetLine C.putStrLn)
+
 data SedState program = SedState
   { program :: program
   , files :: Map Int File
@@ -98,11 +138,11 @@ forkIPCState (Just state) = do
   _ <- forkIO (busRider passenger box)
   return $ Just state { passenger = passenger, box = Mailbox box }
 
-initialState ipc pgm = do
+initialState ipc pgm file0 = do
   ipcState <- if ipc then Just <$> newIPCState else return Nothing
   return SedState {
     program = pgm
-  , files = M.empty
+  , files = M.singleton 0 file0
   , lineNumber = 0
   , pattern = Nothing
   , hold = M.empty
@@ -151,7 +191,7 @@ runIR (IR.Set p cond) = setPred p =<< case cond of
   IR.Line l -> gets ((l ==) . lineNumber)
   IR.Match re -> checkRE re
   IR.MatchLastRE -> checkRE . fromJust =<< gets lastRegex
-  IR.AtEOF -> liftIH 0 hIsEOF
+  IR.AtEOF -> liftIO . fileIsEOF =<< gets (fromJust . M.lookup 0 . files)
 runIR (IR.If p t f) = do
   b <- getPred p
   runIRLabel (if b then t else f)
@@ -239,7 +279,7 @@ doAccept i j = do
     (c,addr) <- liftIO $ accept s
     debug ("accepted: " ++ show addr)
     h <- liftIO $ socketToHandle c ReadWriteMode
-    replaceFile j (HandleFile h)
+    replaceFile j (handleFile h)
 
 doMessage m = gets ipcState >>= f
   where
@@ -314,19 +354,15 @@ redirectFile i j = do
        Just f -> replaceFile i f >> delFile j
        Nothing -> closeFile i
 
-getFile i = M.lookup i . files <$> get
+getFile i = gets (M.lookup i . files)
 setFile i f = modify $ \state -> state { files = M.insert i f (files state) }
 delFile i = modify $ \state -> state { files = M.delete i (files state) }
 
-ifile i state = fileHandle (M.findWithDefault (HandleFile stdin) i (files state))
-ofile i state = fileHandle (M.findWithDefault (HandleFile stdout) i (files state))
+printTo i s = do
+  Just f <- getFile i
+  liftIO (filePutStrLn f s)
 
-liftIH i f = liftIO . f =<< ifile i <$> get
-liftOH i f = liftIO . f =<< ofile i <$> get
-
-printTo i s = liftOH i (\h -> C.hPutStrLn h s)
-
-maybeGetLine i = liftIH i hMaybeGetLine
+maybeGetLine i = liftIO . fileMaybeGetLine =<< fromJust <$> getFile i
 
 hMaybeGetLine :: Handle -> IO (Maybe S)
 hMaybeGetLine h = do
@@ -394,9 +430,9 @@ getScript options inputs = case scripts options of
     ss <- flagScript options
     return (ss, inputs)
 
-runProgram :: Bool -> (H.Label, Program) -> IO ()
-runProgram ipc (label, program) = do
-    state <- initialState ipc program
+runProgram :: Bool -> (H.Label, Program) -> File -> IO ()
+runProgram ipc (label, program) file0 = do
+    state <- initialState ipc program file0
     evalStateT (runIRLabel label) state
 
 do_main args = do
@@ -409,7 +445,6 @@ do_main args = do
 
   (scriptLines,inputs) <- getScript opts (map C.pack nonOpts)
   let seds = parseString (C.unlines scriptLines)
-  when (not (null inputs)) $ fatal "Input files not handled yet, only stdin"
   let program = toIR autoprint seds
   when (dumpOriginalIR) $
       hPutStrLn stderr ("\n\n*** ORIGINAL: \n" ++ show program)
@@ -420,6 +455,8 @@ do_main args = do
       hPutStrLn stderr ("Remaining fuel: " ++ show remainingFuel)
       hPutStrLn stderr ("Used fuel: " ++ show (fuel - remainingFuel))
   when (dumpOptimizedIR || dumpOriginalIR) exitSuccess
-  runProgram enableIPC (fst program,program')
+
+  file0 <- inputListFile (map C.unpack inputs)
+  runProgram enableIPC (fst program,program') file0
 
 main = do_main =<< getArgs
