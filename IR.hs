@@ -313,6 +313,8 @@ tSed (Sed cond x) = tWhen pRunNormal $ withCond cond $ tCmd x
 tCmd :: AST.Cmd -> IRM ()
 tCmd (AST.Block xs) = tSeds xs
 tCmd (AST.Print fd) = emit (Print fd)
+-- Not parsed
+-- tCmd (AST.PrintA fd) = emit (Print fd)
 tCmd (AST.Message m) = emit (Message m)
 -- FIXME Wrong! "If there is no more input then sed exits without processing
 -- any more commands."

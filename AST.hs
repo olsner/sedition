@@ -56,7 +56,7 @@ data Cmd
   | Next Int
   | NextA Int
   | Print Int
-  | PrintA Int
+  -- | PrintA Int
   -- fork flags are parsed separately to an event address with fork
   | Listen Int (Maybe S) Int
   | Accept Int Int
@@ -64,7 +64,7 @@ data Cmd
   -- s///
   | Subst (Maybe RE) S SubstType SubstAction
   -- y///
-  | Trans S S
+  -- | Trans S S
 
   -- a: append text after this cycle finishes (TODO for this: needs more state)
   | Append S
@@ -77,7 +77,7 @@ data Cmd
   -- dD - clear pattern space and start new cycle
   -- TODO Since these read, take an Int for the file to read from
   | Delete
-  | DeleteA
+  -- | DeleteA
   -- hH/gG
   | Hold (Maybe S)
   | HoldA (Maybe S)
