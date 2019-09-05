@@ -39,16 +39,16 @@ data SubstAction
 data Address = Line Int | Match (Maybe RE) | EOF | IRQ
     deriving (Show, Ord, Eq)
 data MaybeAddress
+  -- Perhaps the "Always" case should not be here since that allows e.g. (NotAddr Always)
   = Always
   | At Address
   | Between Address Address
+  | NotAddr MaybeAddress
   deriving (Show, Ord, Eq)
 data Sed = Sed MaybeAddress Cmd deriving (Show, Ord, Eq)
 data Cmd
   = Block [Sed]
   | Fork Sed
-  -- Really belongs in the Address, I think
-  | NotAddr Cmd
   | Label Label
   | Branch (Maybe Label)
   -- | Test Label

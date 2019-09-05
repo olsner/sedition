@@ -42,7 +42,8 @@ tests =
   , ("A 1 2", [Sed Always (Accept 1 2)])
   , ("A1 2", [Sed Always (Accept 1 2)])
 
-  , ("/^$/! p", [Sed (At (Match (re "^$"))) (NotAddr (Print 0))])
+  , ("/^$/! p", [Sed (NotAddr (At (Match (re "^$")))) (Print 0)])
+  , ("8,13 !p", [Sed (NotAddr (Between (Line 8) (Line 13))) (Print 0)])
   , ("a text", [Sed Always (Append "text")])
   , ("a\\\nfoo\\\nbar", [Sed Always (Append "foo\nbar")])
   , ("a\\\nfoo\\r\\nbar\\\nbaz", [Sed Always (Append "foo\r\nbar\nbaz")])

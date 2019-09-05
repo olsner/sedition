@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE OverloadedStrings, ApplicativeDo #-}
 
 module Parser (parseString, parseOnly, pFile) where
 
@@ -28,11 +28,15 @@ lineOrComment = Just <$> pLine <|> Nothing <$ pComment
 -- TODO Special case, when the *first* line is #n autoprint is disabled.
 -- Maybe should be in pFile (can be in the AST as a disable-autoprint command).
 pComment = char '#' *> skipMany (notChar '\n')
-pLine = Sed <$> option Always pMaybeAddress <*> wsThen pCommand
+pLine = Sed <$> pMaybeAddress <*> wsThen pCommand
 
+pMaybeAddress = do
+    addr <- option Always pAddressRange
+    f <- option id (NotAddr <$ try (wsThen (char '!')))
+    return (f addr)
 -- Backtracking could be avoided here - we shouldn't need to reparse pAddress
 -- after failing to find a second part of the range.
-pMaybeAddress = choice $
+pAddressRange = choice $
   [ try (Between <$> pAddress <* wsThen (char ',') <*> wsThen pAddress)
   , At <$> pAddress
   ]
@@ -136,7 +140,6 @@ pQuit print = Quit print . intToExit <$> option 0 wsInt
 
 pCommand = charSwitchM $
   [ ('{', Block <$> pBlock)
-  , ('!', NotAddr <$> wsThen pCommand)
   , (':', Label <$> pLabel)
   , ('<', Redirect <$> wsThen int <*> maybeP (ws1Then int))
   , ('a', Append <$> pTextArgument)

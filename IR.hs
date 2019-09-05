@@ -256,14 +256,11 @@ tWhen p x = mdo
   f <- label
   return res
 
-withCond Always x = x
-withCond (At c) x = mdo
+withCond' Always whenTrue _ = whenTrue
+withCond' (At c) whenTrue whenFalse = do
   p <- tCheck c
-  t <- finishBlock' (If p t f)
-  res <- x
-  f <- label
-  return res
-withCond (Between start end) x = mdo
+  tIf p whenTrue whenFalse
+withCond' (Between start end) whenTrue whenFalse = mdo
   pActive <- newPred
 
   let run = emitBranch' t
@@ -291,10 +288,15 @@ withCond (Between start end) x = mdo
                   ifCheck start (comment "between/first" >> set >> run) skip)
 
   t <- label
-  res <- x
+  _ <- whenTrue
   comment "between/end of code"
-  f <- label
-  return res
+  f <- emitBranch' e
+  _ <- whenFalse
+  e <- label
+  return ()
+withCond' (NotAddr addr) whenTrue whenFalse = withCond' addr whenFalse whenTrue
+
+withCond addr x = withCond' addr x (return ())
 
 withNewPred f = newPred >>= \p -> f p >> return p
 
