@@ -64,9 +64,10 @@ main()
 	SUN=0
 	tests $TEST $TESTLOG
 	exec 1>&4 2>&5
-	colordiff -c $BASELOG $TESTLOG | less -XFR
+	diff -c $BASELOG $TESTLOG | diffstat
 
-    # TODO Set exit status to fail when the test fails (of course we'd want to pass all of them first)
+    # Set exit status to fail when the test fails
+    diff -q $BASELOG $TESTLOG >/dev/null
 }
 
 tests()
@@ -273,6 +274,7 @@ s/^/before_i/p
 inserted
 s/^/after_i/p
 ' lines1 lines2
+    # TODO Fails because appending is done immediately instead of being delayed to the next cycle.
 	mark '4.2' ; $SED -n -e '
 5,12s/^/5-12/
 s/^/before_a/p
@@ -303,11 +305,11 @@ hello
 3,14c\
 hello
 ' lines1
-# SunOS and GNU sed behave differently.   We follow POSIX
-#	mark '4.7' ; $SED -n -e '
-#8,3c\
-#hello
-#' lines1
+# SunOS and GNU sed behave differently.   BSD follows POSIX
+	mark '4.7' ; $SED -n -e '
+8,3c\
+hello
+' lines1
 	mark '4.8' ; $SED d <lines1
 }
 
