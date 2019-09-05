@@ -22,7 +22,10 @@ type FD = Int
 
 data Cond
   = AtEOF
+  -- current line == l
   | Line Int
+  -- current line > l (tested after the first line has been processed)
+  | EndLine Int
   -- Possible extension: explicit "match" registers to track several precomputed
   -- matches at once.
   | Match RE
@@ -268,10 +271,22 @@ withCond (Between start end) x = mdo
       set = emit (Set pActive cTrue)
       clear = emit (Set pActive cFalse)
 
+-- Special case for line-based ranges.
+-- For normal addresses, the end condition is checked after running the command
+-- (or it's checked, set, and the command is run one more time for the last
+-- line).
+-- For line numbers, it seems to be checked before running the command with the address.
+-- 12,13p should print for lines 12 and 13. 12,3p should only print for 12
+-- since the condition is false before reaching the end.
+  let checkEnd | (AST.Line n) <- end =  do
+                  p <- withNewPred $ \p -> emit (Set p (EndLine n))
+                  tIf p (clear >> skip) run
+               | otherwise = ifCheck end (clear >> run) run
+
+  -- If the end address is a line that's <= the current line, clear the flag
+  -- immediately and skip the block.
   tIf pActive (do comment "between/active"
-                  ifCheck end (do comment "between/last"
-                                  clear
-                                  run) run)
+                  checkEnd)
               (do comment "between/inactive"
                   ifCheck start (comment "between/first" >> set >> run) skip)
 

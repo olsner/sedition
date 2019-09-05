@@ -189,6 +189,7 @@ runIR (IR.Branch l) = runIRLabel l
 runIR (IR.Set p cond) = setPred p =<< case cond of
   IR.Bool b -> return b
   IR.Line l -> gets ((l ==) . lineNumber)
+  IR.EndLine l -> gets ((l <) . lineNumber)
   IR.Match re -> checkRE re
   IR.MatchLastRE -> checkRE . fromJust =<< gets lastRegex
   IR.AtEOF -> liftIO . fileIsEOF =<< gets (fromJust . M.lookup 0 . files)
