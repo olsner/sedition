@@ -19,9 +19,16 @@ subst2 pat rep t act = Subst (re pat) rep t act
 emptySub = Subst Nothing "" SubstFirst SActionNone
 
 tests =
+  -- subst flags
   [ ("s/a/b/g", [Sed Always (subst2 "a" "b" SubstAll SActionNone)])
   , ("s/a/b/p", [Sed Always (subst2 "a" "b" SubstFirst (SActionPrint 0))])
   , ("s/a/b/e", [Sed Always (subst2 "a" "b" SubstFirst SActionExec)])
+  , ("s/a/b/1234", [Sed Always (subst2 "a" "b" (SubstNth 1234) SActionNone)])
+  -- combinations of SubstNth
+  , ("s/a/b/gp", [Sed Always (subst2 "a" "b" SubstAll (SActionPrint 0))])
+  , ("s/a/b/1p", [Sed Always (subst2 "a" "b" (SubstNth 1) (SActionPrint 0))])
+  , ("s/a/b/p1", [Sed Always (subst2 "a" "b" (SubstNth 1) (SActionPrint 0))])
+  -- leaning toothpicks
   , ("s/\\//\\//", [Sed Always (subst "/" "/")])
   , ("s|\\||\\||", [Sed Always (subst "|" "|")])
   , ("s///", [Sed Always emptySub])

@@ -115,10 +115,14 @@ maybeNonEmpty s | BS.null s = Nothing | otherwise = Just s
 
 setSubstType   t   (_,act) = (t,act)
 setSubstAction act (t,_) = (t,act)
-sFlag = charSwitch $
+sFlag = choice $
+  -- integer: substitute only the nth occurrence
+  [ setSubstType . SubstNth <$> int
+  , sCharFlag
+  ]
+sCharFlag = charSwitch $
   -- First, flags: control or tweak the matching
   [ ('g', setSubstType SubstAll)
-  -- integer: substitute only the nth occurrence
   -- i/I: match case-insensitively
   -- m/M: make ^ and $ match start/end of line in a multi-line buffer
   --      (with \` and \' matching start/end of whole buffer)
