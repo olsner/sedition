@@ -19,8 +19,42 @@ subst2 pat rep t act = Subst (re pat) rep t act
 emptySub = Subst Nothing "" SubstFirst SActionNone
 
 tests =
+  [ ("a text", [Sed Always (Append "text")])
+  , ("a\\\nfoo\\\nbar", [Sed Always (Append "foo\nbar")])
+  , ("a\\\nfoo\\r\\nbar\\\nbaz", [Sed Always (Append "foo\r\nbar\nbaz")])
+  , ("a text\\\nbar", [Sed Always (Append "text\nbar")])
+  , ("A 1 2", [Sed Always (Accept 1 2)])
+  , ("A1 2", [Sed Always (Accept 1 2)])
+
+  , ("c\\\nfoo\\\nbar", [Sed Always (Change "foo\nbar")])
+  , ("c\\\nfoo\\r\\nbar\\\nbaz", [Sed Always (Change "foo\r\nbar\nbaz")])
+
+  , ("D;d", [Sed Always DeleteFirstLine, Sed Always Delete])
+
+  , ("i text", [Sed Always (Insert "text")])
+
+  , ("l", [Sed Always (PrintLiteral 0)])
+  , ("l 123", [Sed Always (PrintLiteral 123)])
+
+  , ("m foo", [Sed Always (Message (Just "foo"))])
+  , ("m", [Sed Always (Message Nothing)])
+  , ("m  ", [Sed Always (Message Nothing)])
+
+  , ("n 4", [Sed Always (Next 4)])
+  , ("N 4", [Sed Always (NextA 4)])
+
+  , ("P 7", [Sed Always (PrintFirstLine 7)])
+  , ("P;p", [Sed Always (PrintFirstLine 0), Sed Always (Print 0)])
+
+  , ("q", [Sed Always (Quit True ExitSuccess)])
+  , ("q 0", [Sed Always (Quit True ExitSuccess)])
+  , ("q 1", [Sed Always (Quit True (ExitFailure 1))])
+  , ("Q", [Sed Always (Quit False ExitSuccess)])
+
+  , ("r /dev/stdin", [Sed Always (ReadFile "/dev/stdin")])
+
   -- subst flags
-  [ ("s/a/b/g", [Sed Always (subst2 "a" "b" SubstAll SActionNone)])
+  , ("s/a/b/g", [Sed Always (subst2 "a" "b" SubstAll SActionNone)])
   , ("s/a/b/p", [Sed Always (subst2 "a" "b" SubstFirst (SActionPrint 0))])
   , ("s/a/b/e", [Sed Always (subst2 "a" "b" SubstFirst SActionExec)])
   , ("s/a/b/1234", [Sed Always (subst2 "a" "b" (SubstNth 1234) SActionNone)])
@@ -41,33 +75,27 @@ tests =
   , ("\\/\\//s///", [Sed (At (Match (re "/"))) emptySub])
   , ("\\|\\|| s|||", [Sed (At (Match (re "|"))) emptySub])
 
-  , ("q", [Sed Always (Quit True ExitSuccess)])
-  , ("q 0", [Sed Always (Quit True ExitSuccess)])
-  , ("q 1", [Sed Always (Quit True (ExitFailure 1))])
-  , ("Q", [Sed Always (Quit False ExitSuccess)])
+  , ("t foo;Tfoo;t;T",
+        [ Sed Always (Test (Just "foo"))
+        , Sed Always (TestNot (Just "foo"))
+        , Sed Always (Test Nothing)
+        , Sed Always (TestNot Nothing)])
 
-  , ("A 1 2", [Sed Always (Accept 1 2)])
-  , ("A1 2", [Sed Always (Accept 1 2)])
+  , ("w /dev/stdin", [Sed Always (WriteFile "/dev/stdin")])
 
-  , ("/^$/! p", [Sed (NotAddr (At (Match (re "^$")))) (Print 0)])
-  , ("8,13 !p", [Sed (NotAddr (Between (Line 8) (Line 13))) (Print 0)])
-  , ("a text", [Sed Always (Append "text")])
-  , ("a\\\nfoo\\\nbar", [Sed Always (Append "foo\nbar")])
-  , ("a\\\nfoo\\r\\nbar\\\nbaz", [Sed Always (Append "foo\r\nbar\nbaz")])
-  , ("a text\\\nbar", [Sed Always (Append "text\nbar")])
-  , ("i text", [Sed Always (Insert "text")])
+  , ("x", [Sed Always Exchange])
 
-  , ("n 4", [Sed Always (Next 4)])
-  , ("N 4", [Sed Always (NextA 4)])
+  , ("y/abc/def/", [Sed Always (Trans "abc" "def")])
 
   , ("z", [Sed Always Clear])
 
+  , ("/^$/! p", [Sed (NotAddr (At (Match (re "^$")))) (Print 0)])
+  , ("8,13 !p", [Sed (NotAddr (Between (Line 8) (Line 13))) (Print 0)])
   , ("2,/^$/ {}", [Sed (Between (Line 2) (Match (re "^$"))) (Block [])])
   , ("{}", [Sed Always (Block [])])
 
-  , ("m foo", [Sed Always (Message (Just "foo"))])
-  , ("m", [Sed Always (Message Nothing)])
-  , ("m  ", [Sed Always (Message Nothing)])
+  , ("=", [Sed Always (PrintLineNumber 0)])
+  , ("=73", [Sed Always (PrintLineNumber 73)])
   ]
 
 counts :: [Bool] -> (Int,Int)

@@ -51,12 +51,14 @@ data Cmd
   | Fork Sed
   | Label Label
   | Branch (Maybe Label)
-  -- | Test Label
-  -- | TestNot Label
+  | Test (Maybe Label)
+  | TestNot (Maybe Label)
   | Next Int
   | NextA Int
   | Print Int
-  -- | PrintA Int
+  | PrintFirstLine Int
+  | PrintLiteral Int
+  | PrintLineNumber Int
   -- fork flags are parsed separately to an event address with fork
   | Listen Int (Maybe S) Int
   | Accept Int Int
@@ -64,7 +66,7 @@ data Cmd
   -- s///
   | Subst (Maybe RE) S SubstType SubstAction
   -- y///
-  -- | Trans S S
+  | Trans S S
 
   -- a: append text after this cycle finishes (TODO for this: needs more state)
   | Append S
@@ -72,17 +74,21 @@ data Cmd
   | Insert S
   -- c: replace text in matching address range with new text, restarts cycle
   -- every time since we'll clear the pattern space whenever it matches.
-  -- | Change S
+  | Change S
 
-  -- dD - clear pattern space and start new cycle
-  -- TODO Since these read, take an Int for the file to read from
+  -- d - clear pattern space and start new cycle
   | Delete
-  -- | DeleteA
+  -- D - clear until the first newline, then start new cycle
+  | DeleteFirstLine
   -- hH/gG
   | Hold (Maybe S)
   | HoldA (Maybe S)
   | Get (Maybe S)
   | GetA (Maybe S)
+  | Exchange
+
+  | ReadFile S
+  | WriteFile S
 
   | Message (Maybe S)
 
