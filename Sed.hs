@@ -406,11 +406,20 @@ data Options = Options
   , autoprint :: Bool
   , enableIPC :: Bool
   , scripts :: [Either S FilePath]
+  , dumpParse :: Bool
   , dumpOptimizedIR :: Bool
   , dumpOriginalIR :: Bool
   , fuel :: Int
   } deriving (Show, Eq)
-defaultOptions = Options { extendedRegexps = True, autoprint = True, enableIPC = True, scripts = [], dumpOptimizedIR = False, dumpOriginalIR = False, fuel = 1000000 }
+defaultOptions = Options
+    { extendedRegexps = True
+    , autoprint = True
+    , enableIPC = True
+    , scripts = []
+    , dumpParse = False
+    , dumpOptimizedIR = False
+    , dumpOriginalIR = False
+    , fuel = 1000000 }
 addScript s o = o { scripts = Left (C.pack s) : scripts o }
 addScriptFile f o = o { scripts = Right f : scripts o }
 setFuel f o = o { fuel = f }
@@ -421,6 +430,7 @@ sedOptions =
   , Option ['e'] ["expression"] (ReqArg addScript "SCRIPT") "add the script to the commands to be executed"
   , Option ['f'] ["file"] (ReqArg addScriptFile "SCRIPT_FILE") "add the contents of script-file ot the commands to be executed"
   , Option ['I'] ["no-ipc"] (NoArg $ \o -> o { enableIPC = False}) "disable IPC"
+  , Option [] ["dump-parse"] (NoArg $ \o -> o { dumpParse = True }) "don't run script, just parse and print the parsed program"
   , Option [] ["dump-ir"] (NoArg $ \o -> o { dumpOptimizedIR = True }) "don't run script, just compile and print post-optimization IR"
   , Option [] ["dump-ir-pre"] (NoArg $ \o -> o { dumpOriginalIR = True }) "don't run script, just compile and print pre-optimization IR"
   , Option ['O'] ["opt-fuel"] (ReqArg (setFuel . read) "FUEL") "override amount of optimization fuel for optimizations. -O0 to disable optimizations."
@@ -457,6 +467,9 @@ do_main args = do
 
   (scriptLines,inputs) <- getScript opts (map C.pack nonOpts)
   let seds = parseString (C.unlines scriptLines)
+  when dumpParse $ do
+    mapM_ (hPrint stderr) seds
+    exitSuccess
   let program = toIR autoprint seds
   when (dumpOriginalIR) $
       hPutStrLn stderr ("\n\n*** ORIGINAL: \n" ++ show program)
