@@ -246,6 +246,16 @@ runIR (IR.Cycle i intr cont eof) = do
     runIRLabel k
 runIR (IR.Quit code) = liftIO (exitWith code)
 runIR (IR.Comment s) = debug ("*** " ++ s)
+runIR (IR.Read i) = do
+  l <- maybeGetLine i
+  case l of
+   Just _ -> modify $ \state -> state { pattern = l }
+   Nothing -> liftIO exitSuccess
+runIR (IR.ReadAppend i) = do
+  l <- maybeGetLine i
+  case l of
+   Just s -> patternAppend s
+   Nothing -> liftIO exitSuccess
 
 runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
 
@@ -297,12 +307,13 @@ doHold reg = do
 doGet reg =
   modify $ \s -> s { pattern = Just (fromMaybe "" (M.lookup (fromMaybe "" reg) (hold s))) }
 
-doGetAppend reg = do
-  state <- get
-  let p = fromMaybe "" (pattern state)
-  let got = fromMaybe "" (M.lookup (fromMaybe "" reg) (hold state))
-  debug ("GetA: appending " ++ show got ++ " to " ++ show p)
-  modify $ \state -> state { pattern = Just (p <> "\n" <> got) }
+doGetAppend reg =
+  patternAppend =<< gets (fromMaybe "" . M.lookup (fromMaybe "" reg) . hold)
+
+patternAppend s = do
+  p <- gets (fromMaybe "" . pattern)
+  debug ("appending " ++ show s ++ " to " ++ show p)
+  modify $ \state -> state { pattern = Just (p <> "\n" <> s) }
 
 -- This could be preprocessed a bit better, e.g. having the parser parse the
 -- replacement into a list of (Literal|Ref Int).
