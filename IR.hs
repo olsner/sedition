@@ -102,17 +102,23 @@ instance Show (Graph Insn e x) where
 
 invalidLabel :: String -> Label
 invalidLabel s = error ("Invalid label: " ++ s)
-startState autoprint = State 3 autoprint M.empty (invalidLabel "uninitialized next-cycle label") emptyGraph
+startState autoprint = State firstNormalPred autoprint M.empty (invalidLabel "uninitialized next-cycle label") emptyGraph
 
 instance Show Pred where
   show (Pred 0) = "P{pre-first}"
   show (Pred 1) = "P{irq}"
   show (Pred 2) = "P{run-normal}"
+  show (Pred 3) = "P{last-subst}"
   show (Pred n) = "P" ++ show n
+
+firstNormalPred = 4
 
 pPreFirst = Pred 0
 pIntr = Pred 1
 pRunNormal = Pred 2
+pLastSubst = Pred 3
+
+setLastSubst x = emit (Set pLastSubst (Bool x))
 
 instance UniqueMonad IRM where
   freshUnique = do
@@ -347,6 +353,8 @@ tCmd (AST.Branch (Just name)) = do
   _ <- emitBranch' =<< getLabelMapping name
   return ()
 tCmd (AST.Branch Nothing) = branchNextCycle
+tCmd (AST.Test target) = tTest True target
+tCmd (AST.TestNot target) = tTest False target
 tCmd (AST.Fork sed) = mdo
   entry <- finishBlock' (Fork entry exit)
 
@@ -365,7 +373,7 @@ tCmd (AST.Redirect dst (Just src)) = emit (Redirect dst src)
 tCmd (AST.Redirect dst Nothing) = emit (CloseFile dst)
 tCmd (AST.Subst mre sub flags actions) = do
   p <- tCheck (AST.Match mre)
-  tIf p (emit (Subst sub flags) >> tSubstAction actions) (return ())
+  tIf p (setLastSubst True >> emit (Subst sub flags) >> tSubstAction actions) (setLastSubst False)
 tCmd (AST.Hold maybeReg) = emit (Hold maybeReg)
 tCmd (AST.HoldA maybeReg) = emit (HoldA maybeReg)
 tCmd (AST.Get maybeReg) = emit (Get maybeReg)
@@ -382,3 +390,13 @@ tCmd (AST.Quit print status) = () <$ do
 tSubstAction SActionNone = return ()
 tSubstAction SActionExec = emit ShellExec
 tSubstAction (SActionPrint n) = emit (Print n)
+
+tTest ifTrue target = mdo
+  comment ("test " ++ show ifTrue ++ " " ++ show target)
+  label <- case target of
+    Nothing -> gets nextCycleLabel
+    Just name -> getLabelMapping name
+  let (t,f) | ifTrue    = (label, l)
+            | otherwise = (l, label)
+  l <- finishBlock' (If pLastSubst t f)
+  return ()
