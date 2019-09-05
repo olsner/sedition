@@ -57,6 +57,9 @@ tests =
   , ("a text\\\nbar", [Sed Always (Append "text\nbar")])
   , ("i text", [Sed Always (Insert "text")])
 
+  , ("n 4", [Sed Always (Next 4)])
+  , ("N 4", [Sed Always (NextA 4)])
+
   , ("z", [Sed Always Clear])
 
   , ("2,/^$/ {}", [Sed (Between (Line 2) (Match (re "^$"))) (Block [])])

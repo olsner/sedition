@@ -159,6 +159,7 @@ pCommand = charSwitchM $
   , ('L', Listen <$> int <*> maybeP pHostName <*> (char ':' *> int))
   , ('m', Message <$> maybeNonEmpty <$> wsThen pTextArgument)
   , ('n', Next <$> option 0 wsInt)
+  , ('N', NextA <$> option 0 wsInt)
   , ('p', Print <$> option 0 wsInt)
   , ('q', pQuit True)
   , ('Q', pQuit False)

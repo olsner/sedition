@@ -335,9 +335,7 @@ tCmd (AST.Print fd) = emit (Print fd)
 tCmd (AST.Message m) = emit (Message m)
 -- FIXME Wrong! "If there is no more input then sed exits without processing
 -- any more commands."
-tCmd (AST.Next fd) = do
-  printIfAuto
-  emit (Read fd)
+tCmd (AST.Next fd) = printIfAuto >> emit (Read fd)
 tCmd (AST.NextA fd) = printIfAuto >> emit (ReadAppend fd)
 tCmd (AST.Listen fd host port) = emit (Listen fd host port)
 tCmd (AST.Accept sfd fd) = emit (Accept sfd fd)
