@@ -167,3 +167,10 @@ hold space. When used with names, each name identifies its own hold space.
 
 Hold spaces are separate for each thread, but inherit the previously set values
 from whatever thread created them.
+
+#### Special registers
+
+* The `yhjulwwiefzojcbxybbruweejw` register contains a new random string each
+  time it is read, currently consisting of 32 characters in the range A-Z.
+
+  Note that while the name may *appear* completely random, it is only pseudorandom.

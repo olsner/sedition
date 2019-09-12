@@ -51,6 +51,8 @@ main()
 	awk 'END { for (i = 1; i < 15; i++) print "l1_" i}' </dev/null >lines1
 	awk 'END { for (i = 1; i < 10; i++) print "l2_" i}' </dev/null >lines2
 
+	test_sedition $TEST
+
 	exec 4>&1 5>&2
 
 	# Set these flags to get messages about known problems
@@ -511,6 +513,23 @@ u2/g' lines1
 		echo 'eeefff' | $SED -e 'p' -e 's/e/X/p' -e ':x' \
 		    -e 's//Y/p' -e '/f/bx'
 	fi
+}
+
+test_sedition()
+{
+    local SED=$1
+    echo Testing sedition-specific features
+    # Should provide different random numbers each run!
+    if cmp -s <($SED -e '0 g yhjulwwiefzojcbxybbruweejw' /dev/null) <($SED -e '0 g yhjulwwiefzojcbxybbruweejw' /dev/null); then
+        echo "FAIL: Same random number twice"
+        exit 1
+    fi
+    # Should provide 32 random characters, plus a newline
+    local len=`$SED -e '0 g yhjulwwiefzojcbxybbruweejw' /dev/null | wc -c`
+    if [ "$len" -ne 33 ]; then
+        echo "FAIL: Should be 32 random characters, got $len"
+        exit 1
+    fi
 }
 
 test_error()

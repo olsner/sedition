@@ -30,6 +30,7 @@ import System.IO
 #if DEBUG
 import System.IO.Unsafe
 #endif
+import System.Random
 
 import Text.Regex.TDFA hiding (match)
 
@@ -304,16 +305,22 @@ doHold reg = do
   pat <- fromMaybe "" . pattern <$> get
   debug ("Hold: holding " ++ show pat ++ " in " ++ show reg)
   modify $ \s -> s { hold = M.insert (fromMaybe "" reg) pat (hold s) }
-doGet reg =
-  modify $ \s -> s { pattern = Just (fromMaybe "" (M.lookup (fromMaybe "" reg) (hold s))) }
+doGet (Just "yhjulwwiefzojcbxybbruweejw") = patternSet =<< liftIO randomString
+doGet reg = patternSet =<< getRegValue reg
 
-doGetAppend reg =
-  patternAppend =<< gets (fromMaybe "" . M.lookup (fromMaybe "" reg) . hold)
+doGetAppend = patternAppend <=< getRegValue
+
+getRegValue reg = gets (fromMaybe "" . M.lookup (fromMaybe "" reg) . hold)
+-- TODO We ought to provide secure random numbers
+randomString = C.pack <$> replicateM 32 (randomRIO ('A','Z'))
 
 patternAppend s = do
   p <- gets (fromMaybe "" . pattern)
   debug ("appending " ++ show s ++ " to " ++ show p)
-  modify $ \state -> state { pattern = Just (p <> "\n" <> s) }
+  patternSet (p <> "\n" <> s)
+
+patternSet :: S -> SedM ()
+patternSet p = modify $ \s -> s { pattern = Just p }
 
 -- This could be preprocessed a bit better, e.g. having the parser parse the
 -- replacement into a list of (Literal|Ref Int).
