@@ -5,7 +5,7 @@ WARNINGS = -Widentities -Wcompat -Wall -Wno-name-shadowing -Wno-missing-signatur
 GHCFLAGS = -j$(N) -odir $(OUTDIR) -hidir $(OUTDIR) -O2 -threaded -rtsopts $(WARNINGS)
 GHC ?= ghc
 
-all: sed runtests README.html
+all: sed run-parsertest README.html
 
 %.html: %.md
 	markdown $< >$@
@@ -24,8 +24,19 @@ ParserTest: force sed
 	@ln -sf ParserTest.o  $(OUTDIR)/Main.o
 	$(GHC) $(GHCFLAGS) --make $@
 
-runtests: ParserTest
+check: run-parsertest run-bsdtests run-gnused-tests
+
+run-parsertest: ParserTest
 	./ParserTest
+
+run-bsdtests: sed
+	cd tests && ./bsd.sh
+
+run-gnused-tests: sed
+	@if test -d gnused; \
+		then ./run-gnused-tests.sh gnused; \
+		else echo "Check out GNU sed into a directory called gnused"; \
+	fi
 
 MODULES = Sed Parser AST Bus ParserTest IR \
 	Optimize ConstPred RedundantBranches LivePred
