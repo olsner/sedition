@@ -313,11 +313,13 @@ hello
 hello
 ' lines1
 	mark '4.8' ; $SED d <lines1
+	mark '4.9' ; $SED -e '8!chello' lines1
+	mark '4.10'
 }
 
 test_branch()
 {
-	echo Testing labels and branching
+	echo >&2 Testing labels and branching
 	mark '5.1' ; $SED -n -e '
 b label4
 :label3
