@@ -15,17 +15,12 @@ browse-readme: README.html
 
 sed: Sed.hs force
 	@mkdir -p $(OUTDIR)
-# Work around for GHC always compiling the main module into Main.hi/o
-	@ln -sf Sed.hi $(OUTDIR)/Main.hi
-	@ln -sf Sed.o  $(OUTDIR)/Main.o
-	$(GHC) $(GHCFLAGS) --make -o $@ $<
+	$(GHC) $(GHCFLAGS) --make -o $@ -main-is Sed $<
 
 # Compiles after 'sed' because they're sharing modules.
 ParserTest: force sed
 	@mkdir -p $(OUTDIR)
-	@ln -sf ParserTest.hi $(OUTDIR)/Main.hi
-	@ln -sf ParserTest.o  $(OUTDIR)/Main.o
-	$(GHC) $(GHCFLAGS) --make $@
+	$(GHC) $(GHCFLAGS) --make -main-is ParserTest $@
 
 check: run-parsertest run-bsdtests run-gnused-tests
 

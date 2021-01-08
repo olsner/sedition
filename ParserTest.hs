@@ -1,5 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
+module ParserTest (main) where
+
 import System.Exit
 
 import Text.Trifecta
