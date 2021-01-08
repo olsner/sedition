@@ -10,6 +10,9 @@ all: sed run-parsertest README.html
 %.html: %.md
 	markdown $< >$@
 
+browse-readme: README.html
+	xdg-open $<
+
 sed: Sed.hs force
 	@mkdir -p $(OUTDIR)
 # Work around for GHC always compiling the main module into Main.hi/o
