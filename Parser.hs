@@ -136,6 +136,8 @@ sCharFlag = charSwitch $
   -- w file: write result to file
   ]
 
+-- TODO Parse the replacement into e.g. a list of strings and references instead
+-- of doing that on the fly in the interpreter.
 mkSubst pat rep flags = Subst pat rep subst action
   where
     (subst,action) = foldr (.) id flags (SubstFirst, SActionNone)
