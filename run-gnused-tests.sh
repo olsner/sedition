@@ -21,7 +21,7 @@ set -e
 
 test -d "$1" || usage
 
-gnused=$1
+gnused=$(realpath "$1")
 export abs_top_srcdir=$gnused
 export abs_top_srcdir=$gnused
 export SED=`pwd`/sed
@@ -34,7 +34,7 @@ test -x "$SED"
 # TODO Are there more extensions for sed scripts here?
 for t in testsuite/*.sed; do
     name=$(basename -s .sed "$t")
-    if (testsuite/runtest "$name" &>/dev/null); then
+    if testsuite/runtest "$name" &>/dev/null; then
         addpass "$name"
     else
         addfail "$name"
