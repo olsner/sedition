@@ -390,7 +390,7 @@ tCmd (AST.Append s) = emit (PrintS 0 s)
 tCmd (AST.Quit print status) = () <$ do
   when print $ emit (Print 0)
   finishBlock' (Quit status)
---tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
+tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
 
 tSubstAction SActionNone = return ()
 tSubstAction SActionExec = emit ShellExec
