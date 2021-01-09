@@ -93,16 +93,20 @@ data IRState = State
   { firstFreeUnique :: Unique
   , autoprint :: Bool
   , sourceLabels :: Map S Label
-  , nextCycleLabel :: Label
+  , nextCycleLabels :: (Label, Label)
   , program :: Graph Insn O O
   }
+
+nextCycleLabelNoPrint = snd . nextCycleLabels
+nextCycleLabelPrint = fst . nextCycleLabels
 
 instance Show (Graph Insn e x) where
   show g = showGraph showInsn g
 
 invalidLabel :: String -> Label
 invalidLabel s = error ("Invalid label: " ++ s)
-startState autoprint = State firstNormalPred autoprint M.empty (invalidLabel "uninitialized next-cycle label") emptyGraph
+startState autoprint = State firstNormalPred autoprint M.empty (dummyCycleLabel, dummyCycleLabel) emptyGraph
+dummyCycleLabel = invalidLabel "uninitialized next-cycle label"
 
 instance Show Pred where
   show (Pred 0) = "P{pre-first}"
@@ -176,7 +180,8 @@ withNewLabel x = do
 emitBranch l next = Branch l `thenLabel` next
 emitBranch' :: Label -> IRM Label
 emitBranch' l = withNewLabel (emitBranch l)
-branchNextCycle = () <$ (emitBranch' =<< gets nextCycleLabel)
+branchNextCyclePrint = () <$ (emitBranch' =<< gets nextCycleLabelPrint)
+branchNextCycleNoPrint = () <$ (emitBranch' =<< gets nextCycleLabelNoPrint)
 
 emitLabel l = Branch l `thenLabel` l
 -- likely to require mdo unless the first use is afterwards
@@ -218,9 +223,9 @@ toIR autoprint seds = evalState go (startState autoprint)
 -- * interrupt reception (for new-cycle code)
 -- * new cycle label
 tProgram seds = mdo
-  oldNextCycle <- gets nextCycleLabel
+  oldNextCycle <- gets nextCycleLabels
 
-  modify $ \state -> state { nextCycleLabel = newCycle }
+  modify $ \state -> state { nextCycleLabels = (newCyclePrint, newCycleNoPrint) }
 
   emit (Set pIntr cFalse)
   emit (Set pPreFirst cTrue)
@@ -230,8 +235,9 @@ tProgram seds = mdo
   -- Actual normal program here
   tSeds seds
 
-  newCycle <- label
+  newCyclePrint <- label
   get >>= \s -> when (autoprint s) (emit (Print 0))
+  newCycleNoPrint <- label
   line <- finishBlock' (Cycle 0 intr line exit)
 
   emit (Set pIntr cFalse)
@@ -246,7 +252,7 @@ tProgram seds = mdo
 
   exit <- emitBranch' start
 
-  modify $ \state -> state { nextCycleLabel = oldNextCycle }
+  modify $ \state -> state { nextCycleLabels = oldNextCycle }
 
 tSeds = mapM_ tSed
 
@@ -352,23 +358,22 @@ tCmd (AST.Branch (Just name)) = do
   comment ("branch " ++ show name)
   _ <- emitBranch' =<< getLabelMapping name
   return ()
-tCmd (AST.Branch Nothing) = branchNextCycle
+tCmd (AST.Branch Nothing) = branchNextCyclePrint
 tCmd (AST.Test target) = tTest True target
 tCmd (AST.TestNot target) = tTest False target
 tCmd (AST.Fork sed) = mdo
   entry <- finishBlock' (Fork entry exit)
 
-  oldNextCycle <- nextCycleLabel <$> get
+  oldNextCycle <- nextCycleLabels <$> get
   tProgram [sed]
-  modify $ \state -> state { nextCycleLabel = oldNextCycle }
+  modify $ \state -> state { nextCycleLabels = oldNextCycle }
 
   -- End of thread (quit)
   exit <- finishBlock' (Quit ExitSuccess)
   return ()
 
 tCmd (AST.Clear) = emit Clear
--- Clear before branchnext?
-tCmd (AST.Delete) = branchNextCycle
+tCmd (AST.Delete) = branchNextCycleNoPrint
 tCmd (AST.Redirect dst (Just src)) = emit (Redirect dst src)
 tCmd (AST.Redirect dst Nothing) = emit (CloseFile dst)
 tCmd (AST.Subst mre sub flags actions) = do
@@ -394,7 +399,7 @@ tSubstAction (SActionPrint n) = emit (Print n)
 tTest ifTrue target = mdo
   comment ("test " ++ show ifTrue ++ " " ++ show target)
   label <- case target of
-    Nothing -> gets nextCycleLabel
+    Nothing -> gets nextCycleLabelPrint
     Just name -> getLabelMapping name
   let (t,f) | ifTrue    = (label, l)
             | otherwise = (l, label)
