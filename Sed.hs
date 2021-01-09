@@ -477,18 +477,18 @@ do_main args = do
   when dumpParse $ do
     mapM_ (hPrint stderr) seds
     exitSuccess
-  let program = toIR autoprint seds
+  let (entryLabel, program) = toIR autoprint seds
   when (dumpOriginalIR) $
-      hPutStrLn stderr ("\n\n*** ORIGINAL: \n" ++ show program)
-  let (program', remainingFuel) = optimize fuel program
+      hPutStrLn stderr ("\n\n*** ORIGINAL: (entry point " ++ show entryLabel ++ ")\n" ++ show program)
+  let (program', remainingFuel) = optimize fuel (entryLabel, program)
   when (dumpOptimizedIR) $ do
-      hPutStr stderr "\n\n*** OPTIMIZED: \n"
+      hPutStr stderr ("\n\n*** OPTIMIZED: (entry point " ++ show entryLabel ++ ")\n")
       hPutStrLn stderr (show program')
       hPutStrLn stderr ("Remaining fuel: " ++ show remainingFuel)
       hPutStrLn stderr ("Used fuel: " ++ show (fuel - remainingFuel))
   when (dumpOptimizedIR || dumpOriginalIR) exitSuccess
 
   file0 <- inputListFile (map C.unpack inputs)
-  runProgram enableIPC (fst program,program') file0
+  runProgram enableIPC (entryLabel,program') file0
 
 main = do_main =<< getArgs
