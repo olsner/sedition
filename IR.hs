@@ -396,12 +396,14 @@ tSubstAction SActionNone = return ()
 tSubstAction SActionExec = emit ShellExec
 tSubstAction (SActionPrint n) = emit (Print n)
 
-tTest ifTrue target = mdo
+tTest ifTrue maybeTarget = mdo
   comment ("test " ++ show ifTrue ++ " " ++ show target)
-  label <- case target of
+  target <- case maybeTarget of
     Nothing -> gets nextCycleLabelPrint
     Just name -> getLabelMapping name
-  let (t,f) | ifTrue    = (label, l)
-            | otherwise = (l, label)
-  l <- finishBlock' (If pLastSubst t f)
+  let (t,f) | ifTrue    = (target, l)
+            | otherwise = (l, target)
+  let clear = emit (Set pLastSubst cFalse)
+  tIf pLastSubst (clear >> emitBranch' t) (clear >> emitBranch' f)
+  l <- label
   return ()
