@@ -207,7 +207,7 @@ pCommand = charSwitchM $
   , ('H', HoldA <$> maybeP pRegister)
   , ('x', Exchange <$> maybeP pRegister)
   , ('i', Insert <$> pTextArgument)
-  , ('l', PrintLiteral <$> option 0 wsInt)
+  , ('l', PrintLiteral <$> option 70 wsInt)
   , ('L', Listen <$> int <*> maybeP pHostName <*> (char ':' *> int))
   , ('m', Message <$> maybeNonEmpty <$> wsThen pTextArgument)
   , ('n', Next <$> option 0 wsInt)

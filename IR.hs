@@ -54,6 +54,8 @@ data Insn e x where
   ReadAppend    :: FD                       -> Insn O O
   Print         :: FD                       -> Insn O O
   PrintS        :: FD -> S                  -> Insn O O
+  PrintLineNumber :: FD                     -> Insn O O
+  PrintLiteral  :: Int -> FD                -> Insn O O
   Message       :: (Maybe S)                -> Insn O O
 
   Hold          :: (Maybe S)                -> Insn O O
@@ -351,8 +353,8 @@ tSed (Sed cond x) = tWhen pRunNormal $ withCond cond $ tCmd x
 tCmd :: AST.Cmd -> IRM ()
 tCmd (AST.Block xs) = tSeds xs
 tCmd (AST.Print fd) = emit (Print fd)
--- Not parsed
--- tCmd (AST.PrintA fd) = emit (Print fd)
+tCmd (AST.PrintLineNumber fd) = emit (PrintLineNumber fd)
+tCmd (AST.PrintLiteral width) = emit (PrintLiteral width 0)
 tCmd (AST.Message m) = emit (Message m)
 -- FIXME Wrong! "If there is no more input then sed exits without processing
 -- any more commands."

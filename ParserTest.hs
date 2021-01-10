@@ -37,7 +37,7 @@ tests =
 
   , ("i text", [Sed Always (Insert "text")])
 
-  , ("l", [Sed Always (PrintLiteral 0)])
+  , ("l", [Sed Always (PrintLiteral 70)])
   , ("l 123", [Sed Always (PrintLiteral 123)])
 
   , ("m foo", [Sed Always (Message (Just "foo"))])

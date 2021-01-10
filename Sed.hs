@@ -14,6 +14,7 @@ import Control.Monad.Trans.State.Strict
 
 import Data.Array
 import qualified Data.ByteString.Char8 as C
+import Data.Char
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set (Set)
@@ -31,6 +32,7 @@ import System.IO.Unsafe
 #endif
 import System.Random
 
+import Text.Printf (printf)
 import Text.Regex.TDFA hiding (match)
 
 import AST
@@ -51,16 +53,16 @@ data IPCState = IPCState
   deriving (Show)
 
 data File
-  = NormalFile { fileIsEOF :: IO Bool, fileMaybeGetLine :: IO (Maybe S), filePutStrLn :: S -> IO () }
+  = NormalFile { fileIsEOF :: IO Bool, fileMaybeGetLine :: IO (Maybe S), filePutStr :: S -> IO () }
   | SocketFile Socket
 
 instance Show File where
   show (NormalFile _ _ _) = "NormalFile{}"
   show (SocketFile s) = "SocketFile " ++ show s
 
-handleFile h = NormalFile (hIsEOF h) (hMaybeGetLine h) (C.hPutStrLn h)
+handleFile h = NormalFile (hIsEOF h) (hMaybeGetLine h) (C.hPutStr h)
 inputListFile :: [FilePath] -> IO File
-inputListFile [] = return (NormalFile (hIsEOF stdin) (hMaybeGetLine stdin) C.putStrLn)
+inputListFile [] = return (NormalFile (hIsEOF stdin) (hMaybeGetLine stdin) C.putStr)
 inputListFile inputs = do
     current :: MVar Handle <- newEmptyMVar
     inputs <- newMVar inputs
@@ -92,7 +94,7 @@ inputListFile inputs = do
                 Just line -> putMVar current h >> return (Just line)
 
     nextFile (return ()) ()
-    return (NormalFile isEOF maybeGetLine C.putStrLn)
+    return (NormalFile isEOF maybeGetLine C.putStr)
 
 data SedState program = SedState
   { program :: program
@@ -238,6 +240,13 @@ runIR (IR.Print i) = get >>= \state ->
     case pattern state of
         Just p -> printTo i p
         _ -> return ()
+runIR (IR.PrintLiteral w i) = get >>= \state ->
+    case pattern state of
+        Just p -> putStrTo i (formatLiteral w p)
+        _ -> return ()
+runIR (IR.PrintLineNumber i) = do
+    l <- gets lineNumber
+    printTo i (C.pack (show l))
 runIR (IR.Change s) = modify $ \state -> state { pattern = Just s }
 runIR (IR.Hold reg) = doHold reg
 runIR (IR.HoldA reg) = doHoldAppend reg
@@ -374,6 +383,24 @@ trans from to p = C.map f p
     f c | Just i <- C.elemIndex c from = C.index to i
         | otherwise = c
 
+formatLiteral :: Int -> S -> S
+formatLiteral width s = lineWrap width (C.lines (C.append (escape s) "\n"))
+  where
+    escape = C.concatMap escapeChar
+    escapeChar '\\' = "\\\\"
+    escapeChar c | isPrint c = C.singleton c
+                 | otherwise = C.pack (printf "\\%03o" (ord c))
+
+    lineWrap 0 ss = C.concat (map (flip C.append eol) ss)
+    lineWrap width ss = C.concat (concatMap (wrap width) ss)
+
+    eol = "$\n"
+    cont = "\\\n"
+    wrap width s | C.null s2 = [s1, eol]
+                 | otherwise = s1 : cont : wrap width s2
+      where
+        (s1,s2) = C.splitAt (width - 1) s
+
 closeFile i = do
     f <- getFile i
     debug ("Closing " ++ show i ++ ": " ++ show f)
@@ -398,9 +425,11 @@ getFile i = gets (M.lookup i . files)
 setFile i f = modify $ \state -> state { files = M.insert i f (files state) }
 delFile i = modify $ \state -> state { files = M.delete i (files state) }
 
-printTo i s = do
+printTo i s = putStrTo i (C.append s "\n")
+
+putStrTo i s = do
   Just f <- getFile i
-  liftIO (filePutStrLn f s)
+  liftIO (filePutStr f s)
 
 incrementLineNumber =
     modify $ \state -> state { lineNumber = lineNumber state + 1 }
