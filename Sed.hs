@@ -240,8 +240,10 @@ runIR (IR.Print i) = get >>= \state ->
         _ -> return ()
 runIR (IR.Clear) = modify $ \state -> state { pattern = Just "" }
 runIR (IR.Hold reg) = doHold reg
+runIR (IR.HoldA reg) = doHoldAppend reg
 runIR (IR.Get reg) = doGet reg
 runIR (IR.GetA reg) = doGetAppend reg
+runIR (IR.Exchange reg) = doExchange reg
 runIR (IR.Cycle i intr cont eof) = do
     res <- getLineOrEvent i
     let (pat,l,k) = case res of
@@ -309,12 +311,26 @@ doMessage m = gets ipcState >>= f
 doHold reg = do
   pat <- fromMaybe "" . pattern <$> get
   debug ("Hold: holding " ++ show pat ++ " in " ++ show reg)
-  modify $ \s -> s { hold = M.insert (fromMaybe "" reg) pat (hold s) }
+  setRegValue reg pat
 doGet (Just "yhjulwwiefzojcbxybbruweejw") = patternSet =<< liftIO randomString
 doGet reg = patternSet =<< getRegValue reg
 
 doGetAppend = patternAppend <=< getRegValue
+doHoldAppend reg = do
+  pat <- fromMaybe "" . pattern <$> get
+  prev <- gets (M.lookup (fromMaybe "" reg) . hold)
+  setRegValue reg $ case prev of
+    Nothing -> pat
+    Just value -> C.concat [value, "\n", pat]
 
+doExchange reg = do
+  pat <- fromMaybe "" . pattern <$> get
+  held <- getRegValue reg
+  setRegValue reg pat
+  patternSet held
+
+setRegValue reg value =
+  modify $ \s -> s { hold = M.insert (fromMaybe "" reg) value (hold s) }
 getRegValue reg = gets (fromMaybe "" . M.lookup (fromMaybe "" reg) . hold)
 -- TODO We ought to provide secure random numbers
 randomString = C.pack <$> replicateM 32 (randomRIO ('A','Z'))

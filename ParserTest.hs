@@ -101,7 +101,8 @@ tests =
 
   , ("w /dev/stdin", [Sed Always (WriteFile "/dev/stdin")])
 
-  , ("x", [Sed Always Exchange])
+  , ("x", [Sed Always (Exchange Nothing)])
+  , ("x reg", [Sed Always (Exchange (Just "reg"))])
 
   , ("y/abc/def/", [Sed Always (Trans "abc" "def")])
 

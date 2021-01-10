@@ -205,6 +205,7 @@ pCommand = charSwitchM $
   , ('G', GetA <$> maybeP pRegister)
   , ('h', Hold <$> maybeP pRegister)
   , ('H', HoldA <$> maybeP pRegister)
+  , ('x', Exchange <$> maybeP pRegister)
   , ('i', Insert <$> pTextArgument)
   , ('l', PrintLiteral <$> option 0 wsInt)
   , ('L', Listen <$> int <*> maybeP pHostName <*> (char ':' *> int))
@@ -222,7 +223,6 @@ pCommand = charSwitchM $
   , ('t', Test <$> maybeP pLabel)
   , ('T', TestNot <$> maybeP pLabel)
   , ('w', WriteFile <$> pLabel)
-  , ('x', pure Exchange)
   , ('y', anyChar >>= (\c -> Trans <$> stringTerm c <*> stringTerm c))
   , ('z', pure Clear)
   ]

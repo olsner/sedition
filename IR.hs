@@ -60,6 +60,7 @@ data Insn e x where
   HoldA         :: (Maybe S)                -> Insn O O
   Get           :: (Maybe S)                -> Insn O O
   GetA          :: (Maybe S)                -> Insn O O
+  Exchange      :: (Maybe S)                -> Insn O O
 
   SetLastRE     :: RE                       -> Insn O O
   -- Subst last match against current pattern. See Match TODO about match regs.
@@ -386,6 +387,7 @@ tCmd (AST.Hold maybeReg) = emit (Hold maybeReg)
 tCmd (AST.HoldA maybeReg) = emit (HoldA maybeReg)
 tCmd (AST.Get maybeReg) = emit (Get maybeReg)
 tCmd (AST.GetA maybeReg) = emit (GetA maybeReg)
+tCmd (AST.Exchange maybeReg) = emit (Exchange maybeReg)
 tCmd (AST.Insert s) = emit (PrintS 0 s)
 -- TODO append ('a'/'A') should rather save data to be printed at the start of the
 -- next cycle (or the end of this one).

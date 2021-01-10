@@ -88,7 +88,7 @@ data Cmd
   | HoldA (Maybe S)
   | Get (Maybe S)
   | GetA (Maybe S)
-  | Exchange
+  | Exchange (Maybe S)
 
   | ReadFile S
   | WriteFile S

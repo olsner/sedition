@@ -161,8 +161,8 @@ depending on the direction of I/O. This neatly maps to sockets.
 
 ### Extended hold-space
 
-`g`, `G`, `h` and `H` are extended to take an optional register name. When used
-without the name, these correspond to the usual sed commands modifying the
+`g`, `G`, `h`, `H` and `x` are extended to take an optional register name. When
+used without the name, these correspond to the usual sed commands modifying the
 hold space. When used with names, each name identifies its own hold space.
 
 Hold spaces are separate for each thread, but inherit the previously set values
