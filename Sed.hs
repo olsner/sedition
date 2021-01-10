@@ -103,6 +103,7 @@ data SedState program = SedState
   , pattern :: Maybe S
   , hold :: Map S S
   , lastRegex :: Maybe RE
+  , extendedRegex :: Bool
   , predicates :: Set Int
 
   , ipcState :: Maybe IPCState
@@ -140,7 +141,7 @@ forkIPCState (Just state) = do
   _ <- forkIO (busRider passenger box)
   return $ Just state { passenger = passenger, box = Mailbox box }
 
-initialState ipc pgm file0 = do
+initialState ipc ere pgm file0 = do
   ipcState <- if ipc then Just <$> newIPCState else return Nothing
   return SedState {
     program = pgm
@@ -151,6 +152,7 @@ initialState ipc pgm file0 = do
   , lastRegex = Nothing
   , predicates = S.empty
   , ipcState = ipcState
+  , extendedRegex = ere
   }
 forkState pgm = get >>= \state -> liftIO $ do
   ipcState' <- forkIPCState (ipcState state)
@@ -219,7 +221,8 @@ runIR (IR.Subst sub stype) = do
   state <- get
   case pattern state of
     Just p
-      | Just (RE _ pat) <- lastRegex state
+      | Just (RE _ bre ere) <- lastRegex state
+      , pat <- selectRegex bre ere (extendedRegex state)
       , matches@(_:_) <- match stype pat p -> do
           let newp = subst p sub matches
           debug ("Subst: " ++ show p ++ " => " ++ show newp)
@@ -287,11 +290,15 @@ runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
 
 setLastRegex re = modify $ \state -> state { lastRegex = Just re }
 
-checkRE (RE _ re) = do
-  p <- pattern <$> get
+checkRE (RE _ bre ere) = do
+  p <- gets pattern
+  re <- gets (selectRegex bre ere . extendedRegex)
   case p of
     Just p -> return (matchTest re p)
     _ -> return False
+
+selectRegex _ ere True = ere
+selectRegex bre _ False = bre
 
 type SedPM p a = StateT (SedState p) IO a
 type Program = Graph IR.Insn C C
@@ -486,7 +493,7 @@ data Options = Options
   , fuel :: Int
   } deriving (Show, Eq)
 defaultOptions = Options
-    { extendedRegexps = True
+    { extendedRegexps = False
     , autoprint = True
     , enableIPC = True
     , scripts = []
@@ -499,7 +506,7 @@ addScriptFile f o = o { scripts = Right f : scripts o }
 setFuel f o = o { fuel = f }
 
 sedOptions =
-  [ Option ['r', 'E'] ["regexp-extended"] (NoArg $ \o -> o { extendedRegexps = True }) "Use extended regexps (default, always enabled, only parsed for sed compatibility)"
+  [ Option ['r', 'E'] ["regexp-extended"] (NoArg $ \o -> o { extendedRegexps = True }) "Use extended regexps"
   , Option ['n'] ["quiet", "silent"] (NoArg $ \o -> o { autoprint = False }) "suppress automatic printing of pattern space"
   , Option ['e'] ["expression"] (ReqArg addScript "SCRIPT") "add the script to the commands to be executed"
   , Option ['f'] ["file"] (ReqArg addScriptFile "SCRIPT_FILE") "add the contents of script-file to the commands to be executed"
@@ -527,9 +534,9 @@ getScript options inputs = case scripts options of
     ss <- flagScript options
     return (ss, inputs)
 
-runProgram :: Bool -> (H.Label, Program) -> File -> IO ()
-runProgram ipc (label, program) file0 = do
-    state <- initialState ipc program file0
+runProgram :: Bool -> Bool -> (H.Label, Program) -> File -> IO ()
+runProgram ipc ere (label, program) file0 = do
+    state <- initialState ipc ere program file0
     evalStateT (runIRLabel label) state
 
 do_main args = do
@@ -557,6 +564,6 @@ do_main args = do
   when (dumpOptimizedIR || dumpOriginalIR) exitSuccess
 
   file0 <- inputListFile (map C.unpack inputs)
-  runProgram enableIPC (entryLabel,program') file0
+  runProgram enableIPC extendedRegexps (entryLabel,program') file0
 
 main = do_main =<< getArgs

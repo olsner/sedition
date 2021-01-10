@@ -97,6 +97,8 @@ slash re = (char '/' *> slashWith re '/')
 -- and consumes the terminator.
 -- The 're' should presumably have some effect on parsing? It's true for the
 -- regexp part and false for replacement part of a s/// command.
+-- I wonder if it's reasonable to simply parse a complete regexp here, thread
+-- in the BRE/ERE flag and generate an extended regexp internally.
 slashWith :: Bool -> Char -> Parser S
 slashWith re term = BS.concat <$> many p <* char term
   where

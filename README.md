@@ -10,10 +10,8 @@ This is a dialect of sed, extended with some useful features:
 * Extended hold space, a key/value store extending the normal single hold space
 * Built-in optimizer and (eventually) compiler
 
-Some GNU sed features have been included, and the regular expressions are
-always the extended variety (as if the -r flag was passed to sed). There may
-be other subtle differences in regexp dialect between sed and the regex-tdfa
-package used though.
+This tries to be compatible with GNU sed, so it implements some GNU extensions
+and none of the added sedition features should interfere with GNU ones.
 
 ## Building and Getting Started
 
@@ -23,7 +21,7 @@ package used though.
 * Build with `make`
 
 The produced sed executable accepts the usual sed command-line options. (But
-not all of them.)
+not all of them are implemented yet.)
 
 ## Examples
 

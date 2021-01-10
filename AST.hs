@@ -2,26 +2,32 @@ module AST where
 
 import System.Exit
 
-import Text.Regex.TDFA
+import Text.Regex.Posix
 
 import Data.ByteString.Char8 as C
 type S = ByteString
 
--- TODO Replace with actual compiled regexp
-data RE = RE S Regex
+-- Keeps both basic and extended here, then selects variant on execution. Just
+-- to avoid threading dialects all the way into the parser. (though maybe
+-- Trifecta does allow some parser state we can hook into...)
+-- Still feels wrong. Maybe this should just be the string, the IR can contain
+-- Regex and the IR translation can also have a flag in its monad state for
+-- which dialect to compile into.
+data RE = RE S Regex Regex
 type Label = S
 
 instance Show RE where
-  show (RE s _) = show s
+  show (RE s _ _) = show s
 instance Eq RE where
-  RE s _ == RE t _ = s == t
+  RE s _ _ == RE t _ _ = s == t
 instance Ord RE where
-  compare (RE s _) (RE t _) = compare s t
+  compare (RE s _ _) (RE t _ _) = compare s t
 
 re :: S -> Maybe RE
 re s | C.null s  = Nothing
-     -- TODO With options
-     | otherwise = RE s <$> makeRegexM s
+     | otherwise = Just (RE s bre ere)
+       where bre = makeRegexOpts blankCompOpt defaultExecOpt s
+             ere = makeRegexOpts compExtended defaultExecOpt s
 
 data Subst = Literal S | BackReference Int | WholeMatch deriving (Ord,Eq,Show)
 type Replacement = [Subst]
