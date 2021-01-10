@@ -45,6 +45,7 @@ main()
 	TEST=${1-../sed}
 	TESTLOG=nsed.out
 	DICT=/usr/share/dict/words
+    export LC_ALL=C
 
 	test_error | more
 
@@ -444,15 +445,10 @@ p
 test_print()
 {
 	echo Testing print and file routines
-	awk 'END {for (i = 1; i < 256; i++) printf("%c", i);print "\n"}' \
+	awk 'END {for (i = 32; i < 128; i++) printf("%c", i);print "\n"}' \
 		</dev/null >lines3
 	# GNU and SunOS sed behave differently here
-	mark '7.1'
-	if [ $BSD -eq 1 ] ; then
-		echo 'BSD sed drops core on this one; TEST SKIPPED'
-	else
-		$SED -n l lines3
-	fi
+	mark '7.1' ; $SED -n l lines3
 	mark '7.2' ; $SED -e '/l2_/=' lines1 lines2
 	rm -f lines4
 	mark '7.3' ; $SED -e '3,12w lines4' lines1
