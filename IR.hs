@@ -400,8 +400,9 @@ tCmd (AST.Get maybeReg) = emit (Get maybeReg)
 tCmd (AST.GetA maybeReg) = emit (GetA maybeReg)
 tCmd (AST.Exchange maybeReg) = emit (Exchange maybeReg)
 tCmd (AST.Insert s) = emit (PrintS 0 s)
--- TODO append ('a'/'A') should rather save data to be printed at the start of the
--- next cycle (or the end of this one).
+-- TODO append ('a'/'A') should rather save data to be printed at the end of
+-- the cycle, or when reading the next input line.
+-- (Is that only for n or also for N?)
 tCmd (AST.Append s) = emit (PrintS 0 s)
 tCmd (AST.WriteFile path) = emit (WriteFile path)
 tCmd (AST.Quit print status) = () <$ do

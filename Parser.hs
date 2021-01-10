@@ -225,12 +225,14 @@ pCommand = charSwitchM $
   , ('q', pQuit True)
   , ('Q', pQuit False)
   , ('r', ReadFile <$> pFileName)
+  --, ('R', ReadLine <$> pFileName)
   , ('s', anyChar >>= (\c -> mkSubst <$> pRegexp c
                                      <*> pReplacement c
                                      <*> many sFlag))
   , ('t', Test <$> maybeP pLabel)
   , ('T', TestNot <$> maybeP pLabel)
   , ('w', WriteFile <$> pFileName)
+  -- TODO W for WriteFileFirstLine
   , ('y', anyChar >>= (\c -> Trans <$> stringTerm c <*> stringTerm c))
   , ('z', pure Clear)
   ]
