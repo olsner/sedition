@@ -87,6 +87,8 @@ tests =
   , ("s|[|]||", [Sed Always (subst "[|]" "")])
   -- Escaped bracket in bracket should not end it.
   --, ("s/[\\]/]foo/bar/", [Sed Always (subst "[\\]/]foo" "bar")])
+  , ("s|foo|\\\n|", [Sed Always (subst "foo" "\\\n")])
+  , ("s|foo|\\n|", [Sed Always (subst "foo" "\n")])
 
   , ("t foo;Tfoo;t;T",
         [ Sed Always (Test (Just "foo"))

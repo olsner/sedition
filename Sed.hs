@@ -348,10 +348,13 @@ subst p rep matches = go "" 0 matches
       where
         go acc i | i == C.length rep = acc
         go acc i = case C.index rep i of
-          '\\' -> go (acc <> matchN (digitToInt (C.index rep (i + 1)))) (i + 2)
-          '&' -> go (acc <> matchN 0) (i + 1)
+          '\\' | Just c <- maybeIndex rep (i + 1) -> if isDigit c
+            then go (acc <> matchN (digitToInt c)) (i + 2)
+            else go (C.snoc acc c) (i + 2)
           c -> go (C.snoc acc c) (i + 1)
         matchN n = (uncurry substr) (match ! n)
+        maybeIndex s i | 0 <= i, i < C.length s = Just (C.index s i)
+                       | otherwise = Nothing
 
 match SubstFirst re p = take 1 (matchAll re p)
 match SubstAll re p = matchAll re p
