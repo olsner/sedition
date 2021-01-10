@@ -490,8 +490,8 @@ test_subst()
 u1\
 u2/g' lines1
 	mark '8.10'
-	if [ $BSD -eq 1 -o $GNU -eq 1 ] ; then
-		echo 'BSD/GNU sed do not understand digit flags on s commands'
+	if [ $BSD -eq 1 ] ; then
+		echo 'BSD sed does not understand digit flags on s commands'
 	fi
 	$SED -e 's/./X/4' lines1
 	rm -f lines4

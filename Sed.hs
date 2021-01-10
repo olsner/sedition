@@ -358,9 +358,7 @@ subst p rep matches = go "" 0 matches
 
 match SubstFirst re p = take 1 (matchAll re p)
 match SubstAll re p = matchAll re p
--- TODO Handle not finding enough matches for match i. Should be handled the
--- same as a nonmatch.
-match (SubstNth i) re p = [matchAll re p !! i]
+match (SubstNth i) re p = take 1 . drop (i - 1) $ matchAll re p
 
 trans :: S -> S -> S -> S
 trans from to p = C.map f p
