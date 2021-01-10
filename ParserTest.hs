@@ -77,6 +77,17 @@ tests =
   , ("\\/\\//s///", [Sed (At (Match (re "/"))) emptySub])
   , ("\\|\\|| s|||", [Sed (At (Match (re "|"))) emptySub])
 
+  -- Slash (or other separator) should be "escaped" when in brackets. Appears
+  -- in GNU's dc.sed (at least).
+  , ("s/[/]//", [Sed Always (subst "[/]" "")])
+  -- The special handling should probably not be applied in the replacement part.
+  , ("s|foo|[|", [Sed Always (subst "foo" "[")])
+  -- When the bracket is escaped it should not be treated specially
+  , ("s/\\[/]/", [Sed Always (subst "\\[" "]")])
+  , ("s|[|]||", [Sed Always (subst "[|]" "")])
+  -- Escaped bracket in bracket should not end it.
+  --, ("s/[\\]/]foo/bar/", [Sed Always (subst "[\\]/]foo" "bar")])
+
   , ("t foo;Tfoo;t;T",
         [ Sed Always (Test (Just "foo"))
         , Sed Always (TestNot (Just "foo"))

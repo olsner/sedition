@@ -96,19 +96,33 @@ slash re = (char '/' *> slashWith re '/')
 -- The 're' should presumably have some effect on parsing? It's true for the
 -- regexp part and false for replacement part of a s/// command.
 slashWith :: Bool -> Char -> Parser S
-slashWith _re term = BS.pack . concat <$> many p <* char term
+slashWith re term = BS.concat <$> many p <* char term
   where
-  p = choice $
-    [ (:[]) <$> noneOf [term,'\n','\\']
+  -- On the regexp side, handle character classes specially. On the replacement
+  -- side, [ is just a literal.
+  p | re        = choice (charClass : commonParsers)
+    | otherwise = choice commonParsers
+  -- TODO Kind of similar to slashWith ']', but we don't want to unescape
+  -- things like \], and we should unescape the terminator. Getting all
+  -- the corner cases really right requires more work.
+  charClass = BS.pack <$> (char '[' $>$$ many (noneOf [']']) $$>$ char ']')
+  commonParsers =
+    [ BS.singleton <$> noneOf [term,'\n','\\']
     -- TODO It's possible to use a regexp-special character as the delimiter,
     -- which makes this a bit wonky. I think we may need to detect those and
     -- treat them as explicitly literals (?), which may mean adding the \\
     -- depending on if we use BRE or EREs.
-    , [term] <$ try (char '\\' >> char term)
-    , (:[]) <$> try (char '\\' *> (unescape <$> oneOf "rn"))
+    , BS.singleton <$> try (char '\\' >> char term)
+    , BS.singleton <$> try (char '\\' *> (unescape <$> oneOf "rn"))
     -- Any other characters except the terminator get passed through to the
     -- regexp engine including the backslash.
-    , (\x y -> [x,y]) <$> char '\\' <*> anyChar ]
+    , (\x y -> BS.pack [x,y]) <$> char '\\' <*> anyChar ]
+
+($>$$) :: Applicative f => f a -> f [a] -> f [a]
+head $>$$ tail = (:) <$> head <*> tail
+
+($$>$) :: Applicative f => f [a] -> f a -> f [a]
+head $$>$ tail = (\xs y -> xs ++ [y]) <$> head <*> tail
 
 maybeP p = option Nothing (Just <$> p)
 maybeNonEmpty s | BS.null s = Nothing | otherwise = Just s
