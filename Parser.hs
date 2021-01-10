@@ -58,6 +58,7 @@ list p1 p2 = (:) <$> p1 <*> p2
 -- not eof, blank, }, ; or #
 pLabel = BS.pack <$> wsThen (some (noneOf "; \t\n\f\t\v\r#"))
 pRegister = pLabel
+pFileName = pLabel
 -- Same but also delimited by : (for :port)
 pHostName = BS.pack <$> wsThen (some (noneOf ":; \t\n\f\t\v\r#"))
 -- Accept both single-line and multiple-line arguments to [aicm]
@@ -160,6 +161,12 @@ setSubstAction act (t,_) = (t,act)
 sFlag = choice $
   -- integer: substitute only the nth occurrence
   [ setSubstType . SubstNth <$> int
+  -- w file: write result to file
+  , setSubstAction . SActionWriteFile <$> (char 'w' *> pFileName)
+  -- p int for printing to a given file descriptor. probably conflicts with
+  -- existing syntax though, since s///p1 should replace the first match and
+  -- print.
+  --, setSubstAction . SActionPrint <$> (char 'p' *> option 0 int)
   , sCharFlag
   ]
 sCharFlag = charSwitch $
@@ -173,9 +180,8 @@ sCharFlag = charSwitch $
 
   -- Actions, decide how to make the substitution
   , ('e', setSubstAction SActionExec)
-  -- TODO p int for printing to a given file descriptor
+  -- p without argument, print to stdout
   , ('p', setSubstAction (SActionPrint 0))
-  -- w file: write result to file
   ]
 
 -- TODO Parse the replacement into e.g. a list of strings and references instead
@@ -216,13 +222,13 @@ pCommand = charSwitchM $
   , ('P', PrintFirstLine <$> option 0 wsInt)
   , ('q', pQuit True)
   , ('Q', pQuit False)
-  , ('r', ReadFile <$> pLabel)
+  , ('r', ReadFile <$> pFileName)
   , ('s', anyChar >>= (\c -> mkSubst <$> pRegexp c
                                      <*> pReplacement c
                                      <*> many sFlag))
   , ('t', Test <$> maybeP pLabel)
   , ('T', TestNot <$> maybeP pLabel)
-  , ('w', WriteFile <$> pLabel)
+  , ('w', WriteFile <$> pFileName)
   , ('y', anyChar >>= (\c -> Trans <$> stringTerm c <*> stringTerm c))
   , ('z', pure Clear)
   ]

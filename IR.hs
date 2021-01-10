@@ -76,6 +76,8 @@ data Insn e x where
   CloseFile     :: Int                      -> Insn O O
   Comment       :: String                   -> Insn O O
 
+  WriteFile     :: S                        -> Insn O O
+
 deriving instance Show (Insn e x)
 deriving instance Eq (Insn e x)
 
@@ -401,6 +403,7 @@ tCmd (AST.Insert s) = emit (PrintS 0 s)
 -- TODO append ('a'/'A') should rather save data to be printed at the start of the
 -- next cycle (or the end of this one).
 tCmd (AST.Append s) = emit (PrintS 0 s)
+tCmd (AST.WriteFile path) = emit (WriteFile path)
 tCmd (AST.Quit print status) = () <$ do
   when print $ emit (Print 0)
   finishBlock' (Quit status)
@@ -409,6 +412,7 @@ tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
 tSubstAction SActionNone = return ()
 tSubstAction SActionExec = emit ShellExec
 tSubstAction (SActionPrint n) = emit (Print n)
+tSubstAction (SActionWriteFile path) = emit (WriteFile path)
 
 tTest ifTrue maybeTarget = mdo
   comment ("test " ++ show ifTrue ++ " " ++ show target)

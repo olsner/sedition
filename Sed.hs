@@ -273,6 +273,15 @@ runIR (IR.ReadAppend i) = do
   case l of
    Just s -> patternAppend s
    Nothing -> liftIO exitSuccess
+-- Not quite right - all referenced files should be created/truncated before
+-- the first written line, then all subsequent references continue writing
+-- without reopening the file.
+-- Probably the IR step should assign a file descriptor for each used output
+-- file, generate code to open them on startup and then this should be done
+-- through (Print fd) instead.
+runIR (IR.WriteFile path) = do
+  pat <- fromMaybe "" . pattern <$> get
+  liftIO $ C.appendFile (C.unpack path) (C.append pat "\n")
 
 runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
 

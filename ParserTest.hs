@@ -62,6 +62,7 @@ tests =
   , ("s/a/b/p", [Sed Always (subst2 "a" "b" SubstFirst (SActionPrint 0))])
   , ("s/a/b/e", [Sed Always (subst2 "a" "b" SubstFirst SActionExec)])
   , ("s/a/b/1234", [Sed Always (subst2 "a" "b" (SubstNth 1234) SActionNone)])
+  , ("s/a/b/w output", [Sed Always (subst2 "a" "b" SubstFirst (SActionWriteFile "output"))])
   -- combinations of SubstNth
   , ("s/a/b/gp", [Sed Always (subst2 "a" "b" SubstAll (SActionPrint 0))])
   , ("s/a/b/1p", [Sed Always (subst2 "a" "b" (SubstNth 1) (SActionPrint 0))])

@@ -36,6 +36,7 @@ data SubstType
 data SubstAction
   = SActionNone
   | SActionPrint Int
+  | SActionWriteFile S
   | SActionExec
   deriving (Show, Ord, Eq)
 

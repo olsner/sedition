@@ -476,7 +476,11 @@ test_print()
 		echo "" >> lines3
 		$SED -n -e '$p' lines3 /dev/null
 	fi
-		
+
+	rm -f lines4
+	mark '7.9' ; $SED -e '3,12s/.*/&/w lines4' lines1
+	echo w results
+	cat lines4
 }
 
 test_subst()
@@ -502,10 +506,9 @@ u2/g' lines1
 	fi
 	$SED -e 's/./X/4' lines1
 	rm -f lines4
-    # TODO 'w file' flag is unimplemented
-#	mark '8.11' ; $SED -e 's/1/X/w lines4' lines1
-#	echo s wfile results
-#	cat lines4
+	mark '8.11' ; $SED -e 's/1/X/w lines4' lines1
+	echo s wfile results
+	cat lines4
 	mark '8.12' ; $SED -e 's/[123]/X/g' lines1
 	mark '8.13' ; $SED -e 'y/0123456789/9876543210/' lines1
 	mark '8.14' ; 
