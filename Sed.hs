@@ -225,6 +225,12 @@ runIR (IR.Subst sub stype) = do
           modify $ \state -> state { pattern = Just newp }
     _ -> fatal "Subst: no match when substituting?"
 
+runIR (IR.Trans from to) = do
+  state <- get
+  case pattern state of
+    Just p -> modify $ \state -> state { pattern = Just (trans from to p) }
+    _ -> fatal "Trans: no pattern when substituting?"
+
 runIR (IR.Message Nothing) = doMessage . fromJust =<< gets pattern
 runIR (IR.Message (Just s)) = doMessage s
 
@@ -352,6 +358,12 @@ match SubstAll re p = matchAll re p
 -- TODO Handle not finding enough matches for match i. Should be handled the
 -- same as a nonmatch.
 match (SubstNth i) re p = [matchAll re p !! i]
+
+trans :: S -> S -> S -> S
+trans from to p = C.map f p
+  where
+    f c | Just i <- C.elemIndex c from = C.index to i
+        | otherwise = c
 
 closeFile i = do
     f <- getFile i

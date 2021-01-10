@@ -63,6 +63,7 @@ data Insn e x where
   SetLastRE     :: RE                       -> Insn O O
   -- Subst last match against current pattern. See Match TODO about match regs.
   Subst         :: S -> SubstType           -> Insn O O
+  Trans         :: S -> S                   -> Insn O O
 
   ShellExec     ::                             Insn O O
   Listen        :: Int -> (Maybe S) -> Int  -> Insn O O
@@ -379,6 +380,7 @@ tCmd (AST.Redirect dst Nothing) = emit (CloseFile dst)
 tCmd (AST.Subst mre sub flags actions) = do
   p <- tCheck (AST.Match mre)
   tIf p (setLastSubst True >> emit (Subst sub flags) >> tSubstAction actions) (setLastSubst False)
+tCmd (AST.Trans from to) = emit (Trans from to)
 tCmd (AST.Hold maybeReg) = emit (Hold maybeReg)
 tCmd (AST.HoldA maybeReg) = emit (HoldA maybeReg)
 tCmd (AST.Get maybeReg) = emit (Get maybeReg)
