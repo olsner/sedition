@@ -241,6 +241,7 @@ tProgram seds = mdo
   newCyclePrint <- label
   get >>= \s -> when (autoprint s) (emit (Print 0))
   newCycleNoPrint <- label
+  setLastSubst False
   line <- finishBlock' (Cycle 0 intr line exit)
 
   emit (Set pIntr cFalse)
@@ -350,8 +351,8 @@ tCmd (AST.Print fd) = emit (Print fd)
 tCmd (AST.Message m) = emit (Message m)
 -- FIXME Wrong! "If there is no more input then sed exits without processing
 -- any more commands."
-tCmd (AST.Next fd) = printIfAuto >> emit (Read fd)
-tCmd (AST.NextA fd) = emit (ReadAppend fd)
+tCmd (AST.Next fd) = printIfAuto >> emit (Read fd) >> setLastSubst False
+tCmd (AST.NextA fd) = emit (ReadAppend fd) >> setLastSubst False
 tCmd (AST.Listen fd host port) = emit (Listen fd host port)
 tCmd (AST.Accept sfd fd) = emit (Accept sfd fd)
 tCmd (AST.Label name) = do
@@ -408,7 +409,7 @@ tTest ifTrue maybeTarget = mdo
     Just name -> getLabelMapping name
   let (t,f) | ifTrue    = (target, l)
             | otherwise = (l, target)
-  let clear = emit (Set pLastSubst cFalse)
+  let clear = setLastSubst False
   tIf pLastSubst (clear >> emitBranch' t) (clear >> emitBranch' f)
   l <- label
   return ()

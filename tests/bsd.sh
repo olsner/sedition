@@ -392,11 +392,22 @@ hello
 }
 s/l/m/
 tb' lines1
+# Check that reading a line with n/N also clears the substitution done flag
+	mark '5.9'
+	$SED -n -e '
+        s/^/^/p
+        /_5/n
+        /_7/N
+        t l2
+        b
+        :l2
+        s/^/subst-done: /p
+    ' lines1
 }
 
 test_pattern()
 {
-echo Pattern space commands
+echo >&2 Pattern space commands
 # Check that the pattern space is deleted
 	mark '6.1' ; $SED -n -e '
 c\
