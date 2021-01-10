@@ -14,7 +14,6 @@ import Control.Monad.Trans.State.Strict
 
 import Data.Array
 import qualified Data.ByteString.Char8 as C
-import Data.Char
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set (Set)
@@ -328,9 +327,7 @@ patternAppend s = do
 patternSet :: S -> SedM ()
 patternSet p = modify $ \s -> s { pattern = Just p }
 
--- This could be preprocessed a bit better, e.g. having the parser parse the
--- replacement into a list of (Literal|Ref Int).
-subst :: S -> S -> [MatchArray] -> S
+subst :: S -> Replacement -> [MatchArray] -> S
 subst p rep matches = go "" 0 matches
   where
     go acc lastmatch (m:ms)
@@ -344,17 +341,12 @@ subst p rep matches = go "" 0 matches
     go acc lastmatch [] = acc <> C.drop lastmatch p
 
     substr s l = C.take l (C.drop s p)
-    replace rep match = go "" 0
+    replace rep match = C.concat (map replace1 rep)
       where
-        go acc i | i == C.length rep = acc
-        go acc i = case C.index rep i of
-          '\\' | Just c <- maybeIndex rep (i + 1) -> if isDigit c
-            then go (acc <> matchN (digitToInt c)) (i + 2)
-            else go (C.snoc acc c) (i + 2)
-          c -> go (C.snoc acc c) (i + 1)
-        matchN n = (uncurry substr) (match ! n)
-        maybeIndex s i | 0 <= i, i < C.length s = Just (C.index s i)
-                       | otherwise = Nothing
+        replace1 (Literal s) = s
+        replace1 WholeMatch  = group 0
+        replace1 (BackReference i) = group i
+        group n = (uncurry substr) (match ! n)
 
 match SubstFirst re p = take 1 (matchAll re p)
 match SubstAll re p = matchAll re p

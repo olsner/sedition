@@ -6,6 +6,7 @@ import Control.Applicative
 
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BS
+import Data.Char (digitToInt)
 import Data.Maybe
 
 import System.Exit
@@ -118,6 +119,33 @@ slashWith re term = BS.concat <$> many p <* char term
     -- regexp engine including the backslash.
     , (\x y -> BS.pack [x,y]) <$> char '\\' <*> anyChar ]
 
+stringTerm :: Char -> Parser S
+stringTerm term = slashWith False term
+
+pRegexp :: Char -> Parser (Maybe RE)
+pRegexp term = re <$> slashWith True term
+
+-- Parse a replacement and the closing terminator. \ escapes the terminator and
+-- starts a back reference. & is a reference to the whole pattern.
+pReplacement :: Char -> Parser Replacement
+pReplacement term = combineLiterals <$> many (choice ps) <* char term
+  where
+  ps = [ WholeMatch <$ char '&'
+       , charLit <$> noneOf [term,'\n','\\']
+       , char '\\' >> choice escaped ]
+  escaped = [ charLit . unescape <$> oneOf "rn"
+            , BackReference . digitToInt <$> digit
+            , charLit <$> anyChar ]
+  charLit = Literal . BS.singleton
+
+combineLiterals xs = go "" xs
+  where
+    go s1 (Literal s2:xs) = go (BS.append s1 s2) xs
+    go s1 (x:xs) = s1 `literalThen` (x : go "" xs)
+    go s1 [] = s1 `literalThen` []
+    literalThen s xs | BS.null s = xs
+                     | otherwise = Literal s : xs
+
 ($>$$) :: Applicative f => f a -> f [a] -> f [a]
 head $>$$ tail = (:) <$> head <*> tail
 
@@ -188,14 +216,14 @@ pCommand = charSwitchM $
   , ('q', pQuit True)
   , ('Q', pQuit False)
   , ('r', ReadFile <$> pLabel)
-  , ('s', anyChar >>= (\c -> mkSubst <$> (re <$> slashWith True c)
-                                     <*> slashWith False c
+  , ('s', anyChar >>= (\c -> mkSubst <$> pRegexp c
+                                     <*> pReplacement c
                                      <*> many sFlag))
   , ('t', Test <$> maybeP pLabel)
   , ('T', TestNot <$> maybeP pLabel)
   , ('w', WriteFile <$> pLabel)
   , ('x', pure Exchange)
-  , ('y', anyChar >>= (\c -> Trans <$> slashWith True c <*> slashWith False c))
+  , ('y', anyChar >>= (\c -> Trans <$> stringTerm c <*> stringTerm c))
   , ('z', pure Clear)
   ]
 

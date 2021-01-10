@@ -15,6 +15,7 @@ import qualified Data.Map as M
 import System.Exit
 
 import AST hiding (Cmd(..), Address(..), Label)
+import AST (Replacement)
 import qualified AST
 
 newtype Pred = Pred Int deriving (Ord,Eq)
@@ -62,7 +63,7 @@ data Insn e x where
 
   SetLastRE     :: RE                       -> Insn O O
   -- Subst last match against current pattern. See Match TODO about match regs.
-  Subst         :: S -> SubstType           -> Insn O O
+  Subst         :: Replacement -> SubstType -> Insn O O
   Trans         :: S -> S                   -> Insn O O
 
   ShellExec     ::                             Insn O O

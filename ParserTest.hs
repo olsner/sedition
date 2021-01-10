@@ -16,9 +16,11 @@ doTest (input, result) = case parseOnly pFile input of
 
 doTests = mapM doTest
 
-subst pat rep = Subst (re pat) rep SubstFirst SActionNone
-subst2 pat rep t act = Subst (re pat) rep t act
-emptySub = Subst Nothing "" SubstFirst SActionNone
+subst' pat rep = Subst (re pat) rep SubstFirst SActionNone
+subst pat "" = subst' pat []
+subst pat rep = subst' pat [Literal rep]
+subst2 pat rep t act = Subst (re pat) [Literal rep] t act
+emptySub = Subst Nothing [] SubstFirst SActionNone
 
 tests =
   [ ("a text", [Sed Always (Append "text")])
@@ -87,8 +89,9 @@ tests =
   , ("s|[|]||", [Sed Always (subst "[|]" "")])
   -- Escaped bracket in bracket should not end it.
   --, ("s/[\\]/]foo/bar/", [Sed Always (subst "[\\]/]foo" "bar")])
-  , ("s|foo|\\\n|", [Sed Always (subst "foo" "\\\n")])
+  , ("s|foo|\\\n|", [Sed Always (subst "foo" "\n")])
   , ("s|foo|\\n|", [Sed Always (subst "foo" "\n")])
+  , ("s/./(&)/", [Sed Always (subst' "." [Literal "(", WholeMatch, Literal ")"])])
 
   , ("t foo;Tfoo;t;T",
         [ Sed Always (Test (Just "foo"))

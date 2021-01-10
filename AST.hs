@@ -23,6 +23,9 @@ re s | C.null s  = Nothing
      -- TODO With options
      | otherwise = RE s <$> makeRegexM s
 
+data Subst = Literal S | BackReference Int | WholeMatch deriving (Ord,Eq,Show)
+type Replacement = [Subst]
+
 data SubstType
   = SubstFirst
   | SubstNth Int
@@ -64,7 +67,7 @@ data Cmd
   | Accept Int Int
   | Redirect Int (Maybe Int)
   -- s///
-  | Subst (Maybe RE) S SubstType SubstAction
+  | Subst (Maybe RE) Replacement SubstType SubstAction
   -- y///
   | Trans S S
 
