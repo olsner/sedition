@@ -394,7 +394,15 @@ printTo i s = do
   Just f <- getFile i
   liftIO (filePutStrLn f s)
 
-maybeGetLine i = liftIO . fileMaybeGetLine =<< fromJust <$> getFile i
+incrementLineNumber =
+    modify $ \state -> state { lineNumber = lineNumber state + 1 }
+
+maybeGetLine :: Int -> StateT (SedState p) IO (Maybe S)
+maybeGetLine i = do
+    maybeLine <- liftIO . fileMaybeGetLine =<< fromJust <$> getFile i
+    case maybeLine of
+     Just l | 0 <- i -> incrementLineNumber >> return (Just l)
+     _ -> return maybeLine
 
 hMaybeGetLine :: Handle -> IO (Maybe S)
 hMaybeGetLine h = do
