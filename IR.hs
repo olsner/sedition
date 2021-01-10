@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving, CPP, RecursiveDo #-}
+{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving, CPP, RecursiveDo, OverloadedStrings #-}
 
 #define DEBUG 0
 
@@ -47,8 +47,8 @@ data Insn e x where
   Cycle         :: FD -> Label -> Label -> Label -> Insn O C
 
   Set           :: Pred -> Cond             -> Insn O O
-  -- Clear pattern space
-  Clear         ::                             Insn O O
+  -- Set pattern space to hardcoded string
+  Change        :: S                        -> Insn O O
   -- for N (which can never accept interrupts)
   Read          :: FD                       -> Insn O O
   ReadAppend    :: FD                       -> Insn O O
@@ -341,6 +341,11 @@ tSed (Sed cond@(At AST.IRQ) x) = withCond cond $ do
   emit (Set pRunNormal cTrue)
   tCmd x
   emit (Set pRunNormal cFalse)
+-- Special case for change with a range: replace all lines with a single copy
+-- of the replacement string.
+tSed (Sed (Between start end) (AST.Change repl)) = do
+    tSed (Sed (At end) (AST.Insert repl))
+    tSed (Sed (Between start end) AST.Delete)
 tSed (Sed cond x) = tWhen pRunNormal $ withCond cond $ tCmd x
 
 tCmd :: AST.Cmd -> IRM ()
@@ -376,7 +381,8 @@ tCmd (AST.Fork sed) = mdo
   exit <- finishBlock' (Quit ExitSuccess)
   return ()
 
-tCmd (AST.Clear) = emit Clear
+tCmd (AST.Clear) = emit (Change "")
+tCmd (AST.Change replacement) = emit (Change replacement)
 tCmd (AST.Delete) = branchNextCycleNoPrint
 tCmd (AST.Redirect dst (Just src)) = emit (Redirect dst src)
 tCmd (AST.Redirect dst Nothing) = emit (CloseFile dst)

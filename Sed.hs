@@ -238,7 +238,7 @@ runIR (IR.Print i) = get >>= \state ->
     case pattern state of
         Just p -> printTo i p
         _ -> return ()
-runIR (IR.Clear) = modify $ \state -> state { pattern = Just "" }
+runIR (IR.Change s) = modify $ \state -> state { pattern = Just s }
 runIR (IR.Hold reg) = doHold reg
 runIR (IR.HoldA reg) = doHoldAppend reg
 runIR (IR.Get reg) = doGet reg
