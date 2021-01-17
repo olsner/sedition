@@ -105,6 +105,7 @@ data SedState program = SedState
   , lastRegex :: Maybe RE
   , extendedRegex :: Bool
   , predicates :: Set Int
+  , strings :: Map Int S
 
   , ipcState :: Maybe IPCState
 
@@ -149,6 +150,7 @@ initialState ipc ere pgm file0 = do
   , lineNumber = 0
   , pattern = Nothing
   , hold = M.empty
+  , strings = M.empty
   , lastRegex = Nothing
   , predicates = S.empty
   , ipcState = ipcState
@@ -170,6 +172,10 @@ setPred (IR.Pred n) b = modify $ \s -> s { predicates = f (predicates s) }
       | otherwise = S.delete n
 getPred (IR.Pred n) = S.member n . predicates <$> get
 
+setString (IR.SVar n) value =
+    modify $ \s -> s { strings = M.insert n value (strings s) }
+getString (IR.SVar n) = gets (fromMaybe "" . M.lookup n . strings)
+
 runIRLabel :: H.Label -> SedM ()
 runIRLabel entry = do
   GMany _ blocks _ <- program <$> get
@@ -190,13 +196,14 @@ runIR_debug i = do
 runIR :: IR.Insn e x -> SedM ()
 runIR (IR.Label _) = return ()
 runIR (IR.Branch l) = runIRLabel l
-runIR (IR.Set p cond) = setPred p =<< case cond of
+runIR (IR.SetP p cond) = setPred p =<< case cond of
   IR.Bool b -> return b
   IR.Line l -> gets ((l ==) . lineNumber)
   IR.EndLine l -> gets ((l <) . lineNumber)
   IR.Match re -> checkRE re
   IR.MatchLastRE -> checkRE . fromJust =<< gets lastRegex
   IR.AtEOF -> liftIO . fileIsEOF =<< gets (fromJust . M.lookup 0 . files)
+runIR (IR.SetS s expr) = setString s =<< evalStringExpr expr
 runIR (IR.If p t f) = do
   b <- getPred p
   runIRLabel (if b then t else f)
@@ -218,27 +225,22 @@ runIR (IR.CloseFile i) = closeFile i
 runIR (IR.SetLastRE re) = setLastRegex re
 
 runIR (IR.Subst sub stype) = do
-  state <- get
-  case pattern state of
-    Just p
-      | Just (RE _ bre ere) <- lastRegex state
-      , pat <- selectRegex bre ere (extendedRegex state)
-      , matches@(_:_) <- match stype pat p -> do
-          let newp = subst p sub matches
-          debug ("Subst: " ++ show p ++ " => " ++ show newp)
-          modify $ \state -> state { pattern = Just newp }
-    _ -> fatal "Subst: no match when substituting?"
+    pat <- gets pattern
+    case pat of
+        Just p -> patternSet =<< substitute sub stype p
+        _ -> fatal "Sbust: no pattern when substituting?"
 
 runIR (IR.Trans from to) = do
   state <- get
   case pattern state of
-    Just p -> modify $ \state -> state { pattern = Just (trans from to p) }
+    Just p -> patternSet (trans from to p)
     _ -> fatal "Trans: no pattern when substituting?"
 
 runIR (IR.Message Nothing) = doMessage . fromJust =<< gets pattern
 runIR (IR.Message (Just s)) = doMessage s
 
-runIR (IR.PrintS i s) = printTo i s
+runIR (IR.PrintConstS i s) = printTo i s
+runIR (IR.PrintS i s) = printTo i =<< getString s
 runIR (IR.Print i) = get >>= \state ->
     case pattern state of
         Just p -> printTo i p
@@ -299,6 +301,15 @@ checkRE (RE _ bre ere) = do
 
 selectRegex _ ere True = ere
 selectRegex bre _ False = bre
+
+evalStringExpr (IR.SConst s) = return s
+evalStringExpr (IR.SVarRef svar) = getString svar
+evalStringExpr (IR.SHoldSpace reg) = getRegValue reg
+evalStringExpr (IR.SSubst svar sub stype) = substitute sub stype =<< getString svar
+evalStringExpr (IR.SAppendNL a b) = do
+    a <- getString a
+    b <- getString b
+    return (C.concat [a, "\n", b])
 
 type SedPM p a = StateT (SedState p) IO a
 type Program = Graph IR.Insn C C
@@ -367,6 +378,15 @@ patternAppend s = do
 
 patternSet :: S -> SedM ()
 patternSet p = modify $ \s -> s { pattern = Just p }
+
+substitute sub stype p = do
+  state <- get
+  let Just (RE _ bre ere) = lastRegex state
+  let pat = selectRegex bre ere (extendedRegex state)
+  let matches@(_:_) = match stype pat p
+  let newp = subst p sub matches
+  debug ("Subst: " ++ show p ++ " => " ++ show newp)
+  return newp
 
 subst :: S -> Replacement -> [MatchArray] -> S
 subst p rep matches = go "" 0 matches

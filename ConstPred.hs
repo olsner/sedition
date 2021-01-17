@@ -30,8 +30,8 @@ constPredTransfer = mkFTransfer3 first middle last
 
     -- O O
     middle :: Insn O O -> ConstPredFact -> ConstPredFact
-    middle (Set p (Bool x)) f = M.insert p (PElem x) f
-    middle (Set p _)        f = M.insert p Top f
+    middle (SetP p (Bool x)) f = M.insert p (PElem x) f
+    middle (SetP p _)        f = M.insert p Top f
 
     middle _insn f = {-trace ("Unhandled instruction " ++ show insn)-} f
 

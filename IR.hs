@@ -36,6 +36,16 @@ data Cond
 cTrue = Bool True
 cFalse = Bool False
 
+newtype SVar = SVar Int deriving (Ord,Eq)
+data StringExpr
+  = SConst S
+  | SVarRef SVar
+  | SHoldSpace (Maybe S)
+  | SSubst SVar Replacement SubstType
+  | SAppendNL SVar SVar
+  deriving (Show,Eq)
+emptyS = SConst ""
+
 data Insn e x where
   Label         :: Label                    -> Insn C O
   Branch        :: Label                    -> Insn O C
@@ -46,18 +56,27 @@ data Insn e x where
   -- labels are interrupt, line successfully read, EOF
   Cycle         :: FD -> Label -> Label -> Label -> Insn O C
 
-  Set           :: Pred -> Cond             -> Insn O O
+  SetP          :: Pred -> Cond             -> Insn O O
+  SetS          :: SVar -> StringExpr       -> Insn O O
   -- Set pattern space to hardcoded string
   Change        :: S                        -> Insn O O
   -- for N (which can never accept interrupts)
   Read          :: FD                       -> Insn O O
   ReadAppend    :: FD                       -> Insn O O
+  ReadS         :: SVar -> FD               -> Insn O O
   Print         :: FD                       -> Insn O O
-  PrintS        :: FD -> S                  -> Insn O O
+  PrintConstS   :: FD -> S                  -> Insn O O
   PrintLineNumber :: FD                     -> Insn O O
   PrintLiteral  :: Int -> FD                -> Insn O O
+  PrintS        :: FD -> SVar               -> Insn O O
   Message       :: (Maybe S)                -> Insn O O
 
+  -- TODO Map hold names to string variables here in IR?
+  -- But initially:
+  -- remove append forms
+  -- Hold takes hold-name and string-var (not expression, to keep things simple)
+  -- Get is replaced with SetS var (SHoldSpace ...)
+  -- Exchange adds some temporaries
   Hold          :: (Maybe S)                -> Insn O O
   HoldA         :: (Maybe S)                -> Insn O O
   Get           :: (Maybe S)                -> Insn O O
@@ -120,16 +139,26 @@ instance Show Pred where
   show (Pred 1) = "P{irq}"
   show (Pred 2) = "P{run-normal}"
   show (Pred 3) = "P{last-subst}"
+  show (Pred 4) = "P{queued-output}"
   show (Pred n) = "P" ++ show n
 
-firstNormalPred = 4
+firstNormalPred = 5
 
 pPreFirst = Pred 0
 pIntr = Pred 1
 pRunNormal = Pred 2
 pLastSubst = Pred 3
+pHasQueuedOutput = Pred 4
 
-setLastSubst x = emit (Set pLastSubst (Bool x))
+setLastSubst x = emit (SetP pLastSubst (Bool x))
+
+instance Show SVar where
+  show (SVar 0) = "S{pattern-space}"
+  show (SVar 1) = "S{output-queue}"
+  show (SVar n) = "S" ++ show n
+
+sPattern = SVar 0
+sOutputQueue = SVar 1
 
 instance UniqueMonad IRM where
   freshUnique = do
@@ -142,6 +171,13 @@ initBlock l = mkLabel l
 
 newLabel = freshLabel
 newPred = Pred <$> freshUnique
+
+newString :: IRM SVar
+newString = SVar <$> freshUnique
+setString :: SVar -> StringExpr -> IRM ()
+setString s expr = emit (SetS s expr)
+emitString :: StringExpr -> IRM SVar
+emitString expr = newString >>= \s -> setString s expr >> return s
 
 addLabelMapping name l = modify $
     \state -> state { sourceLabels = M.insert name l (sourceLabels state) }
@@ -225,6 +261,12 @@ toIR autoprint seds = evalState go (startState autoprint)
     outState <- get
     return (entry, mkFirst (Label entry) H.<*> program outState H.<*> mkLast (Quit ExitSuccess))
 
+checkQueuedOutput =
+  tWhen pHasQueuedOutput $ do
+    emit (PrintS 0 sOutputQueue)
+    setString sOutputQueue emptyS
+    emit (SetP pHasQueuedOutput cFalse)
+
 -- Entry points to generate:
 -- * pre-first line code (if any)
 -- * interrupt reception (for new-cycle code)
@@ -234,9 +276,9 @@ tProgram seds = mdo
 
   modify $ \state -> state { nextCycleLabels = (newCyclePrint, newCycleNoPrint) }
 
-  emit (Set pIntr cFalse)
-  emit (Set pPreFirst cTrue)
-  emit (Set pRunNormal cFalse)
+  emit (SetP pIntr cFalse)
+  emit (SetP pPreFirst cTrue)
+  emit (SetP pRunNormal cFalse)
 
   start <- label
   -- Actual normal program here
@@ -245,18 +287,19 @@ tProgram seds = mdo
   newCyclePrint <- label
   get >>= \s -> when (autoprint s) (emit (Print 0))
   newCycleNoPrint <- label
+  checkQueuedOutput
   setLastSubst False
   line <- finishBlock' (Cycle 0 intr line exit)
 
-  emit (Set pIntr cFalse)
-  emit (Set pPreFirst cFalse)
-  emit (Set pRunNormal cTrue)
+  emit (SetP pIntr cFalse)
+  emit (SetP pPreFirst cFalse)
+  emit (SetP pRunNormal cTrue)
 
   intr <- emitBranch' start
 
-  emit (Set pIntr cTrue)
-  emit (Set pPreFirst cFalse)
-  emit (Set pRunNormal cFalse)
+  emit (SetP pIntr cTrue)
+  emit (SetP pPreFirst cFalse)
+  emit (SetP pRunNormal cFalse)
 
   exit <- emitBranch' start
 
@@ -285,18 +328,18 @@ withCond' (Between start end) whenTrue whenFalse = mdo
 
   let run = emitBranch' t
       skip = emitBranch' f
-      set = emit (Set pActive cTrue)
-      clear = emit (Set pActive cFalse)
+      setP = emit (SetP pActive cTrue)
+      clear = emit (SetP pActive cFalse)
 
 -- Special case for line-based ranges.
 -- For normal addresses, the end condition is checked after running the command
--- (or it's checked, set, and the command is run one more time for the last
+-- (or it's checked, setP, and the command is run one more time for the last
 -- line).
 -- For line numbers, it seems to be checked before running the command with the address.
 -- 12,13p should print for lines 12 and 13. 12,3p should only print for 12
 -- since the condition is false before reaching the end.
   let checkEnd | (AST.Line n) <- end =  do
-                  p <- withNewPred $ \p -> emit (Set p (EndLine n))
+                  p <- withNewPred $ \p -> emit (SetP p (EndLine n))
                   tIf p (clear >> skip) run
                | otherwise = ifCheck end (clear >> run) run
 
@@ -305,7 +348,7 @@ withCond' (Between start end) whenTrue whenFalse = mdo
   tIf pActive (do comment "between/active"
                   checkEnd)
               (do comment "between/inactive"
-                  ifCheck start (comment "between/first" >> set >> run) skip)
+                  ifCheck start (comment "between/first" >> setP >> run) skip)
 
   t <- label
   _ <- whenTrue
@@ -321,13 +364,13 @@ withCond addr x = withCond' addr x (return ())
 withNewPred f = newPred >>= \p -> f p >> return p
 
 tCheck (AST.Line 0) = return pPreFirst
-tCheck (AST.Line n) = withNewPred $ \p -> emit (Set p (Line n))
+tCheck (AST.Line n) = withNewPred $ \p -> emit (SetP p (Line n))
 tCheck (AST.Match (Just re)) = withNewPred $ \p -> do
-    emit (Set p (Match re))
+    emit (SetP p (Match re))
     emit (SetLastRE re)
-tCheck (AST.Match Nothing) = withNewPred $ \p -> emit (Set p MatchLastRE)
+tCheck (AST.Match Nothing) = withNewPred $ \p -> emit (SetP p MatchLastRE)
 tCheck (AST.IRQ) = return pIntr
-tCheck (AST.EOF) = withNewPred $ \p -> emit (Set p AtEOF)
+tCheck (AST.EOF) = withNewPred $ \p -> emit (SetP p AtEOF)
 
 tSed :: Sed -> IRM ()
 tSed (Sed Always (AST.Block xs)) = tSeds xs
@@ -335,16 +378,16 @@ tSed (Sed cond@(At (AST.Line 0)) x) = withCond cond $ do
   -- While running a 0-conditional line, also run all normal lines until we
   -- either reach the "fall-through" from that line, or until we start a new
   -- cycle, then reset it back to... its original value, hmm...
-  emit (Set pRunNormal cTrue)
+  emit (SetP pRunNormal cTrue)
   tCmd x
   -- FIXME This may need to keep a counter or something rather than just set
   -- to false. Or assign a fresh predicate to push/copy the value into?
-  emit (Set pRunNormal cFalse)
+  emit (SetP pRunNormal cFalse)
 tSed (Sed cond@(At AST.IRQ) x) = withCond cond $ do
   -- See comment/fixme for saving/restrogin pRunNormal above
-  emit (Set pRunNormal cTrue)
+  emit (SetP pRunNormal cTrue)
   tCmd x
-  emit (Set pRunNormal cFalse)
+  emit (SetP pRunNormal cFalse)
 -- Special case for change with a range: replace all lines with a single copy
 -- of the replacement string.
 tSed (Sed (Between start end) (AST.Change repl)) = do
@@ -359,9 +402,16 @@ tCmd (AST.PrintLineNumber fd) = emit (PrintLineNumber fd)
 tCmd (AST.PrintLiteral width) = emit (PrintLiteral width 0)
 tCmd (AST.Message m) = emit (Message m)
 -- FIXME Wrong! "If there is no more input then sed exits without processing
--- any more commands."
-tCmd (AST.Next fd) = printIfAuto >> emit (Read fd) >> setLastSubst False
-tCmd (AST.NextA fd) = emit (ReadAppend fd) >> setLastSubst False
+-- any more commands." (How does read indicate EOF anyway?)
+tCmd (AST.Next fd) = do
+    checkQueuedOutput
+    printIfAuto
+    emit (Read fd)
+    setLastSubst False
+tCmd (AST.NextA fd) = do
+    checkQueuedOutput
+    emit (ReadAppend fd)
+    setLastSubst False
 tCmd (AST.Listen fd host port) = emit (Listen fd host port)
 tCmd (AST.Accept sfd fd) = emit (Accept sfd fd)
 tCmd (AST.Label name) = do
@@ -386,7 +436,9 @@ tCmd (AST.Fork sed) = mdo
   return ()
 
 tCmd (AST.Clear) = emit (Change "")
-tCmd (AST.Change replacement) = emit (Change replacement)
+tCmd (AST.Change replacement) = do
+    emit (PrintConstS 0 replacement)
+    branchNextCycleNoPrint
 tCmd (AST.Delete) = branchNextCycleNoPrint
 tCmd (AST.Redirect dst (Just src)) = emit (Redirect dst src)
 tCmd (AST.Redirect dst Nothing) = emit (CloseFile dst)
@@ -399,11 +451,20 @@ tCmd (AST.HoldA maybeReg) = emit (HoldA maybeReg)
 tCmd (AST.Get maybeReg) = emit (Get maybeReg)
 tCmd (AST.GetA maybeReg) = emit (GetA maybeReg)
 tCmd (AST.Exchange maybeReg) = emit (Exchange maybeReg)
-tCmd (AST.Insert s) = emit (PrintS 0 s)
--- TODO append ('a'/'A') should rather save data to be printed at the end of
--- the cycle, or when reading the next input line.
--- (Is that only for n or also for N?)
-tCmd (AST.Append s) = emit (PrintS 0 s)
+tCmd (AST.Insert s) = emit (PrintConstS 0 s)
+tCmd (AST.Append s) = do
+    tIf pHasQueuedOutput ifTrue ifFalse
+  where
+    -- already set to true, so no need to update predicate. Just append to
+    -- the queue.
+    ifTrue = do
+        temp <- emitString (SConst s)
+        setString sOutputQueue (SAppendNL sOutputQueue temp)
+    -- If there's no queued output yet, we know we can simply replace the
+    -- queued output with a constant.
+    ifFalse = do
+        emit (SetP pHasQueuedOutput cTrue)
+        setString sOutputQueue (SConst s)
 tCmd (AST.WriteFile path) = emit (WriteFile path)
 tCmd (AST.Quit print status) = () <$ do
   when print $ emit (Print 0)

@@ -23,7 +23,7 @@ liveLattice = DataflowLattice
               ch = changeIf (S.size j > S.size old)
 
 kill :: Insn e x -> LivePredFact -> LivePredFact
-kill (Set p _) f = S.delete p f
+kill (SetP p _) f = S.delete p f
 kill _         f = f
 
 gen :: Insn e x -> LivePredFact -> LivePredFact
@@ -47,7 +47,7 @@ livePred :: FuelMonad m => BwdRewrite m Insn LivePredFact
 livePred = mkBRewrite rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x LivePredFact -> m (Maybe (Graph Insn e x))
-    rw (Set p _) f | not (S.member p f) = return (Just emptyGraph)
+    rw (SetP p _) f | not (S.member p f) = return (Just emptyGraph)
     rw _ _ = return Nothing
 
 livePredPass :: FuelMonad m => BwdPass m Insn LivePredFact

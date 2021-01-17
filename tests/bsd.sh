@@ -277,7 +277,6 @@ s/^/before_i/p
 inserted
 s/^/after_i/p
 ' lines1 lines2
-    # TODO Fails because appending is done immediately instead of being delayed to the next cycle.
 	mark '4.2' ; $SED -n -e '
 5,12s/^/5-12/
 s/^/before_a/p
