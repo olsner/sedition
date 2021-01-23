@@ -41,9 +41,10 @@ data StringExpr
   = SConst S
   | SVarRef SVar
   | SHoldSpace (Maybe S)
+  -- Subst last match against current pattern. See Match TODO about match regs.
   | SSubst SVar Replacement SubstType
   -- from to string
-  | STrans SVar SVar SVar
+  | STrans S S SVar
   | SAppendNL SVar SVar
   deriving (Show,Eq)
 emptyS = SConst ""
@@ -78,9 +79,6 @@ data Insn e x where
   Exchange      :: (Maybe S)                -> Insn O O
 
   SetLastRE     :: RE                       -> Insn O O
-  -- Subst last match against current pattern. See Match TODO about match regs.
-  Subst         :: Replacement -> SubstType -> Insn O O
-  Trans         :: S -> S                   -> Insn O O
 
   ShellExec     ::                             Insn O O
   Listen        :: Int -> (Maybe S) -> Int  -> Insn O O
@@ -174,6 +172,8 @@ setString :: SVar -> StringExpr -> IRM ()
 setString s expr = emit (SetS s expr)
 emitString :: StringExpr -> IRM SVar
 emitString expr = newString >>= \s -> setString s expr >> return s
+emitCString :: S -> IRM SVar
+emitCString s = emitString (SConst s)
 
 setPattern s = setString sPattern (SVarRef s) >> emit (SetP pHasPattern cTrue)
 
@@ -409,7 +409,7 @@ tCmd (AST.PrintLineNumber fd) = emit (PrintLineNumber fd)
 tCmd (AST.PrintLiteral width) = tWhen pHasPattern $ emit (PrintLiteral width 0 sPattern)
 tCmd (AST.Message Nothing) = tWhen pHasPattern $ emit (Message sPattern)
 tCmd (AST.Message (Just s)) = do
-    tmp <- emitString (SConst s)
+    tmp <- emitCString s
     emit (Message tmp)
 -- FIXME Wrong! "If there is no more input then sed exits without processing
 -- any more commands." (How does read indicate EOF anyway?)
@@ -457,8 +457,16 @@ tCmd (AST.Redirect dst (Just src)) = emit (Redirect dst src)
 tCmd (AST.Redirect dst Nothing) = emit (CloseFile dst)
 tCmd (AST.Subst mre sub flags actions) = do
   p <- tCheck (AST.Match mre)
-  tIf p (setLastSubst True >> emit (Subst sub flags) >> tSubstAction actions) (setLastSubst False)
-tCmd (AST.Trans from to) = emit (Trans from to)
+  tIf p ifMatch (setLastSubst False)
+  where
+    ifMatch = do
+        setLastSubst True
+        s <- emitString (SSubst sPattern sub flags)
+        setPattern s
+        tSubstAction actions s
+tCmd (AST.Trans from to) = do
+    s <- emitString (STrans from to sPattern)
+    setPattern s
 tCmd (AST.Hold maybeReg) = emit (Hold maybeReg sPattern)
 tCmd (AST.HoldA maybeReg) = do
     tmp <- emitString (SHoldSpace maybeReg)
@@ -480,7 +488,7 @@ tCmd (AST.Append s) = do
     -- already set to true, so no need to update predicate. Just append to
     -- the queue.
     ifTrue = do
-        temp <- emitString (SConst s)
+        temp <- emitCString s
         setString sOutputQueue (SAppendNL sOutputQueue temp)
     -- If there's no queued output yet, we know we can simply replace the
     -- queued output with a constant.
@@ -493,10 +501,10 @@ tCmd (AST.Quit print status) = () <$ do
   finishBlock' (Quit status)
 tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
 
-tSubstAction SActionNone = return ()
-tSubstAction SActionExec = emit ShellExec
-tSubstAction (SActionPrint n) = emit (Print n sPattern)
-tSubstAction (SActionWriteFile path) = emit (WriteFile path sPattern)
+tSubstAction SActionNone _ = return ()
+tSubstAction SActionExec _ = emit ShellExec
+tSubstAction (SActionPrint n) res = emit (Print n res)
+tSubstAction (SActionWriteFile path) res = emit (WriteFile path res)
 
 tTest ifTrue maybeTarget = mdo
   comment ("test " ++ show ifTrue ++ " " ++ show target)

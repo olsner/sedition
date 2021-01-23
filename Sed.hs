@@ -220,19 +220,6 @@ runIR (IR.Redirect i j) = redirectFile i j
 runIR (IR.CloseFile i) = closeFile i
 
 runIR (IR.SetLastRE re) = setLastRegex re
-
--- TODO: Translate to string-var operations
-runIR (IR.Subst sub stype) = do
-    let svar = IR.sPattern
-    p <- getString svar
-    setString svar =<< substitute sub stype p
-
--- TODO: Translate to string-var operations
-runIR (IR.Trans from to) = do
-    let svar = IR.sPattern
-    p <- getString svar
-    setString svar (trans from to p)
-
 runIR (IR.Message s) = doMessage =<< getString s
 
 runIR (IR.PrintConstS i s) = printTo i s
@@ -291,7 +278,7 @@ evalStringExpr (IR.SVarRef svar) = getString svar
 evalStringExpr (IR.SHoldSpace reg) = getRegValue reg
 evalStringExpr (IR.SSubst svar sub stype) = substitute sub stype =<< getString svar
 evalStringExpr (IR.STrans from to str) =
-    trans <$> getString from <*> getString to <*> getString str
+    trans from to <$> getString str
 -- TODO Should this do something special if 'a' is empty?
 evalStringExpr (IR.SAppendNL a b) = do
     a <- getString a
