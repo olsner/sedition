@@ -28,9 +28,14 @@ data Cond
   -- current line > l (tested after the first line has been processed)
   | EndLine Int
   -- Possible extension: explicit "match" registers to track several precomputed
-  -- matches at once.
-  | Match RE
-  | MatchLastRE
+  -- matches at once, and use that instead of MatchLastRE.
+  -- A complication: pattern space may change but the last regexp is the same,
+  -- so should repeat the match but optimize repeated match against unchanged
+  -- pattern space elsewhere.
+  -- I also think the last regexp is dynamic so we'd need to track a global for
+  -- that similar to internal predicates and string variables.
+  | Match SVar RE
+  | MatchLastRE SVar
   | Bool Bool
   deriving (Show,Eq)
 cTrue = Bool True
@@ -367,9 +372,9 @@ withNewPred f = newPred >>= \p -> f p >> return p
 tCheck (AST.Line 0) = return pPreFirst
 tCheck (AST.Line n) = withNewPred $ \p -> emit (SetP p (Line n))
 tCheck (AST.Match (Just re)) = withNewPred $ \p -> do
-    emit (SetP p (Match re))
+    emit (SetP p (Match sPattern re))
     emit (SetLastRE re)
-tCheck (AST.Match Nothing) = withNewPred $ \p -> emit (SetP p MatchLastRE)
+tCheck (AST.Match Nothing) = withNewPred $ \p -> emit (SetP p (MatchLastRE sPattern))
 tCheck (AST.IRQ) = return pIntr
 tCheck (AST.EOF) = withNewPred $ \p -> emit (SetP p AtEOF)
 
