@@ -53,16 +53,55 @@ data IPCState = IPCState
   deriving (Show)
 
 data File
-  = NormalFile { fileIsEOF :: IO Bool, fileMaybeGetLine :: IO (Maybe S), filePutStr :: S -> IO () }
+  = NormalFile {
+    -- Check if file is at EOF. May require reading one more character and may
+    -- thus block, but doesn't have to read the whole line.
+    fileIsEOF :: IO Bool,
+    -- Get a line or return Nothing if at EOF.
+    fileMaybeGetLine :: IO (Maybe S),
+    -- Read a fulle line like fileMaybeGetLine but don't consume the line
+    -- returned until another call to fileMaybeGetLine.
+    filePeekLine :: IO (Maybe S),
+    -- Output a string (without newline at the end)
+    filePutStr :: S -> IO ()
+  }
   | SocketFile Socket
 
 instance Show File where
-  show (NormalFile _ _ _) = "NormalFile{}"
+  show (NormalFile {}) = "NormalFile{}"
   show (SocketFile s) = "SocketFile " ++ show s
 
-handleFile h = NormalFile (hIsEOF h) (hMaybeGetLine h) (C.hPutStr h)
+rawHandleFile :: Handle -> Handle -> File
+rawHandleFile inh outh = NormalFile (hIsEOF inh) (hMaybeGetLine inh) (error "filePeekLine in rawHandleFile") (C.hPutStr outh)
+handleFile :: Handle -> Handle -> IO File
+handleFile inh outh = threadedFile (rawHandleFile inh outh)
+
+threadedFile :: File -> IO File
+threadedFile file@NormalFile{} = do
+    nextLine :: MVar (Maybe S) <- newEmptyMVar
+
+    let readThread :: IO ()
+        readThread = do
+            line <- fileMaybeGetLine file
+            putMVar nextLine line
+            -- Stop reading on EOF
+            when (isJust line) readThread
+
+        maybeGetLine :: IO (Maybe S)
+        maybeGetLine = takeMVar nextLine
+
+        peekLine :: IO (Maybe S)
+        peekLine = readMVar nextLine
+
+        isEOF :: IO Bool
+        isEOF = isNothing <$> readMVar nextLine
+
+    _ <- forkIO readThread
+    return (NormalFile isEOF maybeGetLine peekLine (filePutStr file))
+threadedFile (SocketFile _) = error "Can't wrap a server socket in a threaded file"
+
 inputListFile :: [FilePath] -> IO File
-inputListFile [] = return (NormalFile (hIsEOF stdin) (hMaybeGetLine stdin) C.putStr)
+inputListFile [] = handleFile stdin stdout
 inputListFile inputs = do
     current :: MVar Handle <- newEmptyMVar
     inputs <- newMVar inputs
@@ -94,7 +133,13 @@ inputListFile inputs = do
                 Just line -> putMVar current h >> return (Just line)
 
     nextFile (return ()) ()
-    return (NormalFile isEOF maybeGetLine C.putStr)
+    threadedFile (NormalFile isEOF maybeGetLine (error "filePeekLine in inputListFile") C.putStr)
+
+hMaybeGetLine :: Handle -> IO (Maybe S)
+hMaybeGetLine h = do
+    eof <- hIsEOF h
+    if eof then pure Nothing
+           else Just <$> C.hGetLine h
 
 data SedState program = SedState
   { program :: program
@@ -107,8 +152,6 @@ data SedState program = SedState
   , strings :: Map Int S
 
   , ipcState :: Maybe IPCState
-
-  -- Pending output? Other tricky stuff?
 }
   deriving (Show)
 
@@ -198,8 +241,9 @@ runIR (IR.SetP p cond) = setPred p =<< case cond of
   IR.Line l -> gets ((l ==) . lineNumber)
   IR.EndLine l -> gets ((l <) . lineNumber)
   IR.Match svar re -> checkRE svar re
-  IR.MatchLastRE svar -> checkRE svar . fromJust =<< gets lastRegex
+  IR.MatchLastRE svar -> checkRE svar =<< getLastRegex
   IR.AtEOF fd -> liftIO . fileIsEOF =<< gets (fromJust . M.lookup fd . files)
+  IR.PendingIPC -> hasPendingIPC =<< gets ipcState
 runIR (IR.SetS s expr) = setString s =<< evalStringExpr expr
 runIR (IR.If p t f) = do
   b <- getPred p
@@ -231,25 +275,20 @@ runIR (IR.PrintLineNumber i) = do
     l <- gets lineNumber
     printTo i (C.pack (show l))
 runIR (IR.Hold reg svar) = setRegValue reg =<< getString svar
-runIR (IR.Cycle i intr cont eof) = do
-    res <- getLineOrEvent i
-    let (pat,lineDelta,k) = case res of
-          Left Nothing -> ("", 0, eof)
-          Left (Just s) -> (s, 1, cont)
-          Right s -> (s, 0, intr)
-    -- TODO Cycle does too much - and the interpreter should not know about
-    -- sPattern at all. Maybe Cycle should specify the string variable to
-    -- receive the line. (Until we've replaced it with something read-like.)
-    setString IR.sPattern pat
-    modify $ \state -> state { lineNumber = lineNumber state + lineDelta }
-    runIRLabel k
 runIR (IR.Quit code) = liftIO (exitWith code)
 runIR (IR.Comment s) = debug ("*** " ++ s)
+
+runIR (IR.Wait i) = waitLineOrEvent i
 runIR (IR.Read svar i) = do
   l <- maybeGetLine i
   case l of
    Just s -> setString svar s
-   Nothing -> liftIO exitSuccess
+   Nothing -> liftIO exitSuccess -- TODO EOF should be visible to the program rather than exiting directly.
+runIR (IR.GetMessage svar) = do
+    state <- gets (fromJust . ipcState)
+    let Mailbox v = box state
+    Right message <- liftIO (takeMVar v)
+    setString svar message
 
 -- Not quite right - all referenced files should be created/truncated before
 -- the first written line, then all subsequent references continue writing
@@ -261,9 +300,17 @@ runIR (IR.WriteFile path svar) = do
   s <- getString svar
   liftIO $ C.appendFile (C.unpack path) (C.append s "\n")
 
-runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
+runIR (IR.ShellExec svar) = do
+    cmd <- getString svar
+    fatal ("ShellExec not allowed (would run " ++ show cmd ++ ")")
+
+--runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
 
 setLastRegex re = modify $ \state -> state { lastRegex = Just re }
+getLastRegex :: StateT (SedState p) IO RE
+getLastRegex = gets $ \SedState { lastRegex = last } -> case last of
+    Just re -> re
+    Nothing -> fatal "no previous regular expression"
 
 checkRE svar (RE _ bre ere) = do
   p <- getString svar
@@ -308,7 +355,7 @@ doAccept i j = do
     (c,addr) <- liftIO $ accept s
     debug ("accepted: " ++ show addr)
     h <- liftIO $ socketToHandle c ReadWriteMode
-    replaceFile j (handleFile h)
+    replaceFile j =<< liftIO (handleFile h h)
 
 doMessage m = gets ipcState >>= f
   where
@@ -326,9 +373,9 @@ getRegValue reg = gets (fromMaybe "" . M.lookup (fromMaybe "" reg) . hold)
 randomString = C.pack <$> replicateM 32 (randomRIO ('A','Z'))
 
 substitute sub stype p = do
-  state <- get
-  let Just (RE _ bre ere) = lastRegex state
-  let pat = selectRegex bre ere (extendedRegex state)
+  (RE _ bre ere) <- getLastRegex
+  useExtRE <- gets extendedRegex
+  let pat = selectRegex bre ere useExtRE
   let matches@(_:_) = match stype pat p
   let newp = subst p sub matches
   debug ("Subst: " ++ show p ++ " => " ++ show newp)
@@ -423,11 +470,9 @@ maybeGetLine i = do
      Just l | 0 <- i -> incrementLineNumber >> return (Just l)
      _ -> return maybeLine
 
-hMaybeGetLine :: Handle -> IO (Maybe S)
-hMaybeGetLine h = do
-    eof <- hIsEOF h
-    if eof then pure Nothing
-           else Just <$> C.hGetLine h
+peekLine :: Int -> StateT (SedState p) IO (Maybe S)
+peekLine i = do
+    liftIO . filePeekLine =<< fromJust <$> getFile i
 
 forkIO_ :: StateT s IO () -> StateT s IO ()
 forkIO_ m = unliftIO forkIO m >> return ()
@@ -437,16 +482,22 @@ unliftIO f m = do
   state <- get
   liftIO (f (evalStateT m state))
 
-getLineOrEvent :: Int -> StateT (SedState p) IO (Either (Maybe S) S)
-getLineOrEvent i = do
+waitLineOrEvent :: Int -> StateT (SedState p) IO ()
+waitLineOrEvent i = do
     state <- gets ipcState
     case state of
       Just state -> do
         let Mailbox v = box state
-        forkIO_ (liftIO . putMVar v . Left =<< maybeGetLine i)
-        liftIO $ takeMVar v
-      Nothing -> do
-        Left <$> maybeGetLine i
+        forkIO_ (liftIO . putMVar v . Left =<< peekLine i)
+        liftIO (() <$ takeMVar v)
+      Nothing -> () <$ peekLine i
+
+hasPendingIPC (Just (IPCState { box = Mailbox mvar })) = do
+    val <- liftIO (tryTakeMVar mvar)
+    case val of
+      Just (Right _) -> return True
+      _ -> return False
+hasPendingIPC _ = return False
 
 data Options = Options
   { extendedRegexps :: Bool

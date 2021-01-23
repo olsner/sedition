@@ -23,6 +23,7 @@ type FD = Int
 
 data Cond
   = AtEOF FD
+  | PendingIPC
   -- current line == l
   -- Should this take a file too? Redirects could get confusing, but per-file
   -- (per-socket) line counters would make more sense in forks and such.
@@ -63,9 +64,12 @@ data Insn e x where
   If            :: Pred -> Label -> Label   -> Insn O C
   Fork          :: Label -> Label           -> Insn O C
   Quit          :: ExitCode                 -> Insn O C
-  -- for n and new cycle (which can accept incoming messages)
-  -- labels are interrupt, line successfully read, EOF
-  Cycle         :: FD -> Label -> Label -> Label -> Insn O C
+
+  -- Wait for IPC or line of input or EOF.
+  Wait          :: FD                       -> Insn O O
+  -- Writes SVar. Should be a StringExpr I guess then?
+  -- OTOH it has side effects and this style kind of matches Read below.
+  GetMessage    :: SVar                     -> Insn O O
 
   SetP          :: Pred -> Cond             -> Insn O O
   SetS          :: SVar -> StringExpr       -> Insn O O
@@ -84,11 +88,10 @@ data Insn e x where
   -- Get is replaced with SetS var (SHoldSpace ...)
   -- Exchange adds some temporaries
   Hold          :: (Maybe S) -> SVar        -> Insn O O
-  Exchange      :: (Maybe S)                -> Insn O O
 
   SetLastRE     :: RE                       -> Insn O O
 
-  ShellExec     ::                             Insn O O
+  ShellExec     :: SVar                     -> Insn O O
   Listen        :: Int -> (Maybe S) -> Int  -> Insn O O
   Accept        :: Int -> Int               -> Insn O O
   Redirect      :: Int -> Int               -> Insn O O
@@ -109,7 +112,6 @@ instance NonLocal Insn where
   successors (If _ t f) = [t,f]
   successors (Fork t c) = [t,c]
   successors (Quit _) = []
-  successors (Cycle _ i r e) = [i,r,e]
 
 instance HooplNode Insn where
   mkBranchNode = Branch
@@ -299,16 +301,31 @@ tProgram seds = mdo
   checkQueuedOutput
   setLastSubst False
 
-  line <- finishBlock' (Cycle 0 intr line exit)
+  -- New cycle handling: wait for IPC or input, check for EOF, then run a copy
+  -- of the main program with the appropriate predicates set.
+  emit (Wait 0)
+  emit (SetP pIntr PendingIPC)
+  lineOrEOF <- finishBlock' (If pIntr intr lineOrEOF)
 
-  emit (SetP pIntr cFalse)
+  pAtEOF <- emitNewPred (AtEOF 0)
+  line <- finishBlock' (If pAtEOF exit line)
+
+  do
+    line <- newString
+    emit (Read line 0)
+    setPattern line
+
   emit (SetP pPreFirst cFalse)
   emit (SetP pRunNormal cTrue)
-  emit (SetP pHasPattern cTrue)
 
   intr <- emitBranch' start
 
-  emit (SetP pIntr cTrue)
+  msg <- newString
+  emit (GetMessage msg)
+  -- Update pattern variable for matching but don't set pHasPattern in IPC
+  -- branch, to avoid printing it at the end of the loop.
+  setString sPattern (SVarRef msg)
+
   emit (SetP pPreFirst cFalse)
   emit (SetP pRunNormal cFalse)
 
@@ -515,7 +532,7 @@ tCmd (AST.Quit print status) = () <$ do
 tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
 
 tSubstAction SActionNone _ = return ()
-tSubstAction SActionExec _ = emit ShellExec
+tSubstAction SActionExec res = emit (ShellExec res)
 tSubstAction (SActionPrint n) res = emit (Print n res)
 tSubstAction (SActionWriteFile path) res = emit (WriteFile path res)
 

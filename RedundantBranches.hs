@@ -42,12 +42,9 @@ rewrite = mkBRewrite rw
     rw old@(Branch t) f = rwLast old (Branch (label t f))
     rw old@(If p tl fl) f = rwLast old (If p (label tl f) (label fl f))
     rw old@(Fork l1 l2) f = rwLast old (Fork (label l1 f) (label l2 f))
-    rw old@(Cycle fd l1 l2 l3) f = rwLast old (Cycle fd (label l1 f) (label l2 f) (label l3 f))
     rw _ _ = return Nothing
 
     rwLast :: FuelMonad m => Insn O C -> Insn O C -> m (Maybe (Graph Insn O C))
-    -- Mainly for esthetics, don't copy Cycle into a Branch
-    rwLast (Branch _) (Cycle _ _ _ _) = return Nothing
     rwLast old new
         | old /= new = return (Just (mkLast new))
         | otherwise  = return Nothing

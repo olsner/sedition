@@ -41,7 +41,6 @@ constPredTransfer = mkFTransfer3 first middle last
     last (If p tl fl) f = mkFactBase constLattice
            [(tl, M.insert p (PElem True)  f),
             (fl, M.insert p (PElem False) f)]
-    last (Cycle _ intr read eof) f = boringFactBase f [intr,read,eof]
     last (Quit _) _ = mapEmpty
     -- Is this correct? We probably reset some of these in forkState
     last (Fork a b) f = boringFactBase f [a,b]
