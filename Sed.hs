@@ -5,7 +5,7 @@ module Sed (main) where
 
 #define DEBUG 0
 
-import Compiler.Hoopl as H
+import Compiler.Hoopl as H hiding ((<*>))
 
 import Control.Concurrent
 import Control.Monad
@@ -100,7 +100,6 @@ data SedState program = SedState
   { program :: program
   , files :: Map Int File
   , lineNumber :: Int
-  , pattern :: Maybe S
   , hold :: Map S S
   , lastRegex :: Maybe RE
   , extendedRegex :: Bool
@@ -148,7 +147,6 @@ initialState ipc ere pgm file0 = do
     program = pgm
   , files = M.singleton 0 file0
   , lineNumber = 0
-  , pattern = Nothing
   , hold = M.empty
   , strings = M.empty
   , lastRegex = Nothing
@@ -160,7 +158,6 @@ forkState pgm = get >>= \state -> liftIO $ do
   ipcState' <- forkIPCState (ipcState state)
   return state {
     program = pgm
-  , pattern = Nothing
   , lineNumber = 0
   , predicates = S.empty
   , ipcState = ipcState'
@@ -224,80 +221,67 @@ runIR (IR.CloseFile i) = closeFile i
 
 runIR (IR.SetLastRE re) = setLastRegex re
 
+-- TODO: Translate to string-var operations
 runIR (IR.Subst sub stype) = do
-    pat <- gets pattern
-    case pat of
-        Just p -> patternSet =<< substitute sub stype p
-        _ -> fatal "Sbust: no pattern when substituting?"
+    let svar = IR.sPattern
+    p <- getString svar
+    setString svar =<< substitute sub stype p
 
+-- TODO: Translate to string-var operations
 runIR (IR.Trans from to) = do
-  state <- get
-  case pattern state of
-    Just p -> patternSet (trans from to p)
-    _ -> fatal "Trans: no pattern when substituting?"
+    let svar = IR.sPattern
+    p <- getString svar
+    setString svar (trans from to p)
 
-runIR (IR.Message Nothing) = doMessage . fromJust =<< gets pattern
-runIR (IR.Message (Just s)) = doMessage s
+runIR (IR.Message s) = doMessage =<< getString s
 
 runIR (IR.PrintConstS i s) = printTo i s
-runIR (IR.PrintS i s) = printTo i =<< getString s
-runIR (IR.Print i) = get >>= \state ->
-    case pattern state of
-        Just p -> printTo i p
-        _ -> return ()
-runIR (IR.PrintLiteral w i) = get >>= \state ->
-    case pattern state of
-        Just p -> putStrTo i (formatLiteral w p)
-        _ -> return ()
+runIR (IR.Print i s) = printTo i =<< getString s
+runIR (IR.PrintLiteral w i s) = do
+    p <- getString s
+    putStrTo i (formatLiteral w p)
 runIR (IR.PrintLineNumber i) = do
     l <- gets lineNumber
     printTo i (C.pack (show l))
-runIR (IR.Change s) = modify $ \state -> state { pattern = Just s }
-runIR (IR.Hold reg) = doHold reg
-runIR (IR.HoldA reg) = doHoldAppend reg
-runIR (IR.Get reg) = doGet reg
-runIR (IR.GetA reg) = doGetAppend reg
-runIR (IR.Exchange reg) = doExchange reg
+runIR (IR.Hold reg svar) = setRegValue reg =<< getString svar
 runIR (IR.Cycle i intr cont eof) = do
     res <- getLineOrEvent i
-    let (pat,l,k) = case res of
-          Left Nothing -> (Nothing, 0, eof)
-          Left (Just s) -> (Just s, 1, cont)
-          Right s -> (Just s, 0, intr)
-    modify $ \state -> state { pattern = pat, lineNumber = lineNumber state + l }
+    let (pat,lineDelta,k) = case res of
+          Left Nothing -> ("", 0, eof)
+          Left (Just s) -> (s, 1, cont)
+          Right s -> (s, 0, intr)
+    -- TODO Cycle does too much - and the interpreter should not know about
+    -- sPattern at all. Maybe Cycle should specify the string variable to
+    -- receive the line. (Until we've replaced it with something read-like.)
+    setString IR.sPattern pat
+    modify $ \state -> state { lineNumber = lineNumber state + lineDelta }
     runIRLabel k
 runIR (IR.Quit code) = liftIO (exitWith code)
 runIR (IR.Comment s) = debug ("*** " ++ s)
-runIR (IR.Read i) = do
+runIR (IR.Read svar i) = do
   l <- maybeGetLine i
   case l of
-   Just _ -> modify $ \state -> state { pattern = l }
+   Just s -> setString svar s
    Nothing -> liftIO exitSuccess
-runIR (IR.ReadAppend i) = do
-  l <- maybeGetLine i
-  case l of
-   Just s -> patternAppend s
-   Nothing -> liftIO exitSuccess
+
 -- Not quite right - all referenced files should be created/truncated before
 -- the first written line, then all subsequent references continue writing
 -- without reopening the file.
 -- Probably the IR step should assign a file descriptor for each used output
 -- file, generate code to open them on startup and then this should be done
 -- through (Print fd) instead.
-runIR (IR.WriteFile path) = do
-  pat <- fromMaybe "" . pattern <$> get
-  liftIO $ C.appendFile (C.unpack path) (C.append pat "\n")
+runIR (IR.WriteFile path svar) = do
+  s <- getString svar
+  liftIO $ C.appendFile (C.unpack path) (C.append s "\n")
 
 runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
 
 setLastRegex re = modify $ \state -> state { lastRegex = Just re }
 
 checkRE (RE _ bre ere) = do
-  p <- gets pattern
+  p <- getString IR.sPattern
   re <- gets (selectRegex bre ere . extendedRegex)
-  case p of
-    Just p -> return (matchTest re p)
-    _ -> return False
+  return (matchTest re p)
 
 selectRegex _ ere True = ere
 selectRegex bre _ False = bre
@@ -306,6 +290,9 @@ evalStringExpr (IR.SConst s) = return s
 evalStringExpr (IR.SVarRef svar) = getString svar
 evalStringExpr (IR.SHoldSpace reg) = getRegValue reg
 evalStringExpr (IR.SSubst svar sub stype) = substitute sub stype =<< getString svar
+evalStringExpr (IR.STrans from to str) =
+    trans <$> getString from <*> getString to <*> getString str
+-- TODO Should this do something special if 'a' is empty?
 evalStringExpr (IR.SAppendNL a b) = do
     a <- getString a
     b <- getString b
@@ -344,40 +331,12 @@ doMessage m = gets ipcState >>= f
         debug ("Messaging " ++ show m)
         liftIO (drive (bus ipcState) m)
 
-doHold reg = do
-  pat <- fromMaybe "" . pattern <$> get
-  debug ("Hold: holding " ++ show pat ++ " in " ++ show reg)
-  setRegValue reg pat
-doGet (Just "yhjulwwiefzojcbxybbruweejw") = patternSet =<< liftIO randomString
-doGet reg = patternSet =<< getRegValue reg
-
-doGetAppend = patternAppend <=< getRegValue
-doHoldAppend reg = do
-  pat <- fromMaybe "" . pattern <$> get
-  prev <- gets (M.lookup (fromMaybe "" reg) . hold)
-  setRegValue reg $ case prev of
-    Nothing -> pat
-    Just value -> C.concat [value, "\n", pat]
-
-doExchange reg = do
-  pat <- fromMaybe "" . pattern <$> get
-  held <- getRegValue reg
-  setRegValue reg pat
-  patternSet held
-
 setRegValue reg value =
   modify $ \s -> s { hold = M.insert (fromMaybe "" reg) value (hold s) }
+getRegValue (Just "yhjulwwiefzojcbxybbruweejw") = liftIO randomString
 getRegValue reg = gets (fromMaybe "" . M.lookup (fromMaybe "" reg) . hold)
 -- TODO We ought to provide secure random numbers
 randomString = C.pack <$> replicateM 32 (randomRIO ('A','Z'))
-
-patternAppend s = do
-  p <- gets (fromMaybe "" . pattern)
-  debug ("appending " ++ show s ++ " to " ++ show p)
-  patternSet (p <> "\n" <> s)
-
-patternSet :: S -> SedM ()
-patternSet p = modify $ \s -> s { pattern = Just p }
 
 substitute sub stype p = do
   state <- get

@@ -42,6 +42,8 @@ data StringExpr
   | SVarRef SVar
   | SHoldSpace (Maybe S)
   | SSubst SVar Replacement SubstType
+  -- from to string
+  | STrans SVar SVar SVar
   | SAppendNL SVar SVar
   deriving (Show,Eq)
 emptyS = SConst ""
@@ -58,18 +60,13 @@ data Insn e x where
 
   SetP          :: Pred -> Cond             -> Insn O O
   SetS          :: SVar -> StringExpr       -> Insn O O
-  -- Set pattern space to hardcoded string
-  Change        :: S                        -> Insn O O
-  -- for N (which can never accept interrupts)
-  Read          :: FD                       -> Insn O O
-  ReadAppend    :: FD                       -> Insn O O
-  ReadS         :: SVar -> FD               -> Insn O O
-  Print         :: FD                       -> Insn O O
+  -- for n/N (which can never accept interrupts)
+  Read          :: SVar -> FD               -> Insn O O
   PrintConstS   :: FD -> S                  -> Insn O O
   PrintLineNumber :: FD                     -> Insn O O
-  PrintLiteral  :: Int -> FD                -> Insn O O
-  PrintS        :: FD -> SVar               -> Insn O O
-  Message       :: (Maybe S)                -> Insn O O
+  PrintLiteral  :: Int -> FD -> SVar        -> Insn O O
+  Print         :: FD -> SVar               -> Insn O O
+  Message       :: SVar                     -> Insn O O
 
   -- TODO Map hold names to string variables here in IR?
   -- But initially:
@@ -77,10 +74,7 @@ data Insn e x where
   -- Hold takes hold-name and string-var (not expression, to keep things simple)
   -- Get is replaced with SetS var (SHoldSpace ...)
   -- Exchange adds some temporaries
-  Hold          :: (Maybe S)                -> Insn O O
-  HoldA         :: (Maybe S)                -> Insn O O
-  Get           :: (Maybe S)                -> Insn O O
-  GetA          :: (Maybe S)                -> Insn O O
+  Hold          :: (Maybe S) -> SVar        -> Insn O O
   Exchange      :: (Maybe S)                -> Insn O O
 
   SetLastRE     :: RE                       -> Insn O O
@@ -95,7 +89,7 @@ data Insn e x where
   CloseFile     :: Int                      -> Insn O O
   Comment       :: String                   -> Insn O O
 
-  WriteFile     :: S                        -> Insn O O
+  WriteFile     :: S -> SVar                -> Insn O O
 
 deriving instance Show (Insn e x)
 deriving instance Eq (Insn e x)
@@ -140,6 +134,7 @@ instance Show Pred where
   show (Pred 2) = "P{run-normal}"
   show (Pred 3) = "P{last-subst}"
   show (Pred 4) = "P{queued-output}"
+  show (Pred 5) = "P{has-pattern}"
   show (Pred n) = "P" ++ show n
 
 firstNormalPred = 5
@@ -149,6 +144,7 @@ pIntr = Pred 1
 pRunNormal = Pred 2
 pLastSubst = Pred 3
 pHasQueuedOutput = Pred 4
+pHasPattern = Pred 5
 
 setLastSubst x = emit (SetP pLastSubst (Bool x))
 
@@ -178,6 +174,8 @@ setString :: SVar -> StringExpr -> IRM ()
 setString s expr = emit (SetS s expr)
 emitString :: StringExpr -> IRM SVar
 emitString expr = newString >>= \s -> setString s expr >> return s
+
+setPattern s = setString sPattern (SVarRef s) >> emit (SetP pHasPattern cTrue)
 
 addLabelMapping name l = modify $
     \state -> state { sourceLabels = M.insert name l (sourceLabels state) }
@@ -233,7 +231,7 @@ label = withNewLabel emitLabel
 
 printIfAuto = do
     ap <- autoprint <$> get
-    when ap (emit (Print 0))
+    when ap (emit (Print 0 sPattern))
 
 tIf :: Pred -> IRM a -> IRM b -> IRM ()
 tIf p tx fx = mdo
@@ -263,7 +261,7 @@ toIR autoprint seds = evalState go (startState autoprint)
 
 checkQueuedOutput =
   tWhen pHasQueuedOutput $ do
-    emit (PrintS 0 sOutputQueue)
+    emit (Print 0 sOutputQueue)
     setString sOutputQueue emptyS
     emit (SetP pHasQueuedOutput cFalse)
 
@@ -285,7 +283,9 @@ tProgram seds = mdo
   tSeds seds
 
   newCyclePrint <- label
-  get >>= \s -> when (autoprint s) (emit (Print 0))
+  doprint <- gets autoprint
+  when doprint (tWhen pHasPattern (emit (Print 0 sPattern)))
+  emit (SetP pHasPattern cFalse)
   newCycleNoPrint <- label
   checkQueuedOutput
   setLastSubst False
@@ -294,6 +294,7 @@ tProgram seds = mdo
   emit (SetP pIntr cFalse)
   emit (SetP pPreFirst cFalse)
   emit (SetP pRunNormal cTrue)
+  emit (SetP pHasPattern cTrue)
 
   intr <- emitBranch' start
 
@@ -395,23 +396,35 @@ tSed (Sed (Between start end) (AST.Change repl)) = do
     tSed (Sed (Between start end) AST.Delete)
 tSed (Sed cond x) = tWhen pRunNormal $ withCond cond $ tCmd x
 
+readString :: Int -> IRM SVar
+readString fd = do
+    s <- newString
+    emit (Read s fd)
+    return s
+
 tCmd :: AST.Cmd -> IRM ()
 tCmd (AST.Block xs) = tSeds xs
-tCmd (AST.Print fd) = emit (Print fd)
+tCmd (AST.Print fd) = tWhen pHasPattern $ emit (Print fd sPattern)
 tCmd (AST.PrintLineNumber fd) = emit (PrintLineNumber fd)
-tCmd (AST.PrintLiteral width) = emit (PrintLiteral width 0)
-tCmd (AST.Message m) = emit (Message m)
+tCmd (AST.PrintLiteral width) = tWhen pHasPattern $ emit (PrintLiteral width 0 sPattern)
+tCmd (AST.Message Nothing) = tWhen pHasPattern $ emit (Message sPattern)
+tCmd (AST.Message (Just s)) = do
+    tmp <- emitString (SConst s)
+    emit (Message tmp)
 -- FIXME Wrong! "If there is no more input then sed exits without processing
 -- any more commands." (How does read indicate EOF anyway?)
 tCmd (AST.Next fd) = do
     checkQueuedOutput
     printIfAuto
-    emit (Read fd)
     setLastSubst False
+    line <- readString fd
+    setPattern line
 tCmd (AST.NextA fd) = do
     checkQueuedOutput
-    emit (ReadAppend fd)
     setLastSubst False
+    line <- readString fd
+    tmp <- emitString (SAppendNL sPattern line)
+    tIf pHasPattern (setPattern tmp) (setPattern line)
 tCmd (AST.Listen fd host port) = emit (Listen fd host port)
 tCmd (AST.Accept sfd fd) = emit (Accept sfd fd)
 tCmd (AST.Label name) = do
@@ -435,7 +448,7 @@ tCmd (AST.Fork sed) = mdo
   exit <- finishBlock' (Quit ExitSuccess)
   return ()
 
-tCmd (AST.Clear) = emit (Change "")
+tCmd (AST.Clear) = setString sPattern emptyS >> emit (SetP pHasPattern cFalse)
 tCmd (AST.Change replacement) = do
     emit (PrintConstS 0 replacement)
     branchNextCycleNoPrint
@@ -446,11 +459,20 @@ tCmd (AST.Subst mre sub flags actions) = do
   p <- tCheck (AST.Match mre)
   tIf p (setLastSubst True >> emit (Subst sub flags) >> tSubstAction actions) (setLastSubst False)
 tCmd (AST.Trans from to) = emit (Trans from to)
-tCmd (AST.Hold maybeReg) = emit (Hold maybeReg)
-tCmd (AST.HoldA maybeReg) = emit (HoldA maybeReg)
-tCmd (AST.Get maybeReg) = emit (Get maybeReg)
-tCmd (AST.GetA maybeReg) = emit (GetA maybeReg)
-tCmd (AST.Exchange maybeReg) = emit (Exchange maybeReg)
+tCmd (AST.Hold maybeReg) = emit (Hold maybeReg sPattern)
+tCmd (AST.HoldA maybeReg) = do
+    tmp <- emitString (SHoldSpace maybeReg)
+    tmp2 <- emitString (SAppendNL tmp sPattern)
+    emit (Hold maybeReg tmp2)
+tCmd (AST.Get maybeReg) = setPattern =<< emitString (SHoldSpace maybeReg)
+tCmd (AST.GetA maybeReg) = do
+    tmp <- emitString (SHoldSpace maybeReg)
+    tmp2 <- emitString (SAppendNL sPattern tmp)
+    setString sPattern (SVarRef tmp2)
+tCmd (AST.Exchange maybeReg) = do
+    tmp <- emitString (SHoldSpace maybeReg)
+    emit (Hold maybeReg sPattern)
+    setString sPattern (SVarRef tmp)
 tCmd (AST.Insert s) = emit (PrintConstS 0 s)
 tCmd (AST.Append s) = do
     tIf pHasQueuedOutput ifTrue ifFalse
@@ -465,16 +487,16 @@ tCmd (AST.Append s) = do
     ifFalse = do
         emit (SetP pHasQueuedOutput cTrue)
         setString sOutputQueue (SConst s)
-tCmd (AST.WriteFile path) = emit (WriteFile path)
+tCmd (AST.WriteFile path) = emit (WriteFile path sPattern)
 tCmd (AST.Quit print status) = () <$ do
-  when print $ emit (Print 0)
+  when print $ emit (Print 0 sPattern)
   finishBlock' (Quit status)
 tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
 
 tSubstAction SActionNone = return ()
 tSubstAction SActionExec = emit ShellExec
-tSubstAction (SActionPrint n) = emit (Print n)
-tSubstAction (SActionWriteFile path) = emit (WriteFile path)
+tSubstAction (SActionPrint n) = emit (Print n sPattern)
+tSubstAction (SActionWriteFile path) = emit (WriteFile path sPattern)
 
 tTest ifTrue maybeTarget = mdo
   comment ("test " ++ show ifTrue ++ " " ++ show target)
