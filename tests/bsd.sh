@@ -314,7 +314,32 @@ hello
 ' lines1
 	mark '4.8' ; $SED d <lines1
 	mark '4.9' ; $SED -e '8!chello' lines1
-	mark '4.10'
+	mark '4.10' ; $SED '
+a\
+append
+2q
+' lines1
+	mark '4.11' ; $SED -n '
+a\
+append
+2q
+' lines1
+	mark '4.12' ; $SED '
+a\
+append
+2Q
+' lines1
+	mark '4.13' ; $SED -n '
+a\
+append
+2Q
+' lines1
+    # Append and 'n'ext - is it printed before or after the pattern?
+	mark '4.14' ; $SED '
+a\
+append
+2n
+' lines1
 }
 
 test_branch()

@@ -238,8 +238,8 @@ label :: IRM Label
 label = withNewLabel emitLabel
 
 printIfAuto = do
-    ap <- autoprint <$> get
-    when ap (emit (Print 0 sPattern))
+    ap <- gets autoprint
+    when ap (tWhen pHasPattern (emit (Print 0 sPattern)))
 
 tIf :: Pred -> IRM a -> IRM b -> IRM ()
 tIf p tx fx = mdo
@@ -291,12 +291,14 @@ tProgram seds = mdo
   tSeds seds
 
   newCyclePrint <- label
-  doprint <- gets autoprint
-  when doprint (tWhen pHasPattern (emit (Print 0 sPattern)))
+  printIfAuto
+  -- TODO Should this also be done in printIfAuto so that it's done by 'n'?
   emit (SetP pHasPattern cFalse)
+
   newCycleNoPrint <- label
   checkQueuedOutput
   setLastSubst False
+
   line <- finishBlock' (Cycle 0 intr line exit)
 
   emit (SetP pIntr cFalse)
@@ -423,8 +425,8 @@ tCmd (AST.Message (Just s)) = do
 -- FIXME "If there is no more input then sed exits without processing any more
 -- commands." (How does read indicate EOF anyway?)
 tCmd (AST.Next fd) = do
-    checkQueuedOutput
     printIfAuto
+    checkQueuedOutput
     setLastSubst False
     line <- readString fd
     setPattern line
@@ -506,7 +508,9 @@ tCmd (AST.Append s) = do
         setString sOutputQueue (SConst s)
 tCmd (AST.WriteFile path) = emit (WriteFile path sPattern)
 tCmd (AST.Quit print status) = () <$ do
-  when print $ emit (Print 0 sPattern)
+  when print $ do
+    printIfAuto
+    checkQueuedOutput
   finishBlock' (Quit status)
 tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
 
