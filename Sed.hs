@@ -199,7 +199,7 @@ runIR (IR.SetP p cond) = setPred p =<< case cond of
   IR.EndLine l -> gets ((l <) . lineNumber)
   IR.Match svar re -> checkRE svar re
   IR.MatchLastRE svar -> checkRE svar . fromJust =<< gets lastRegex
-  IR.AtEOF -> liftIO . fileIsEOF =<< gets (fromJust . M.lookup 0 . files)
+  IR.AtEOF fd -> liftIO . fileIsEOF =<< gets (fromJust . M.lookup fd . files)
 runIR (IR.SetS s expr) = setString s =<< evalStringExpr expr
 runIR (IR.If p t f) = do
   b <- getPred p

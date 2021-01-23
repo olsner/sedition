@@ -22,8 +22,11 @@ newtype Pred = Pred Int deriving (Ord,Eq)
 type FD = Int
 
 data Cond
-  = AtEOF
+  = AtEOF FD
   -- current line == l
+  -- Should this take a file too? Redirects could get confusing, but per-file
+  -- (per-socket) line counters would make more sense in forks and such.
+  -- Fork does reset the counter though.
   | Line Int
   -- current line > l (tested after the first line has been processed)
   | EndLine Int
@@ -345,7 +348,7 @@ withCond' (Between start end) whenTrue whenFalse = mdo
 -- 12,13p should print for lines 12 and 13. 12,3p should only print for 12
 -- since the condition is false before reaching the end.
   let checkEnd | (AST.Line n) <- end =  do
-                  p <- withNewPred $ \p -> emit (SetP p (EndLine n))
+                  p <- emitNewPred (EndLine n)
                   tIf p (clear >> skip) run
                | otherwise = ifCheck end (clear >> run) run
 
@@ -368,15 +371,16 @@ withCond' (NotAddr addr) whenTrue whenFalse = withCond' addr whenFalse whenTrue
 withCond addr x = withCond' addr x (return ())
 
 withNewPred f = newPred >>= \p -> f p >> return p
+emitNewPred cond = withNewPred $ \p -> emit (SetP p cond)
 
 tCheck (AST.Line 0) = return pPreFirst
-tCheck (AST.Line n) = withNewPred $ \p -> emit (SetP p (Line n))
+tCheck (AST.Line n) = emitNewPred (Line n)
 tCheck (AST.Match (Just re)) = withNewPred $ \p -> do
     emit (SetP p (Match sPattern re))
     emit (SetLastRE re)
-tCheck (AST.Match Nothing) = withNewPred $ \p -> emit (SetP p (MatchLastRE sPattern))
+tCheck (AST.Match Nothing) = emitNewPred (MatchLastRE sPattern)
 tCheck (AST.IRQ) = return pIntr
-tCheck (AST.EOF) = withNewPred $ \p -> emit (SetP p AtEOF)
+tCheck (AST.EOF) = emitNewPred (AtEOF 0)
 
 tSed :: Sed -> IRM ()
 tSed (Sed Always (AST.Block xs)) = tSeds xs
@@ -416,8 +420,8 @@ tCmd (AST.Message Nothing) = tWhen pHasPattern $ emit (Message sPattern)
 tCmd (AST.Message (Just s)) = do
     tmp <- emitCString s
     emit (Message tmp)
--- FIXME Wrong! "If there is no more input then sed exits without processing
--- any more commands." (How does read indicate EOF anyway?)
+-- FIXME "If there is no more input then sed exits without processing any more
+-- commands." (How does read indicate EOF anyway?)
 tCmd (AST.Next fd) = do
     checkQueuedOutput
     printIfAuto
