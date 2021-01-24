@@ -92,6 +92,9 @@ tests =
   --, ("s/[\\]/]foo/bar/", [Sed Always (subst "[\\]/]foo" "bar")])
   , ("s|foo|\\\n|", [Sed Always (subst "foo" "\n")])
   , ("s|foo|\\n|", [Sed Always (subst "foo" "\n")])
+  , ("s|foo|&|", [Sed Always (subst' "foo" [WholeMatch])])
+  , ("s|foo|\\&|", [Sed Always (subst' "foo" [Literal "&"])])
+  , ("s|foo|\\x26|", [Sed Always (subst' "foo" [Literal "&"])])
   , ("s/./(&)/", [Sed Always (subst' "." [Literal "(", WholeMatch, Literal ")"])])
 
   , ("t foo;Tfoo;t;T",

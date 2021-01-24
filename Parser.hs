@@ -53,6 +53,8 @@ unescape 'n' = '\n'
 unescape 'r' = '\r'
 unescape c   = c
 
+hexUnescape 'x' d1 d2 = toEnum (read ['0','x',d1,d2])
+
 list p1 p2 = (:) <$> p1 <*> p2
 
 -- not eof, blank, }, ; or #
@@ -137,6 +139,7 @@ pReplacement term = combineLiterals <$> many (choice ps) <* char term
        , charLit <$> noneOf [term,'\n','\\']
        , char '\\' >> choice escaped ]
   escaped = [ charLit . unescape <$> oneOf "rn"
+            , charLit <$> (hexUnescape <$> char 'x' <*> hexDigit <*> hexDigit)
             , BackReference . digitToInt <$> digit
             , charLit <$> anyChar ]
   charLit = Literal . BS.singleton
