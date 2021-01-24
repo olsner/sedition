@@ -428,6 +428,16 @@ tb' lines1
         :l2
         s/^/subst-done: /p
     ' lines1
+# Check if a conditional substitution clears the substitution done flag
+	mark '5.10' ; $SED -e '
+s/2$/S/
+/_5/! s/_3/_E/
+t l1
+b
+: l1
+i label1
+b
+' lines1
 }
 
 test_pattern()

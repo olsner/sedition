@@ -81,12 +81,8 @@ data Insn e x where
   Print         :: FD -> SVar               -> Insn O O
   Message       :: SVar                     -> Insn O O
 
-  -- TODO Map hold names to string variables here in IR?
-  -- But initially:
-  -- remove append forms
-  -- Hold takes hold-name and string-var (not expression, to keep things simple)
-  -- Get is replaced with SetS var (SHoldSpace ...)
-  -- Exchange adds some temporaries
+  -- TODO Map hold names to string variables here in IR, and remove the Hold
+  -- and SHoldSpace instructions.
   Hold          :: (Maybe S) -> SVar        -> Insn O O
 
   SetLastRE     :: RE                       -> Insn O O
@@ -485,13 +481,11 @@ tCmd (AST.Redirect dst (Just src)) = emit (Redirect dst src)
 tCmd (AST.Redirect dst Nothing) = emit (CloseFile dst)
 tCmd (AST.Subst mre sub flags actions) = do
   p <- tCheck (AST.Match mre)
-  tIf p ifMatch (setLastSubst False)
-  where
-    ifMatch = do
-        setLastSubst True
-        s <- emitString (SSubst sPattern sub flags)
-        setPattern s
-        tSubstAction actions s
+  tWhen p $ do
+    setLastSubst True
+    s <- emitString (SSubst sPattern sub flags)
+    setPattern s
+    tSubstAction actions s
 tCmd (AST.Trans from to) = do
     s <- emitString (STrans from to sPattern)
     setPattern s
