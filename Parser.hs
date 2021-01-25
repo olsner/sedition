@@ -53,7 +53,7 @@ unescape 'n' = '\n'
 unescape 'r' = '\r'
 unescape c   = c
 
-hexUnescape 'x' d1 d2 = toEnum (read ['0','x',d1,d2])
+hexUnescape _ d1 d2 = toEnum (read ['0','x',d1,d2])
 
 list p1 p2 = (:) <$> p1 <*> p2
 
