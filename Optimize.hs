@@ -12,6 +12,8 @@ import IR
 
 import ConstPred (constPredPass)
 import LivePred (livePredPass)
+import LiveString (liveStringPass)
+import SameString (sameStringPass)
 import RedundantBranches (redundantBranchesPass)
 
 --debugBwd = debugBwdJoins trace (const True)
@@ -24,6 +26,8 @@ optimizeOnce entry program = do
   (program,_,_) <- analyzeAndRewriteBwd livePredPass entries program mapEmpty
   (program,_,_) <- analyzeAndRewriteFwd constPredPass entries program mapEmpty
   (program,_,_) <- analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
+  (program,_,_) <- analyzeAndRewriteFwd sameStringPass entries program mapEmpty
+  (program,_,_) <- analyzeAndRewriteBwd liveStringPass entries program mapEmpty
   return program
 
 optToFix f original = do
