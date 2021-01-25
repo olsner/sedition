@@ -145,7 +145,6 @@ data SedState program = SedState
   { program :: program
   , files :: Map Int File
   , lineNumber :: Int
-  , hold :: Map S S
   , lastRegex :: Maybe RE
   , extendedRegex :: Bool
   , predicates :: Set Int
@@ -190,7 +189,6 @@ initialState ipc ere pgm file0 = do
     program = pgm
   , files = M.singleton 0 file0
   , lineNumber = 0
-  , hold = M.empty
   , strings = M.empty
   , lastRegex = Nothing
   , predicates = S.empty
@@ -274,7 +272,6 @@ runIR (IR.PrintLiteral w i s) = do
 runIR (IR.PrintLineNumber i) = do
     l <- gets lineNumber
     printTo i (C.pack (show l))
-runIR (IR.Hold reg svar) = setRegValue reg =<< getString svar
 runIR (IR.Quit code) = liftIO (exitWith code)
 runIR (IR.Comment s) = debug ("*** " ++ s)
 
@@ -322,7 +319,7 @@ selectRegex bre _ False = bre
 
 evalStringExpr (IR.SConst s) = return s
 evalStringExpr (IR.SVarRef svar) = getString svar
-evalStringExpr (IR.SHoldSpace reg) = getRegValue reg
+evalStringExpr (IR.SRandomString) = liftIO randomString
 evalStringExpr (IR.SSubst svar sub stype) = substitute sub stype =<< getString svar
 evalStringExpr (IR.STrans from to str) =
     trans from to <$> getString str
@@ -331,6 +328,9 @@ evalStringExpr (IR.SAppendNL a b) = do
     a <- getString a
     b <- getString b
     return (C.concat [a, "\n", b])
+
+-- TODO We ought to provide secure random numbers
+randomString = C.pack <$> replicateM 32 (randomRIO ('A','Z'))
 
 type SedPM p a = StateT (SedState p) IO a
 type Program = Graph IR.Insn C C
@@ -364,13 +364,6 @@ doMessage m = gets ipcState >>= f
       do
         debug ("Messaging " ++ show m)
         liftIO (drive (bus ipcState) m)
-
-setRegValue reg value =
-  modify $ \s -> s { hold = M.insert (fromMaybe "" reg) value (hold s) }
-getRegValue (Just "yhjulwwiefzojcbxybbruweejw") = liftIO randomString
-getRegValue reg = gets (fromMaybe "" . M.lookup (fromMaybe "" reg) . hold)
--- TODO We ought to provide secure random numbers
-randomString = C.pack <$> replicateM 32 (randomRIO ('A','Z'))
 
 substitute sub stype p = do
   (RE _ bre ere) <- getLastRegex

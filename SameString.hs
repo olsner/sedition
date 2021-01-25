@@ -36,6 +36,8 @@ sameStringTransfer = mkFTransfer3 first middle last
 
     -- O O
     middle :: Insn O O -> SameStringFact -> SameStringFact
+    -- When changing s, we also need to invalidate other references to s in the
+    -- *values* of the fact base. That's annoying.
     middle (SetS s (SVarRef s2)) f = M.insert s (PElem s2) f
     middle (SetS s _)            f = M.insert s Top f
     middle (GetMessage s)        f = M.insert s Top f
@@ -62,7 +64,6 @@ sameString = deepFwdRw rw
     rw (SetS s expr) f | Just expr' <- rwE expr f = return (Just (mkMiddle (SetS s expr')))
     rw (SetP p cond) f | Just cond' <- rwC cond f = return (Just (mkMiddle (SetP p cond')))
     rw (Print fd s) f | Just s' <- var s f = return (Just (mkMiddle (Print fd s')))
-    rw (Hold reg s) f | Just s' <- var s f = return (Just (mkMiddle (Hold reg s')))
     -- rw (Message s) =
     -- rw (PrintLiteral _ _ s) =
     -- rw (ShellExec s) =

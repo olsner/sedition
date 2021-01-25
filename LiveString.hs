@@ -37,7 +37,6 @@ gen (SetS _ expr) = genS expr
 gen (PrintLiteral _ _ s) = S.insert s
 gen (Print _ s) = S.insert s
 gen (Message s) = S.insert s
-gen (Hold _ s) = S.insert s
 gen (ShellExec s) = S.insert s
 gen (WriteFile _ s) = S.insert s
 gen (SetP _ (Match s _)) = S.insert s
@@ -50,7 +49,7 @@ genS (SAppendNL s1 s2) = S.insert s1 . S.insert s2
 genS (SSubst s _ _) = S.insert s
 genS (STrans _ _ s) = S.insert s
 genS (SConst _) = id
-genS (SHoldSpace _) = id
+genS (SRandomString) = id
 
 liveStringTransfer :: BwdTransfer Insn LiveStringFact
 liveStringTransfer = mkBTransfer3 first middle last

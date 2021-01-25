@@ -49,7 +49,7 @@ newtype SVar = SVar Int deriving (Ord,Eq)
 data StringExpr
   = SConst S
   | SVarRef SVar
-  | SHoldSpace (Maybe S)
+  | SRandomString
   -- Subst last match against current pattern. See Match TODO about match regs.
   | SSubst SVar Replacement SubstType
   -- from to string
@@ -80,10 +80,6 @@ data Insn e x where
   PrintLiteral  :: Int -> FD -> SVar        -> Insn O O
   Print         :: FD -> SVar               -> Insn O O
   Message       :: SVar                     -> Insn O O
-
-  -- TODO Map hold names to string variables here in IR, and remove the Hold
-  -- and SHoldSpace instructions.
-  Hold          :: (Maybe S) -> SVar        -> Insn O O
 
   SetLastRE     :: RE                       -> Insn O O
 
@@ -117,6 +113,7 @@ data IRState = State
   { firstFreeUnique :: Unique
   , autoprint :: Bool
   , sourceLabels :: Map S Label
+  , holdSpaces :: Map S SVar
   , nextCycleLabels :: (Label, Label)
   , program :: Graph Insn O O
   }
@@ -129,7 +126,7 @@ instance Show (Graph Insn e x) where
 
 invalidLabel :: String -> Label
 invalidLabel s = error ("Invalid label: " ++ s)
-startState autoprint = State firstNormalPred autoprint M.empty (dummyCycleLabel, dummyCycleLabel) emptyGraph
+startState autoprint = State firstNormalPred autoprint M.empty M.empty (dummyCycleLabel, dummyCycleLabel) emptyGraph
 dummyCycleLabel = invalidLabel "uninitialized next-cycle label"
 
 instance Show Pred where
@@ -155,10 +152,12 @@ setLastSubst x = emit (SetP pLastSubst (Bool x))
 instance Show SVar where
   show (SVar 0) = "S{pattern-space}"
   show (SVar 1) = "S{output-queue}"
+  show (SVar 2) = "S{hold-space}"
   show (SVar n) = "S" ++ show n
 
 sPattern = SVar 0
 sOutputQueue = SVar 1
+sHoldSpace = SVar 2
 
 instance UniqueMonad IRM where
   freshUnique = do
@@ -174,14 +173,18 @@ newPred = Pred <$> freshUnique
 
 newString :: IRM SVar
 newString = SVar <$> freshUnique
-setString :: SVar -> StringExpr -> IRM ()
-setString s expr = emit (SetS s expr)
+setString :: SVar -> SVar -> IRM ()
+setString s src = emit (SetS s (SVarRef src))
 emitString :: StringExpr -> IRM SVar
-emitString expr = newString >>= \s -> setString s expr >> return s
+emitString expr = newString >>= \s -> emit (SetS s expr) >> return s
 emitCString :: S -> IRM SVar
 emitCString s = emitString (SConst s)
+withNewString f = do
+    next <- newString
+    _ <- f next
+    return next
 
-setPattern s = setString sPattern (SVarRef s) >> emit (SetP pHasPattern cTrue)
+setPattern s = setString sPattern s >> emit (SetP pHasPattern cTrue)
 
 addLabelMapping name l = modify $
     \state -> state { sourceLabels = M.insert name l (sourceLabels state) }
@@ -191,6 +194,15 @@ getLabelMapping name = do
   case res of
     Just l -> return l
     Nothing -> withNewLabel (addLabelMapping name)
+
+addHoldMapping name var = modify $
+    \state -> state { holdSpaces = M.insert name var (holdSpaces state) }
+getHoldMapping Nothing = return sHoldSpace
+getHoldMapping (Just name) = do
+  res <- M.lookup name . holdSpaces <$> get
+  case res of
+    Just var -> return var
+    Nothing -> withNewString (addHoldMapping name)
 
 emitOCO :: Insn O C -> Insn C O -> IRM ()
 emitOCO last first =
@@ -268,7 +280,7 @@ toIR autoprint seds = evalState go (startState autoprint)
 checkQueuedOutput =
   tWhen pHasQueuedOutput $ do
     emit (Print 0 sOutputQueue)
-    setString sOutputQueue emptyS
+    setString sOutputQueue =<< emitString emptyS
     emit (SetP pHasQueuedOutput cFalse)
 
 -- Entry points to generate:
@@ -320,7 +332,7 @@ tProgram seds = mdo
   emit (GetMessage msg)
   -- Update pattern variable for matching but don't set pHasPattern in IPC
   -- branch, to avoid printing it at the end of the loop.
-  setString sPattern (SVarRef msg)
+  setString sPattern msg
 
   emit (SetP pPreFirst cFalse)
   emit (SetP pRunNormal cFalse)
@@ -472,7 +484,10 @@ tCmd (AST.Fork sed) = mdo
   exit <- finishBlock' (Quit ExitSuccess)
   return ()
 
-tCmd (AST.Clear) = setString sPattern emptyS >> emit (SetP pHasPattern cFalse)
+tCmd (AST.Clear) = do
+    t <- emitString emptyS
+    setString sPattern t
+    emit (SetP pHasPattern cFalse)
 tCmd (AST.Change replacement) = do
     emit (PrintConstS 0 replacement)
     branchNextCycleNoPrint
@@ -489,20 +504,32 @@ tCmd (AST.Subst mre sub flags actions) = do
 tCmd (AST.Trans from to) = do
     s <- emitString (STrans from to sPattern)
     setPattern s
-tCmd (AST.Hold maybeReg) = emit (Hold maybeReg sPattern)
+tCmd (AST.Hold maybeReg) = do
+    space <- getHoldMapping maybeReg
+    setString space sPattern
 tCmd (AST.HoldA maybeReg) = do
-    tmp <- emitString (SHoldSpace maybeReg)
-    tmp2 <- emitString (SAppendNL tmp sPattern)
-    emit (Hold maybeReg tmp2)
-tCmd (AST.Get maybeReg) = setPattern =<< emitString (SHoldSpace maybeReg)
+    space <- getHoldMapping maybeReg
+    tmp2 <- emitString (SAppendNL space sPattern)
+    setString space tmp2
+
+tCmd (AST.Get (Just "yhjulwwiefzojcbxybbruweejw")) = do
+    temp <- emitString SRandomString
+    setPattern temp
+tCmd (AST.GetA (Just "yhjulwwiefzojcbxybbruweejw")) = do
+    temp <- emitString SRandomString
+    tmp2 <- emitString (SAppendNL sPattern temp)
+    setString sPattern tmp2
+
+tCmd (AST.Get maybeReg) = setPattern =<< getHoldMapping maybeReg
 tCmd (AST.GetA maybeReg) = do
-    tmp <- emitString (SHoldSpace maybeReg)
-    tmp2 <- emitString (SAppendNL sPattern tmp)
-    setString sPattern (SVarRef tmp2)
+    space <- getHoldMapping maybeReg
+    tmp2 <- emitString (SAppendNL sPattern space)
+    setString sPattern tmp2
 tCmd (AST.Exchange maybeReg) = do
-    tmp <- emitString (SHoldSpace maybeReg)
-    emit (Hold maybeReg sPattern)
-    setString sPattern (SVarRef tmp)
+    space <- getHoldMapping maybeReg
+    tmp <- emitString (SVarRef space)
+    setString space sPattern
+    setString sPattern tmp
 tCmd (AST.Insert s) = emit (PrintConstS 0 s)
 tCmd (AST.Append s) = do
     tIf pHasQueuedOutput ifTrue ifFalse
@@ -511,12 +538,14 @@ tCmd (AST.Append s) = do
     -- the queue.
     ifTrue = do
         temp <- emitCString s
-        setString sOutputQueue (SAppendNL sOutputQueue temp)
+        temp2 <- emitString (SAppendNL sOutputQueue temp)
+        setString sOutputQueue temp2
     -- If there's no queued output yet, we know we can simply replace the
     -- queued output with a constant.
     ifFalse = do
         emit (SetP pHasQueuedOutput cTrue)
-        setString sOutputQueue (SConst s)
+        temp <- emitCString s
+        setString sOutputQueue temp
 tCmd (AST.WriteFile path) = emit (WriteFile path sPattern)
 tCmd (AST.Quit print status) = () <$ do
   when print $ do
