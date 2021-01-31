@@ -49,6 +49,8 @@ genS (SAppendNL s1 s2) = S.insert s1 . S.insert s2
 genS (SSubst s _ _) = S.insert s
 genS (STrans _ _ s) = S.insert s
 genS (SConst _) = id
+genS (SFirstLine s) = S.insert s
+genS (SRemainingLines s) = S.insert s
 genS (SRandomString) = id
 
 liveStringTransfer :: BwdTransfer Insn LiveStringFact

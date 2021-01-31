@@ -55,6 +55,8 @@ data StringExpr
   -- from to string
   | STrans S S SVar
   | SAppendNL SVar SVar
+  | SFirstLine SVar
+  | SRemainingLines SVar
   deriving (Show,Eq)
 emptyS = SConst ""
 
@@ -441,6 +443,11 @@ readString fd = do
 tCmd :: AST.Cmd -> IRM ()
 tCmd (AST.Block xs) = tSeds xs
 tCmd (AST.Print fd) = tWhen pHasPattern $ emit (Print fd sPattern)
+tCmd (AST.PrintFirstLine fd) = tWhen pHasPattern $ do
+    firstLine <- emitString (SFirstLine sPattern)
+    restLines <- emitString (SRemainingLines sPattern)
+    setPattern restLines
+    emit (Print fd firstLine)
 tCmd (AST.PrintLineNumber fd) = emit (PrintLineNumber fd)
 tCmd (AST.PrintLiteral width) = tWhen pHasPattern $ emit (PrintLiteral width 0 sPattern)
 tCmd (AST.Message Nothing) = tWhen pHasPattern $ emit (Message sPattern)
@@ -492,6 +499,14 @@ tCmd (AST.Change replacement) = do
     emit (PrintConstS 0 replacement)
     branchNextCycleNoPrint
 tCmd (AST.Delete) = branchNextCycleNoPrint
+-- TODO, slightly more complicated: If pattern space contains newlines, delete
+-- to the first newline then restart cycle with the resulting pattern space
+-- *without reading a new input line*. If pattern state does not contain any
+-- newlines, work like 'd'.
+tCmd (AST.DeleteFirstLine) = do
+    restLines <- emitString (SRemainingLines sPattern)
+    setPattern restLines
+    branchNextCycleNoPrint
 tCmd (AST.Redirect dst (Just src)) = emit (Redirect dst src)
 tCmd (AST.Redirect dst Nothing) = emit (CloseFile dst)
 tCmd (AST.Subst mre sub flags actions) = do

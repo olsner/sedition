@@ -330,6 +330,12 @@ evalStringExpr (IR.SAppendNL a b) = do
     a <- getString a
     b <- getString b
     return (C.concat [a, "\n", b])
+evalStringExpr (IR.SFirstLine s) = do
+    (s,_) <- C.break (== '\n') <$> getString s
+    return s
+evalStringExpr (IR.SRemainingLines s) = do
+    (_,s) <- C.break (== '\n') <$> getString s
+    return s
 
 -- TODO We ought to provide secure random numbers
 randomString = C.pack <$> replicateM 32 (randomRIO ('A','Z'))
