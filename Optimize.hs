@@ -6,7 +6,7 @@ import Compiler.Hoopl as H hiding ((<*>))
 
 --import Data.Map (Map)
 --import qualified Data.Map as M
---import Debug.Trace
+import Debug.Trace
 
 import IR
 
@@ -20,16 +20,16 @@ import RedundantBranches (redundantBranchesPass)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
 --debugBwd = id
 
+--debugFwd = debugFwdTransfers trace showInsn (\n f -> True)
+debugFwd = id
+
 optimizeOnce :: (CheckpointMonad m, FuelMonad m) => Label -> Graph Insn C C -> m (Graph Insn C C)
 optimizeOnce entry program = do
   let entries = JustC [entry]
   (program,_,_) <- analyzeAndRewriteBwd livePredPass entries program mapEmpty
   (program,_,_) <- analyzeAndRewriteFwd constPredPass entries program mapEmpty
   (program,_,_) <- analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
-  -- Realized this isn't safe yet, it doesn't track modifications to variables
-  -- it is optimizing other variables to. (e.g. the hold/pattern swap would
-  -- optimize down to everything getting set to either of the inputs).
-  -- (program,_,_) <- analyzeAndRewriteFwd sameStringPass entries program mapEmpty
+  (program,_,_) <- analyzeAndRewriteFwd (debugFwd sameStringPass) entries program mapEmpty
   (program,_,_) <- analyzeAndRewriteBwd liveStringPass entries program mapEmpty
   return program
 

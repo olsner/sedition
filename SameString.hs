@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving, CPP, ScopedTypeVariables, FlexibleContexts #-}
+{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving, CPP, ScopedTypeVariables, FlexibleContexts, LambdaCase #-}
 
 -- sameStringPass: Find cases where a string variable is set to the same other
 -- variable on every incoming branch. Should rewrite many uses of
@@ -26,6 +26,11 @@ constLattice = DataflowLattice
        = if new == old then (NoChange, PElem new)
          else               (SomeChange, Top)
 
+cleanup var to = M.mapMaybe $ \case
+    PElem s | s == var -> Nothing
+    f -> Just f
+
+forward s to = M.insert s to . cleanup s to
 
 sameStringTransfer :: FwdTransfer Insn SameStringFact
 sameStringTransfer = mkFTransfer3 first middle last
@@ -38,12 +43,81 @@ sameStringTransfer = mkFTransfer3 first middle last
     middle :: Insn O O -> SameStringFact -> SameStringFact
     -- When changing s, we also need to invalidate other references to s in the
     -- *values* of the fact base. That's annoying.
-    middle (SetS s (SVarRef s2)) f = M.insert s (PElem s2) f
-    middle (SetS s _)            f = M.insert s Top f
-    middle (GetMessage s)        f = M.insert s Top f
-    middle (Read s _)            f = M.insert s Top f
+    -- Let's have a think about what it means to find "(s, PElem t)" in the
+    -- map... It should mean that any subsequent reference to s can be safely
+    -- replaced with a reference to t. Why do we do this?
+    -- * remove S{pattern} and S{hold} with specific variables/values where
+    --   possible. Not always possible where two divergent executions merge.
+    --   this is supposed to expose future optimizations based on the values of
+    --   strings.
+    -- * remove subsequently dead assignments
+    -- * avoid work done by those assignments
+    -- When is that no longer safe?
+    -- * t is modified after copying (e.g. tmp <- pattern, modify pattern, foo <- tmp)
+    -- * would it work to just M.insert s2 Top?
+    middle (SetS s (SVarRef s2)) = forward s (PElem s2)
+    middle (SetS s _)            = forward s Top
+    middle (GetMessage s)        = forward s Top
+    middle (Read s _)            = forward s Top
 
-    middle _insn f = {-trace ("Unhandled instruction " ++ show insn)-} f
+    middle _insn = \f -> {-trace ("Unhandled instruction " ++ show insn)-} f
+
+    -- Exchange (original behavior):
+    -- (Let O{2,3,{pattern}{hold}} denote the original values of all variables)
+    --
+    -- S2 <- S{pattern}
+    --   S2: PElem S{pattern}
+    -- S3 <- S{hold}
+    --   S2: PElem S{pattern}
+    --   S3: PElem S{hold}
+    -- S{pattern} <- S3
+    --   S2: PElem S{pattern}
+    --   S3: PElem S{hold}
+    --   S{pattern}: PElem S3
+    -- S{hold} <- S2
+    --   S2: PElem S{pattern}
+    --   S3: PElem S{hold}
+    --   S{pattern}: PElem S3
+    --   S{hold}: PElem S2
+    -- [some instruction reading from S{pattern}, S{hold}, S2 or S3]
+    --
+    -- What's actually rewritable according to original rules:
+    -- S2 -> S{pattern} [wrong!]
+    -- S3 -> S{hold} [wrong!]
+    -- S{pattern} -> S3 [correct]
+    --         *and* S3 -> S{hold} [wrong!]
+    -- S{hold} -> S2 [correct]
+    --      *and* S2 -> S{pattern} [wrong!]
+    -- The latter two could also result in a rewriting loop, from S{pattern} to
+    -- S3, S{hold}, S2 and then back to S{pattern}...
+    --
+    -- What should be permissible to rewrite afterwards?
+    -- S{pattern} -> S3
+    -- S{hold} -> S2
+    -- S2 -> O{pattern} (if remembered, otherwise no rewrite)
+    -- S3 -> O{hold} (if remembered)
+
+    -- Exchange (delete s2 . insert s):
+    -- (Let O{2,3,{pattern}{hold}} denote the original values of all variables)
+    --
+    -- S2 <- S{pattern}
+    --   S2: PElem S{pattern}
+    -- S3 <- S{hold}
+    --   S2: PElem S{pattern}
+    --   S3: PElem S{hold}
+    -- S{pattern} <- S3
+    --   S2: PElem S{pattern}
+    --   S{pattern}: PElem S3
+    -- S{hold} <- S2
+    --   S{pattern}: PElem S3
+    --   S{hold}: PElem S2
+    -- [some instruction reading from S{pattern}, S{hold}, S2 or S3]
+    --
+    -- What is permissible to rewrite afterwards?
+    -- S{pattern} -> S3
+    -- S{hold} -> S2
+    --
+    -- Kind of looks correct, hm.
 
     -- O C
     last :: Insn O C -> SameStringFact -> FactBase SameStringFact
