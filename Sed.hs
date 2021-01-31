@@ -8,6 +8,7 @@ module Sed (main) where
 import Compiler.Hoopl as H hiding ((<*>))
 
 import Control.Concurrent
+import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.State.Strict
@@ -20,6 +21,7 @@ import qualified Data.Map as M
 import Data.Set (Set)
 import qualified Data.Set as S
 import Data.Maybe
+import Data.Time
 
 import Network.Socket
 
@@ -500,6 +502,7 @@ data Options = Options
   , dumpParse :: Bool
   , dumpOptimizedIR :: Bool
   , dumpOriginalIR :: Bool
+  , timeIt :: Bool
   , fuel :: Int
   } deriving (Show, Eq)
 defaultOptions = Options
@@ -510,6 +513,7 @@ defaultOptions = Options
     , dumpParse = False
     , dumpOptimizedIR = False
     , dumpOriginalIR = False
+    , timeIt = False
     , fuel = 1000000 }
 addScript s o = o { scripts = Left (C.pack s) : scripts o }
 addScriptFile f o = o { scripts = Right f : scripts o }
@@ -528,6 +532,7 @@ sedOptions =
   , Option ['s'] ["separate"] (NoArg id) "Unimplemented GNU feature: treat files as separate rather than a single continuous stream"
   -- Not implemented!
   -- , Option [] ["sandbox"] (NoArg Sandbox) "operate in sandbox mode (unimplemented GNU sed feature)"
+  , Option ['t'] ["time"] (NoArg $ \o -> o { timeIt = True }) "Time optimization and execution of the program"
   ]
 
 -- TODO Include source file/line info here, thread through to the parser...
@@ -544,10 +549,18 @@ getScript options inputs = case scripts options of
     ss <- flagScript options
     return (ss, inputs)
 
-runProgram :: Bool -> Bool -> (H.Label, Program) -> File -> IO ()
+runProgram :: Bool -> Bool -> (H.Label, Program) -> File -> IO ExitCode
 runProgram ipc ere (label, program) file0 = do
     state <- initialState ipc ere program file0
     evalStateT (runIRLabel label) state
+    return ExitSuccess
+
+timestamp :: IO UTCTime
+timestamp = getCurrentTime
+
+reportTime :: String -> UTCTime -> UTCTime -> IO ()
+reportTime label start end = do
+    hPutStrLn stderr (printf "%32s %.3fs" label (realToFrac (diffUTCTime end start) :: Double))
 
 do_main args = do
   let (optFuns,nonOpts,errors) = getOpt Permute sedOptions args
@@ -558,14 +571,28 @@ do_main args = do
   let opts@Options {..} = foldl (.) id optFuns defaultOptions
 
   (scriptLines,inputs) <- getScript opts (map C.pack nonOpts)
+
+  tStartParse <- timestamp
   let seds = parseString (C.unlines scriptLines)
+  tEndParse <- seds `seq` timestamp
+
   when dumpParse $ do
     mapM_ (hPrint stderr) seds
     exitSuccess
+
+  tStartGenerateIR <- timestamp
   let (entryLabel, program) = toIR autoprint seds
+  tEndGenerateIR <- program `seq` timestamp
+
   when (dumpOriginalIR) $
       hPutStrLn stderr ("\n\n*** ORIGINAL: (entry point " ++ show entryLabel ++ ")\n" ++ show program)
-  let (program', remainingFuel) = optimize fuel (entryLabel, program)
+
+  tStartOpt <- timestamp
+  let (program', remainingFuel)
+          | fuel > 0  = optimize fuel (entryLabel, program)
+          | otherwise = (program, fuel)
+  tEndOpt <- program' `seq` timestamp
+
   when (dumpOptimizedIR) $ do
       hPutStr stderr ("\n\n*** OPTIMIZED: (entry point " ++ show entryLabel ++ ")\n")
       hPutStrLn stderr (show program')
@@ -573,7 +600,21 @@ do_main args = do
       hPutStrLn stderr ("Used fuel: " ++ show (fuel - remainingFuel))
   when (dumpOptimizedIR || dumpOriginalIR) exitSuccess
 
+  when timeIt $ do
+    reportTime "Parsing" tStartParse tEndParse
+    reportTime "Generate IR" tStartGenerateIR tEndGenerateIR
+    reportTime "Optimize" tStartOpt tEndOpt
+
+  tProgStart <- timestamp
   file0 <- inputListFile (map C.unpack inputs)
-  runProgram enableIPC extendedRegexps (entryLabel,program') file0
+  status <- catch
+    (runProgram enableIPC extendedRegexps (entryLabel,program') file0)
+    return
+  tProgEnd <- timestamp
+
+  when timeIt $ do
+    reportTime "Running" tProgStart tProgEnd
+
+  exitWith status
 
 main = do_main =<< getArgs
