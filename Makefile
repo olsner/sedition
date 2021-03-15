@@ -2,7 +2,8 @@ N = 12
 
 OUTDIR = out
 WARNINGS = -Widentities -Wcompat -Wall -Wno-name-shadowing -Wno-missing-signatures
-GHCFLAGS = -j$(N) -odir $(OUTDIR) -hidir $(OUTDIR) -O2 -threaded -rtsopts $(WARNINGS)
+GHCPACKAGES = random regex-posix
+GHCFLAGS = -j$(N) -odir $(OUTDIR) -hidir $(OUTDIR) -O2 -threaded -rtsopts $(WARNINGS) -dynamic $(addprefix -package , $(GHCPACKAGES))
 GHC ?= ghc
 
 all: sed run-parsertest README.html

@@ -35,7 +35,7 @@ import System.IO.Unsafe
 import System.Random
 
 import Text.Printf (printf)
-import Text.Regex.TDFA hiding (match)
+import Text.Regex.Posix hiding (match)
 
 import AST
 import Bus
