@@ -1,0 +1,3 @@
+[submodule "hoopl"]
+	path = hoopl
+	url = https://github.com/olsner/hoopl
