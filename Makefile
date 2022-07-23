@@ -2,7 +2,7 @@ N = 12
 
 OUTDIR = out
 WARNINGS = -Widentities -Wcompat -Wall -Wno-name-shadowing -Wno-missing-signatures
-GHCPACKAGES = random regex-posix
+GHCPACKAGES = random regex-posix trifecta network
 GHCFLAGS = -j$(N) -odir $(OUTDIR) -hidir $(OUTDIR) -O2 -threaded -rtsopts $(WARNINGS) -dynamic $(addprefix -package , $(GHCPACKAGES))
 GHC ?= ghc
 
@@ -24,6 +24,7 @@ ParserTest: force sed
 	$(GHC) $(GHCFLAGS) --make -main-is ParserTest $@
 
 check: run-parsertest run-bsdtests run-gnused-tests
+test: check
 
 run-parsertest: ParserTest
 	./ParserTest
