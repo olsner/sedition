@@ -1,5 +1,7 @@
 #!/bin/sh
 
-set -e
-#cabal update
-exec cabal install -j`nproc`  --ghc-options=-dynamic --lib regex-posix trifecta network
+cabalopts="--user -j`nproc` --ghc-options=-dynamic --lib"
+set -ex
+git submodule update --init
+cabal install $cabalopts regex-posix trifecta network
+cabal install $cabalopts ./hoopl
