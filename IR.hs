@@ -15,7 +15,6 @@ import qualified Data.Map as M
 import System.Exit
 
 import AST hiding (Cmd(..), Address(..), Label)
-import AST (Replacement)
 import qualified AST
 
 newtype Pred = Pred Int deriving (Ord,Eq)
