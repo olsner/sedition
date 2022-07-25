@@ -212,6 +212,7 @@ setPred (IR.Pred n) b = modify $ \s -> s { predicates = f (predicates s) }
       | otherwise = S.delete n
 getPred (IR.Pred n) = S.member n . predicates <$> get
 
+setString :: IR.SVar -> S -> SedM ()
 setString (IR.SVar n) value =
     modify $ \s -> s { strings = M.insert n value (strings s) }
 getString (IR.SVar n) = gets (fromMaybe "" . M.lookup n . strings)
@@ -319,6 +320,7 @@ checkRE svar (RE _ bre ere) = do
 selectRegex _ ere True = ere
 selectRegex bre _ False = bre
 
+evalStringExpr :: IR.StringExpr -> SedM S
 evalStringExpr (IR.SConst s) = return s
 evalStringExpr (IR.SVarRef svar) = getString svar
 evalStringExpr (IR.SRandomString) = liftIO randomString
