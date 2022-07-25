@@ -95,6 +95,7 @@ tests =
   , ("s|foo|&|", [Sed Always (subst' "foo" [WholeMatch])])
   , ("s|foo|\\&|", [Sed Always (subst' "foo" [Literal "&"])])
   , ("s|foo|\\x26|", [Sed Always (subst' "foo" [Literal "&"])])
+  , ("s|foo|\\x00|", [Sed Always (subst' "foo" [Literal "\0"])])
   , ("s/./(&)/", [Sed Always (subst' "." [Literal "(", WholeMatch, Literal ")"])])
 
   , ("t foo;Tfoo;t;T",
