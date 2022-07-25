@@ -1,3 +1,5 @@
+{-# LANGUAGE FlexibleContexts,ExistentialQuantification #-}
+
 module AST where
 
 import System.Exit
@@ -13,7 +15,7 @@ type S = ByteString
 -- Still feels wrong. Maybe this should just be the string, the IR can contain
 -- Regex and the IR translation can also have a flag in its monad state for
 -- which dialect to compile into.
-data RE = RE S Regex Regex
+data RE = forall r . (RegexLike r S) => RE S r r
 type Label = S
 
 instance Show RE where
