@@ -96,7 +96,16 @@ tests =
   , ("s|foo|\\&|", [Sed Always (subst' "foo" [Literal "&"])])
   , ("s|foo|\\x26|", [Sed Always (subst' "foo" [Literal "&"])])
   , ("s|foo|\\x00|", [Sed Always (subst' "foo" [Literal "\0"])])
+  -- And octal escapes. These are kind of ambiguous with back references.
+  -- TODO: figure out what the rules are for that... Maybe any 3-digit number
+  -- after backslash is parsed as an escape first.
+  -- , ("s|foo|\\032|", [Sed Always (subst' "foo" [Literal "&"])])
+  -- , ("s|foo|\\32|", [Sed Always (subst' "foo" [Literal "&"])])
+  -- , ("s|foo|\\000|", [Sed Always (subst' "foo" [Literal "\0"])])
   , ("s/./(&)/", [Sed Always (subst' "." [Literal "(", WholeMatch, Literal ")"])])
+  -- TODO: fails parsing because of the \xc4. Is it not matched by anyChar or
+  -- something?
+  --, ("s/aa/\xc4/", [Sed Always (subst' "foo" [Literal "\xc4"])])
 
   , ("t foo;Tfoo;t;T",
         [ Sed Always (Test (Just "foo"))
