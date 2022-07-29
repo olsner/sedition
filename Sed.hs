@@ -15,6 +15,8 @@ import Control.Monad.Trans.State.Strict
 
 import Data.Array
 import qualified Data.ByteString.Char8 as C
+import qualified Data.ByteString.Lazy.Char8 as L
+import Data.ByteString.Builder as B
 import Data.Char
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -374,27 +376,26 @@ substitute sub stype p = do
   useExtRE <- gets extendedRegex
   let pat = selectRegex bre ere useExtRE
   let matches@(_:_) = match stype pat p
-  let newp = subst p sub matches
+  let newp = B.toLazyByteString (subst p sub matches)
   debug ("Subst: " ++ show p ++ " => " ++ show newp)
-  return newp
+  return (L.toStrict newp)
 
-subst :: S -> Replacement -> [MatchArray] -> S
-subst p rep matches = go "" 0 matches
+subst :: S -> Replacement -> [MatchArray] -> B.Builder
+subst p rep matches = go 0 matches
   where
-    go acc lastmatch (m:ms)
-        | matchstart >= lastmatch = go acc' matchend ms
-        | otherwise = go acc lastmatch ms
+    go lastmatch (m:ms)
+        | matchstart >= lastmatch = rest <> go matchend ms
+        | otherwise = go lastmatch ms
         where
             (matchstart,matchlen) = m ! 0
             matchend = matchstart + matchlen
-            acc' = acc <> substr lastmatch (matchstart - lastmatch)
-                       <> replace rep m
-    go acc lastmatch [] = acc <> C.drop lastmatch p
+            rest = substr lastmatch (matchstart - lastmatch) <> replace rep m
+    go lastmatch [] = B.byteString (C.drop lastmatch p)
 
-    substr s l = C.take l (C.drop s p)
-    replace rep match = C.concat (map replace1 rep)
+    substr s l = B.byteString (C.take l (C.drop s p))
+    replace rep match = foldMap replace1 rep
       where
-        replace1 (Literal s) = s
+        replace1 (Literal s) = B.byteString s
         replace1 WholeMatch  = group 0
         replace1 (BackReference i) = group i
         group n = (uncurry substr) (match ! n)
