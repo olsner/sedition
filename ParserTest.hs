@@ -108,8 +108,16 @@ tests =
   -- , ("s|foo|\\000|", [Sed Always (subst' "foo" [Literal "\0"])])
   , ("s/./(&)/", [Sed Always (subst' "." [Literal "(", WholeMatch, Literal ")"])])
   -- TODO: fails parsing because of the \xc4. Is it not matched by anyChar or
-  -- something?
+  -- something? (Note, this isn't a hex escape, it's a byte C4 in the input.)
   --, ("s/aa/\xc4/", [Sed Always (subst' "foo" [Literal "\xc4"])])
+
+  , ("s/.*/\\L&/", [Sed Always (subst' ".*" [SetCaseConv Lower, WholeMatch])])
+  , ("s//\\L\\l\\U\\u\\E/", [Sed Always (subst' "" [
+    SetCaseConv Lower,
+    SetCaseConv LowerChar,
+    SetCaseConv Upper,
+    SetCaseConv UpperChar,
+    SetCaseConv NoConv])])
 
   , ("t foo;Tfoo;t;T",
         [ Sed Always (Test (Just "foo"))

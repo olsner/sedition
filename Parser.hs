@@ -139,6 +139,11 @@ pReplacement term = combineLiterals <$> many (choice ps) <* char term
   escaped = [ charLit . unescape <$> oneOf "rn"
             , charLit <$> (hexUnescape <$> char 'x' <*> hexDigit <*> hexDigit)
             , BackReference . digitToInt <$> digit
+            , SetCaseConv Lower <$ char 'L'
+            , SetCaseConv LowerChar <$ char 'l'
+            , SetCaseConv Upper <$ char 'U'
+            , SetCaseConv UpperChar <$ char 'u'
+            , SetCaseConv NoConv <$ char 'E'
             , charLit <$> anyChar ]
   charLit = Literal . BS.singleton
 

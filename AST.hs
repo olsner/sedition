@@ -31,7 +31,19 @@ re s | C.null s  = Nothing
        where bre = makeRegexOpts blankCompOpt defaultExecOpt s
              ere = makeRegexOpts compExtended defaultExecOpt s
 
-data Subst = Literal S | BackReference Int | WholeMatch deriving (Ord,Eq,Show)
+data CaseConv
+  = NoConv
+  | LowerChar
+  | Lower
+  | UpperChar
+  | Upper
+  deriving (Ord,Eq,Show)
+data Subst
+  = Literal S
+  | BackReference Int
+  | WholeMatch
+  | SetCaseConv CaseConv
+  deriving (Ord,Eq,Show)
 type Replacement = [Subst]
 
 data SubstType
