@@ -1,3 +1,6 @@
 [submodule "hoopl"]
 	path = hoopl
 	url = https://github.com/olsner/hoopl
+[submodule "regex-posix"]
+	path = regex-posix
+	url = https://github.com/olsner/regex-posix
