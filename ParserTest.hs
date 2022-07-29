@@ -92,6 +92,10 @@ tests =
   --, ("s/[\\]/]foo/bar/", [Sed Always (subst "[\\]/]foo" "bar")])
   , ("s|foo|\\\n|", [Sed Always (subst "foo" "\n")])
   , ("s|foo|\\n|", [Sed Always (subst "foo" "\n")])
+  , ("s|\\n|\\n|", [Sed Always (subst "\n" "\n")])
+  -- \n in backets should be replaced too, so it matches a newline rather than
+  -- a backslash or an 'n'.
+  , ("s|[\\n]|\\n|", [Sed Always (subst "[\n]" "\n")])
   , ("s|foo|&|", [Sed Always (subst' "foo" [WholeMatch])])
   , ("s|foo|\\&|", [Sed Always (subst' "foo" [Literal "&"])])
   , ("s|foo|\\x26|", [Sed Always (subst' "foo" [Literal "&"])])

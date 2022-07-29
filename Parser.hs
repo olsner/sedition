@@ -97,22 +97,20 @@ slash re = (char '/' *> slashWith re '/')
 
 -- Reads a "slash"-terminated (the terminator itself already parsed) argument
 -- and consumes the terminator.
--- The 're' should presumably have some effect on parsing? It's true for the
--- regexp part and false for replacement part of a s/// command.
--- I wonder if it's reasonable to simply parse a complete regexp here, thread
--- in the BRE/ERE flag and generate an extended regexp internally.
 slashWith :: Bool -> Char -> Parser S
 slashWith re term = BS.concat <$> many p <* char term
   where
   -- On the regexp side, handle character classes specially. On the replacement
   -- side, [ is just a literal.
-  p | re        = choice (charClass : commonParsers)
-    | otherwise = choice commonParsers
+  p | re        = choice (charClass : commonParsers term)
+    | otherwise = choice (commonParsers term)
   -- TODO Kind of similar to slashWith ']', but we don't want to unescape
   -- things like \], and we should unescape the terminator. Getting all
   -- the corner cases really right requires more work.
-  charClass = BS.pack <$> (char '[' $>$$ many (noneOf [']']) $$>$ char ']')
-  commonParsers =
+  charClass = BS.concat <$> (charBS '[' $>$$ many charInClass $$>$ charBS ']')
+  charInClass = choice (commonParsers ']')
+  charBS c = BS.singleton <$> char c
+  commonParsers term =
     [ BS.singleton <$> noneOf [term,'\n','\\']
     -- TODO It's possible to use a regexp-special character as the delimiter,
     -- which makes this a bit wonky. I think we may need to detect those and
