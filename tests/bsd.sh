@@ -99,7 +99,7 @@ mark()
 	exec >"$DIR/${MARK}_$1"
 	echo "Test $1:$MARK"
 	# Uncomment this line to match tests with sed error messages
-	echo "Test $1:$MARK" >&5
+	#echo "Test $1:$MARK" >&5
 }
 
 test_args()
