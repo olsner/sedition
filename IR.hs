@@ -11,6 +11,8 @@ import Control.Monad.Trans.State.Strict
 
 import Data.Map (Map)
 import qualified Data.Map as M
+import Data.Set (Set)
+import qualified Data.Set as S
 
 import System.Exit
 
@@ -107,6 +109,8 @@ instance NonLocal Insn where
 instance HooplNode Insn where
   mkBranchNode = Branch
   mkLabelNode = Label
+
+type Program = Graph IR.Insn C C
 
 data IRState = State
   { firstFreeUnique :: Unique
@@ -569,3 +573,54 @@ tTest ifTrue maybeTarget = mdo
   tIf pLastSubst (clear >> emitBranch' t) (clear >> emitBranch' f)
   l <- label
   return ()
+
+allPredicates :: Program -> Set Pred
+allPredicates graph = foldGraphNodes (S.union . usedPredicates) graph S.empty
+allStrings :: Program -> Set SVar
+allStrings graph = foldGraphNodes (S.union . usedStrings) graph S.empty
+allFiles :: Program -> Set FD
+allFiles graph = foldGraphNodes (S.union . usedFiles) graph S.empty
+
+usedFiles :: Insn e x -> Set FD
+usedFiles (Print i _) = S.singleton i
+usedFiles (PrintConstS i _) = S.singleton i
+usedFiles (PrintLineNumber i) = S.singleton i
+usedFiles (PrintLiteral i _ _) = S.singleton i
+usedFiles (Wait i) = S.singleton i
+usedFiles (Read _ i) = S.singleton i
+usedFiles (Listen i _ _) = S.singleton i
+usedFiles (Accept s c) = S.fromList [s, c]
+usedFiles (Redirect i j) = S.fromList [i, j]
+usedFiles (CloseFile i) = S.singleton i
+usedFiles (SetP _ c) = condUsedFiles c
+usedFiles _ = S.empty
+
+usedPredicates :: Insn e x -> Set Pred
+usedPredicates (SetP p _) = S.singleton p
+usedPredicates (If p _ _) = S.singleton p
+usedPredicates _ = S.empty
+
+usedStrings :: Insn e x -> Set SVar
+usedStrings (Print _ s) = S.singleton s
+usedStrings (Read s _) = S.singleton s
+usedStrings (SetS s e) = S.insert s (stringExprStrings e)
+usedStrings (SetP _ c) = condUsedStrings c
+usedStrings (Message s) = S.singleton s
+usedStrings (GetMessage s) = S.singleton s
+usedStrings (PrintLiteral _ _ s) = S.singleton s
+usedStrings (ShellExec s) = S.singleton s
+usedStrings (WriteFile _ s) = S.singleton s
+usedStrings _ = S.empty
+
+stringExprStrings (SVarRef s) = S.singleton s
+stringExprStrings (SSubst s _ _) = S.singleton s
+stringExprStrings (STrans _ _ s) = S.singleton s
+stringExprStrings (SAppendNL s t) = S.insert s (S.singleton t)
+stringExprStrings _ = S.empty
+
+condUsedStrings (Match s _) = S.singleton s
+condUsedStrings (MatchLastRE s) = S.singleton s
+condUsedStrings _ = S.empty
+
+condUsedFiles (AtEOF i) = S.singleton i
+condUsedFiles _ = S.empty

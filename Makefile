@@ -40,7 +40,7 @@ run-gnused-tests: sed
 
 MODULES = Sed Parser AST Bus ParserTest IR \
 	Optimize ConstPred RedundantBranches LivePred \
-	LiveString SameString
+	LiveString SameString Compile
 
 clean:
 	rm -f sed Sed ParserTest

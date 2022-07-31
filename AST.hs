@@ -31,6 +31,8 @@ re s | C.null s  = Nothing
        where bre = makeRegexOpts blankCompOpt defaultExecOpt s
              ere = makeRegexOpts compExtended defaultExecOpt s
 
+reString (RE s _ _) = s
+
 data CaseConv
   = NoConv
   | LowerChar

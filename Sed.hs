@@ -41,8 +41,9 @@ import Text.Regex.Base hiding (match)
 
 import AST
 import Bus
+import Compile
 import Parser
-import IR (toIR)
+import IR (toIR, Program)
 import qualified IR
 import Optimize
 
@@ -339,7 +340,6 @@ evalStringExpr (IR.SAppendNL a b) = do
 randomString = C.pack <$> replicateM 32 (randomRIO ('A','Z'))
 
 type SedPM p a = StateT (SedState p) IO a
-type Program = Graph IR.Insn C C
 type SedM a = SedPM Program a
 
 doListen i maybeHost port = do
@@ -502,10 +502,13 @@ data Options = Options
   , autoprint :: Bool
   , enableIPC :: Bool
   , scripts :: [Either S FilePath]
+  , outputFile :: FilePath
   , dumpParse :: Bool
   , dumpOptimizedIR :: Bool
   , dumpOriginalIR :: Bool
   , timeIt :: Bool
+  , runIt :: Bool
+  , compileIt :: Bool
   , fuel :: Int
   } deriving (Show, Eq)
 defaultOptions = Options
@@ -513,13 +516,17 @@ defaultOptions = Options
     , autoprint = True
     , enableIPC = True
     , scripts = []
+    , outputFile = "out.c"
     , dumpParse = False
     , dumpOptimizedIR = False
     , dumpOriginalIR = False
     , timeIt = False
+    , runIt = True
+    , compileIt = False
     , fuel = 1000000 }
 addScript s o = o { scripts = Left (C.pack s) : scripts o }
 addScriptFile f o = o { scripts = Right f : scripts o }
+setOutputFile f o = o { outputFile = f }
 setFuel f o = o { fuel = f }
 
 sedOptions =
@@ -536,6 +543,8 @@ sedOptions =
   -- Not implemented!
   -- , Option [] ["sandbox"] (NoArg Sandbox) "operate in sandbox mode (unimplemented GNU sed feature)"
   , Option ['t'] ["time"] (NoArg $ \o -> o { timeIt = True }) "Time optimization and execution of the program"
+  , Option ['c'] ["compile"] (NoArg $ \o -> o { runIt = False, compileIt = True }) "Don't run the program, compile it to C instead."
+  , Option ['o'] [] (ReqArg setOutputFile "OUTPUT_FILE") "Path to compiled output file."
   ]
 
 -- TODO Include source file/line info here, thread through to the parser...
@@ -556,6 +565,16 @@ runProgram :: Bool -> Bool -> (H.Label, Program) -> File -> IO ExitCode
 runProgram ipc ere (label, program) file0 = do
     state <- initialState ipc ere program file0
     evalStateT (runIRLabel label) state
+    return ExitSuccess
+
+-- Currently unimplemented for non-extended regexps. We should be handling the
+-- extended/basic switch earlier and e.g. actually parse the regexps in
+-- sedition so that we can also output them in re2c syntax and/or use TDFA in
+-- the interpreter.
+compileProgram :: Bool -> Bool -> (H.Label, Program) -> FilePath -> IO ExitCode
+compileProgram ipc _eres (label, program) ofile = do
+    let compiled = compileIR ipc label program
+    C.writeFile ofile compiled
     return ExitSuccess
 
 timestamp :: IO UTCTime
@@ -608,16 +627,23 @@ do_main args = do
     reportTime "Generate IR" tStartGenerateIR tEndGenerateIR
     reportTime "Optimize" tStartOpt tEndOpt
 
-  tProgStart <- timestamp
-  file0 <- inputListFile (map C.unpack inputs)
-  status <- catch
-    (runProgram enableIPC extendedRegexps (entryLabel,program') file0)
-    return
-  tProgEnd <- timestamp
+  when runIt $ do
+    tProgStart <- timestamp
+    file0 <- inputListFile (map C.unpack inputs)
+    status <- catch
+      (runProgram enableIPC extendedRegexps (entryLabel,program') file0)
+      return
+    tProgEnd <- timestamp
 
-  when timeIt $ do
-    reportTime "Running" tProgStart tProgEnd
+    when timeIt $ do
+      reportTime "Running" tProgStart tProgEnd
 
-  exitWith status
+    exitWith status
+
+  when compileIt $ do
+    status <- catch
+      (compileProgram enableIPC extendedRegexps (entryLabel, program') outputFile)
+      return
+    exitWith status
 
 main = do_main =<< getArgs
