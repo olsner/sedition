@@ -23,7 +23,10 @@ programHeader program = "\n\
     \#include <regex.h>\n\
     \#include <stdbool.h>\n\
     \#include <stdio.h>\n\
-    \struct string { char* buf; size_t n; };\n\
+    \#include <stdlib.h>\n\
+    \#include \"sedition.h\"\n\
+    \struct string { char* buf; size_t len; size_t alloc; };\n\
+    \typedef struct string string;\n\
     \static int lineNumber;\n\
     \static bool hasPendingIPC;\n\
     \static const char* lastRegex;\n" <>
@@ -48,12 +51,12 @@ compileIR _ipc entry program = L.toStrict . toLazyByteString $
   where GMany _ blocks _ = program
 
 -- compileBlock :: Block IR.Insn e x -> Builder
-compileBlock block = fold (string8 "\n")
+compileBlock block = fold (mempty :: Builder)
   where
     fold :: Builder -> Builder
     fold = foldBlockNodesF f block
     f :: forall e x . IR.Insn e x -> Builder -> Builder
-    f insn builder = compileInsn insn <> builder
+    f insn builder = builder <> compileInsn insn
 
 goto :: H.Label -> Builder
 goto l = stmt ("goto " <> label l)
@@ -87,7 +90,8 @@ comment builder = "// " <> builder <> "\n"
 unimpl what extra = comment ("UNIMPLEMENTED: " <> what <> ": " <> showB extra)
 
 compileCond cond = case cond of
-  IR.Bool b -> showB b
+  IR.Bool True -> "true"
+  IR.Bool False -> "false"
   IR.Line l -> intDec l <> " == " <> lineNumber
   IR.EndLine l -> intDec l <> " < " <> lineNumber
   IR.Match svar re -> fun "checkRE" [string svar, cstring (reString re)]
@@ -128,7 +132,7 @@ compileInsn (IR.PrintLineNumber i) =
 compileInsn (IR.Quit code) = stmt (fun "exit" [c_code code])
   where
     c_code (ExitFailure n) = intDec n
-    c_code ExitSuccess = "EXIT_SUCCCESS"
+    c_code ExitSuccess = "EXIT_SUCCESS"
 compileInsn (IR.Comment s) = comment (string8 s)
 
 compileInsn (IR.Wait i) = sfun "wait_or_event" [fd i]
