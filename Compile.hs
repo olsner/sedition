@@ -20,20 +20,19 @@ import IR (Program)
 -- Declare global variables
 -- Find and declare all strings, predicates and files
 programHeader program = "\n\
+    \#define _GNU_SOURCE\n\
     \#include <regex.h>\n\
     \#include <stdbool.h>\n\
     \#include <stdio.h>\n\
     \#include <stdlib.h>\n\
     \#include \"sedition.h\"\n\
-    \struct string { char* buf; size_t len; size_t alloc; };\n\
-    \typedef struct string string;\n\
     \static int lineNumber;\n\
     \static bool hasPendingIPC;\n\
     \static const char* lastRegex;\n" <>
     foldMap (declare "bool" pred) preds <>
     foldMap (declare "string" stringvar) strings <>
     foldMap (declare "FILE*" fd) files <>
-    "int main() {"
+    "int main() {\n"
   where
     declare t s var = stmt ("static " <> t <> " " <> s var)
     preds = IR.allPredicates program
@@ -74,6 +73,7 @@ cstring s = "\"" <> foldMap quoteC (C.unpack s) <> "\""
   where
     quoteC '\n' = "\\n"
     quoteC '\"' = "\\\""
+    quoteC '\\' = "\\\\"
     quoteC c = char8 c
 
 showB x = string8 (show x)
@@ -99,7 +99,7 @@ compileCond cond = case cond of
   -- variables earlier, so we can map regexps in the code to functions in the
   -- compiled output.
   IR.MatchLastRE svar -> fun "checkRE" [string svar, lastRegex]
-  IR.AtEOF i -> fun "isEOF" [fd i]
+  IR.AtEOF i -> fun "is_eof" [fd i]
   IR.PendingIPC -> hasPendingIPC
 
 compileInsn :: IR.Insn e x -> Builder
