@@ -572,8 +572,8 @@ runProgram ipc ere (label, program) file0 = do
 -- sedition so that we can also output them in re2c syntax and/or use TDFA in
 -- the interpreter.
 compileProgram :: Bool -> Bool -> (H.Label, Program) -> FilePath -> IO ExitCode
-compileProgram ipc _eres (label, program) ofile = do
-    let compiled = compileIR ipc label program
+compileProgram ipc ere (label, program) ofile = do
+    let compiled = compileIR ipc ere label program
     C.writeFile ofile compiled
     return ExitSuccess
 

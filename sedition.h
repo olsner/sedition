@@ -1,5 +1,7 @@
 // TODO Bundle this in Compile.hs or something so we don't need loose data
 // files in a sedition distribution.
+
+#include <regex.h>
 #include <string.h>
 
 struct string { char* buf; size_t len; size_t alloc; };
@@ -49,10 +51,25 @@ static void concat_newline(string* dst, string* a, string* b)
 // Regex functions
 //
 
-static bool checkRE(string* pat, const char* regexp)
+static bool checkRE(string* s, const char* regexp, int cflags)
 {
-    fprintf(stderr, "UNIMPL: apply regexp %s to %.*s\n", regexp, (int)pat->len, pat->buf);
-    return false;
+    regex_t re;
+    regmatch_t match;
+    int res = regcomp(&re, regexp, cflags);
+    if (res) {
+        fprintf(stderr, "regcomp: error %d in %s\n", res, regexp);
+        abort();
+    }
+    match.rm_so = 0;
+    match.rm_eo = s->len;
+    res = regexec(&re, s->buf, 0, &match, REG_STARTEND);
+    if (res != 0 && res != REG_NOMATCH) {
+        fprintf(stderr, "regexec: error %d in %s\n", res, regexp);
+        abort();
+    }
+    regfree(&re);
+    fprintf(stderr, "checkRE: res %d for %s on %.*s\n", res, regexp, (int)s->len, s->buf);
+    return res == 0;
 }
 
 //

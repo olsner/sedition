@@ -19,9 +19,8 @@ import IR (Program)
 -- Include the "runtime" (or inline it)
 -- Declare global variables
 -- Find and declare all strings, predicates and files
-programHeader program = "\n\
+programHeader ere program = "\n\
     \#define _GNU_SOURCE\n\
-    \#include <regex.h>\n\
     \#include <stdbool.h>\n\
     \#include <stdio.h>\n\
     \#include <stdlib.h>\n\
@@ -32,18 +31,21 @@ programHeader program = "\n\
     foldMap (declare "bool" pred) preds <>
     foldMap (declare "string" stringvar) strings <>
     foldMap (declare "FILE*" fd) files <>
+    "static const int re_cflags = " <> cflags <> ";\n" <>
     "int main() {\n"
   where
     declare t s var = stmt ("static " <> t <> " " <> s var)
     preds = IR.allPredicates program
     strings = IR.allStrings program
     files = IR.allFiles program
+    cflags | ere       = "REG_EXTENDED"
+           | otherwise = "0"
 
 programFooter = "\n;\n}\n"
 
-compileIR :: Bool -> H.Label -> Program -> S
-compileIR _ipc entry program = L.toStrict . toLazyByteString $
-  programHeader program
+compileIR :: Bool -> Bool -> H.Label -> Program -> S
+compileIR _ipc ere entry program = L.toStrict . toLazyByteString $
+  programHeader ere program
   <> goto entry
   <> foldMap compileBlock blocks
   <> programFooter
@@ -68,6 +70,7 @@ fd i = "F" <> intDec i
 lineNumber = "lineNumber"
 hasPendingIPC = "hasPendingIPC"
 lastRegex = "lastRegex"
+re_cflags = "re_cflags"
 
 cstring s = "\"" <> foldMap quoteC (C.unpack s) <> "\""
   where
@@ -94,11 +97,11 @@ compileCond cond = case cond of
   IR.Bool False -> "false"
   IR.Line l -> intDec l <> " == " <> lineNumber
   IR.EndLine l -> intDec l <> " < " <> lineNumber
-  IR.Match svar re -> fun "checkRE" [string svar, cstring (reString re)]
+  IR.Match svar re -> fun "checkRE" [string svar, cstring (reString re), re_cflags]
   -- tracking the last regexp with re2c is, eugh... Should introduce match/RE
   -- variables earlier, so we can map regexps in the code to functions in the
   -- compiled output.
-  IR.MatchLastRE svar -> fun "checkRE" [string svar, lastRegex]
+  IR.MatchLastRE svar -> fun "checkRE" [string svar, lastRegex, re_cflags]
   IR.AtEOF i -> fun "is_eof" [fd i]
   IR.PendingIPC -> hasPendingIPC
 
