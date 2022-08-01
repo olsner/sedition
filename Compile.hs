@@ -25,7 +25,8 @@ programHeader program = "\n\
     \#include <stdio.h>\n\
     \struct string { char* buf; size_t n; };\n\
     \static int lineNumber;\n\
-    \static bool hasPendingIPC;\n" <>
+    \static bool hasPendingIPC;\n\
+    \static const char* lastRegex;\n" <>
     foldMap (declare "bool" pred) preds <>
     foldMap (declare "string" stringvar) strings <>
     foldMap (declare "FILE*" fd) files <>
@@ -64,6 +65,7 @@ pred (IR.Pred p) = "P" <> intDec p
 fd i = "F" <> intDec i
 lineNumber = "lineNumber"
 hasPendingIPC = "hasPendingIPC"
+lastRegex = "lastRegex"
 
 cstring s = "\"" <> foldMap quoteC (C.unpack s) <> "\""
   where
@@ -92,7 +94,7 @@ compileCond cond = case cond of
   -- tracking the last regexp with re2c is, eugh... Should introduce match/RE
   -- variables earlier, so we can map regexps in the code to functions in the
   -- compiled output.
-  IR.MatchLastRE svar -> fun "checkLastRE" [string svar]
+  IR.MatchLastRE svar -> fun "checkRE" [string svar, lastRegex]
   IR.AtEOF i -> fun "isEOF" [fd i]
   IR.PendingIPC -> hasPendingIPC
 
@@ -144,7 +146,7 @@ compileInsn (IR.ShellExec svar) = sfun "shell_exec" [string svar]
 
 --compileInsn cmd = fatal ("compileInsn: Unhandled instruction " ++ show cmd)
 
-setLastRegex re = comment ("Set last regexp to: " <> showB re)
+setLastRegex re = stmt (lastRegex <> " = " <> cstring (reString re))
 
 setString :: IR.SVar -> IR.StringExpr -> Builder
 setString t (IR.SConst s) = fun "store_cstr" [string t, cstring s]
