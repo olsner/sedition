@@ -58,12 +58,10 @@ liveStringTransfer = mkBTransfer3 first middle last
   where
     first :: Insn C O -> LiveStringFact -> LiveStringFact
     first (Label _)  f = f
-    -- TODO Which order should gen and kill be done to work correctly when a
-    -- variable is both killed and genned? This matches what we do in LivePred.
     middle :: Insn O O -> LiveStringFact -> LiveStringFact
-    middle insn = kill insn . gen insn
+    middle insn = gen insn . kill insn
     last :: Insn O C -> FactBase LiveStringFact -> LiveStringFact
-    last insn = kill insn . gen insn . facts (successors insn)
+    last insn = gen insn . kill insn . facts (successors insn)
 
     fact f l = fromMaybe S.empty (mapLookup l f)
     facts ls f = S.unions (map (fact f) ls)
