@@ -11,7 +11,7 @@ import Compiler.Hoopl as H hiding ((<*>))
 
 import Data.Map (Map)
 import qualified Data.Map as M
---import Debug.Trace
+import Debug.Trace
 
 import IR
 
@@ -26,6 +26,7 @@ constLattice = DataflowLattice
        = if new == old then (NoChange, PElem new)
          else               (SomeChange, Top)
 
+deleteValues value = M.filter (/= value)
 
 sameStringTransfer :: FwdTransfer Insn SameStringFact
 sameStringTransfer = mkFTransfer3 first middle last
@@ -38,12 +39,11 @@ sameStringTransfer = mkFTransfer3 first middle last
     middle :: Insn O O -> SameStringFact -> SameStringFact
     -- When changing s, we also need to invalidate other references to s in the
     -- *values* of the fact base. That's annoying.
-    middle (SetS s (SVarRef s2)) f = M.insert s (PElem s2) f
-    middle (SetS s _)            f = M.insert s Top f
-    middle (GetMessage s)        f = M.insert s Top f
-    middle (Read s _)            f = M.insert s Top f
-
-    middle _insn f = {-trace ("Unhandled instruction " ++ show insn)-} f
+    middle (SetS s (SVarRef s2)) = M.insert s (PElem s2)
+    middle (SetS s _)            = M.insert s Top
+    middle (GetMessage s)        = M.insert s Top
+    middle (Read s _)            = M.insert s Top
+    middle _insn                 = id
 
     -- O C
     last :: Insn O C -> SameStringFact -> FactBase SameStringFact
@@ -63,7 +63,9 @@ sameString = deepFwdRw rw
     rw :: FuelMonad m => Insn e x -> SameStringFact -> m (Maybe (Graph Insn e x))
     rw (SetS s expr) f | Just expr' <- rwE expr f = return (Just (mkMiddle (SetS s expr')))
     rw (SetP p cond) f | Just cond' <- rwC cond f = return (Just (mkMiddle (SetP p cond')))
+    rw (SetM m expr) f | Just expr' <- rwM expr f = return (Just (mkMiddle (SetM m expr')))
     rw (Print fd s) f | Just s' <- var s f = return (Just (mkMiddle (Print fd s')))
+    rw (WriteFile path s) f | Just s' <- var s f = return (Just (mkMiddle (WriteFile path s')))
     -- rw (Message s) =
     -- rw (PrintLiteral _ _ s) =
     -- rw (ShellExec s) =
@@ -72,12 +74,14 @@ sameString = deepFwdRw rw
 
     rwE (SVarRef s)        f = SVarRef <$> var s f
     rwE (SAppendNL s1 s2)  f = SAppendNL <$> var s1 f <*> var s2 f
-    rwE (SSubst s r a)     f = SSubst <$> var s f <*> pure r <*> pure a
+    rwE (SAppend s1 s2)    f = SAppend <$> var s1 f <*> var s2 f
     rwE (STrans from to s) f = STrans from to <$> var s f
     rwE _                  _ = Nothing
 
-    rwC (Match s re)       f = Match <$> var s f <*> pure re
-    rwC (MatchLastRE s)    f = MatchLastRE <$> var s f
+    rwM (Match s re)       f = Match <$> var s f <*> pure re
+    rwM (MatchLastRE s)    f = MatchLastRE <$> var s f
+    rwM _                  _ = Nothing
+
     rwC _                  _ = Nothing
 
     var s f | Just (PElem t) <- M.lookup s f = Just t
