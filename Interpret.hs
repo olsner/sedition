@@ -14,8 +14,6 @@ import Control.Monad.Trans.State.Strict
 
 import Data.Array
 import qualified Data.ByteString.Char8 as C
-import qualified Data.ByteString.Lazy.Char8 as L
-import Data.ByteString.Builder as B
 import Data.Char
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -337,10 +335,6 @@ evalStringExpr :: IR.StringExpr -> SedM S
 evalStringExpr (IR.SConst s) = return s
 evalStringExpr (IR.SVarRef svar) = getString svar
 evalStringExpr (IR.SRandomString) = liftIO randomString
-evalStringExpr (IR.SSubst mvar svar sub stype) = do
-    s <- getString svar
-    m <- getMatch mvar
-    substitute sub stype s m
 evalStringExpr (IR.STrans from to str) =
     trans from to <$> getString str
 -- TODO Should this do something special if 'a' is empty?
@@ -403,36 +397,6 @@ doMessage m = gets ipcState >>= f
       do
         debug ("Messaging " ++ show m)
         liftIO (drive (bus ipcState) m)
-
-substitute sub stype p m = do
-  let matches@(_:_) = selectMatches stype m
-  let newp = B.toLazyByteString (subst p sub matches)
-  debug ("Subst: " ++ show p ++ " => " ++ show newp)
-  return (L.toStrict newp)
-
-subst :: S -> Replacement -> [MatchArray] -> B.Builder
-subst p rep matches = go 0 matches
-  where
-    go lastmatch (m:ms)
-        | matchstart >= lastmatch = rest <> go matchend ms
-        | otherwise = go lastmatch ms
-        where
-            (matchstart,matchlen) = m ! 0
-            matchend = matchstart + matchlen
-            rest = substr lastmatch (matchstart - lastmatch) <> replace rep m
-    go lastmatch [] = B.byteString (C.drop lastmatch p)
-
-    substr s l = B.byteString (C.take l (C.drop s p))
-    replace rep match = foldMap replace1 rep
-      where
-        replace1 (Literal s) = B.byteString s
-        replace1 WholeMatch  = group 0
-        replace1 (BackReference i) = group i
-        group n = (uncurry substr) (match ! n)
-
-selectMatches SubstAll = id
-selectMatches SubstFirst = take 1
-selectMatches (SubstNth i) = take 1 . drop (i - 1)
 
 trans :: S -> S -> S -> S
 trans from to p = C.map f p

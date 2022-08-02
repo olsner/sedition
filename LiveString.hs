@@ -47,7 +47,6 @@ genS :: StringExpr -> LiveStringFact -> LiveStringFact
 genS (SVarRef s) = S.insert s
 genS (SAppendNL s1 s2) = S.insert s1 . S.insert s2
 genS (SAppend s1 s2) = S.insert s1 . S.insert s2
-genS (SSubst _ s _ _) = S.insert s
 genS (STrans _ _ s) = S.insert s
 genS (SSubstring s _ _) = S.insert s
 genS (SConst _) = id

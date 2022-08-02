@@ -43,12 +43,12 @@ data StringExpr
   = SConst S
   | SVarRef SVar
   | SRandomString
-  -- Subst last match against current pattern.
-  | SSubst MVar SVar Replacement SubstType
-  -- from to string`
+  -- from to string
   | STrans S S SVar
-  -- TODO Replace with more appends and an SConst? or a predefined svar that
-  -- contains a newline.
+  -- TODO Replace with more appends and perhaps a predefined svar that contains
+  -- a newline. Also investigate if it's always adding the newline or only when
+  -- the strings are empty, then more code will need to be generated to use
+  -- SAppend.
   | SAppendNL SVar SVar
   | SAppend SVar SVar
   | SSubstring SVar SIndex SIndex
@@ -703,10 +703,12 @@ usedStrings (WriteFile _ s) = S.singleton s
 usedStrings _ = S.empty
 
 stringExprStrings (SVarRef s) = S.singleton s
-stringExprStrings (SSubst _ s _ _) = S.singleton s
 stringExprStrings (STrans _ _ s) = S.singleton s
 stringExprStrings (SAppendNL s t) = S.insert s (S.singleton t)
-stringExprStrings _ = S.empty
+stringExprStrings (SAppend s t) = S.insert s (S.singleton t)
+stringExprStrings (SSubstring s _ _) = S.singleton s
+stringExprStrings (SConst _) = S.empty
+stringExprStrings SRandomString = S.empty
 
 matchUsedStrings (Match s _) = S.singleton s
 matchUsedStrings (MatchLastRE s) = S.singleton s
@@ -719,8 +721,15 @@ usedMatches (SetS _ s) = stringExprMatches s
 usedMatches (SetM m _) = S.singleton m
 usedMatches _ = S.empty
 
-stringExprMatches (SSubst m _ _ _) = S.singleton m
+stringExprMatches (SSubstring _ i1 i2) =
+  stringIndexMatches i1 (stringIndexMatches i2 S.empty)
 stringExprMatches _ = S.empty
+
+stringIndexMatches (SIMatchStart m) = S.insert m
+stringIndexMatches (SIMatchEnd m) = S.insert m
+stringIndexMatches (SIGroupStart m _) = S.insert m
+stringIndexMatches (SIGroupEnd m _) = S.insert m
+stringIndexMatches _ = id
 
 matchUsedMatches (NextMatch m _) = S.singleton m
 matchUsedMatches (MVarRef m) = S.singleton m
