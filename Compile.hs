@@ -8,6 +8,7 @@ import Compiler.Hoopl as H
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy.Char8 as L
 import Data.ByteString.Builder as B
+import Data.Word
 
 import System.Exit
 
@@ -31,6 +32,7 @@ programHeader ere program = "\n\
     foldMap (declare "bool" pred) preds <>
     foldMap (declare "string" stringvar) strings <>
     foldMap (declare "FILE*" fd) files <>
+    foldMap (declare "match_t" match) matches <>
     "static const int re_cflags = " <> cflags <> ";\n" <>
     "int main() {\n"
   where
@@ -38,6 +40,7 @@ programHeader ere program = "\n\
     preds = IR.allPredicates program
     strings = IR.allStrings program
     files = IR.allFiles program
+    matches = IR.allMatches program
     cflags | ere       = "REG_EXTENDED"
            | otherwise = "0"
 
@@ -66,6 +69,8 @@ label l = showB l
 string (IR.SVar s) = "&S" <> intDec s
 stringvar (IR.SVar s) = "S" <> intDec s
 pred (IR.Pred p) = "P" <> intDec p
+match (IR.MVar m) = "M" <> intDec m
+matchref (IR.MVar m) = "&M" <> intDec m
 fd i = "F" <> intDec i
 lineNumber = "lineNumber"
 hasPendingIPC = "hasPendingIPC"
@@ -77,7 +82,13 @@ cstring s = "\"" <> foldMap quoteC (C.unpack s) <> "\""
     quoteC '\n' = "\\n"
     quoteC '\"' = "\\\""
     quoteC '\\' = "\\\\"
+    quoteC c
+      -- Add an extra "" pair to terminate the hex escape in case it is
+      -- followed by a valid hex digit.
+      | length (show c) /= 3 = "\\x" <> word8HexFixed (toWord8 c) <> "\"\""
     quoteC c = char8 c
+    toWord8 :: Char -> Word8
+    toWord8 = fromIntegral . fromEnum
 
 showB x = string8 (show x)
 intercalateB _   [] = mempty
@@ -90,26 +101,27 @@ fun function args = function <> "(" <> intercalateB ", " args <> ")"
 sfun function args = stmt (fun function args)
 stmt builder = builder <> ";\n"
 comment builder = "// " <> builder <> "\n"
-unimpl what extra = comment ("UNIMPLEMENTED: " <> what <> ": " <> showB extra)
 
 compileCond cond = case cond of
   IR.Bool True -> "true"
   IR.Bool False -> "false"
   IR.Line l -> intDec l <> " == " <> lineNumber
   IR.EndLine l -> intDec l <> " < " <> lineNumber
-  IR.Match svar re -> fun "checkRE" [string svar, cstring (reString re), re_cflags]
-  -- tracking the last regexp with re2c is, eugh... Should introduce match/RE
-  -- variables earlier, so we can map regexps in the code to functions in the
-  -- compiled output.
-  IR.MatchLastRE svar -> fun "checkRE" [string svar, lastRegex, re_cflags]
+  IR.IsMatch mvar -> match mvar <> ".result"
   IR.AtEOF i -> fun "is_eof" [fd i]
   IR.PendingIPC -> hasPendingIPC
+
+compileMatch m (IR.Match svar re) = fun "match_regexp" [matchref m, string svar, cstring (reString re), re_cflags, "0"]
+compileMatch m (IR.MatchLastRE svar) = fun "match_regexp" [matchref m, string svar, lastRegex, re_cflags, "0"]
+compileMatch m (IR.NextMatch m2 s) = fun "next_match" [matchref m, matchref m2, string s]
+compileMatch m (IR.MVarRef m2) = fun "copy_match" [matchref m, matchref m2]
 
 compileInsn :: IR.Insn e x -> Builder
 compileInsn (IR.Label lbl) = label lbl <> ":\n"
 compileInsn (IR.Branch l) = goto l
-compileInsn (IR.SetP p cond) = pred p <> " = " <> compileCond cond <> ";\n"
+compileInsn (IR.SetP p cond) = stmt (pred p <> " = " <> compileCond cond)
 compileInsn (IR.SetS s expr) = stmt (setString s expr)
+compileInsn (IR.SetM m expr) = stmt (compileMatch m expr)
 compileInsn (IR.If p t f) = fun "if" [pred p] <> goto t <> "else " <> goto f
 compileInsn (IR.Listen i maybeHost port) =
   sfun "sock_listen" [fd i, chost maybeHost, intDec port]
@@ -156,13 +168,29 @@ compileInsn (IR.ShellExec svar) = sfun "shell_exec" [string svar]
 setLastRegex re = stmt (lastRegex <> " = " <> cstring (reString re))
 
 setString :: IR.SVar -> IR.StringExpr -> Builder
-setString t (IR.SConst s) = fun "store_cstr" [string t, cstring s]
+setString t (IR.SConst s) = fun "store_cstr" [string t, cstring s, intDec (C.length s)]
 setString t (IR.SVarRef svar) = fun "copy" [string t, string svar]
 setString t (IR.SRandomString) = fun "randomString" [string t]
--- TODO Consider lowering substitutions earlier, e.g. having getmatch and append
--- operations and something for global substitutions.
-setString t expr@(IR.SSubst _svar _sub _stype) =
-  unimpl "SSubst" (t, expr)
 setString t (IR.STrans from to s) =
+  -- TODO compile transformations into functions. Might require that we add
+  -- statefulness to cache them and to output functions outside of main though.
   fun "trans" [string t, cstring from, cstring to, string s]
 setString t (IR.SAppendNL a b) = fun "concat_newline" (map string [t, a, b])
+setString t (IR.SAppend a b) = fun "concat" (map string [t, a, b])
+setString t (IR.SSubstring s start end) =
+  fun "substring" [string t, string s, startix, endix]
+  where
+      startix = resolveStringIndex s start
+      endix = resolveStringIndex s end
+
+resolveStringIndex :: IR.SVar -> IR.SIndex -> Builder
+resolveStringIndex s ix = case ix of
+  IR.SIStart -> "0"
+  IR.SIEnd -> stringvar s <> ".len"
+  IR.SIMatchStart m -> groupStart m 0
+  IR.SIMatchEnd m -> groupEnd m 0
+  IR.SIGroupStart m i -> groupStart m i
+  IR.SIGroupEnd m i -> groupEnd m i
+  where
+    groupStart m i = match m <> ".matches[" <> intDec i <> "].rm_so"
+    groupEnd m i = match m <> ".matches[" <> intDec i <> "].rm_eo"

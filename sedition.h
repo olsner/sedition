@@ -1,11 +1,23 @@
 // TODO Bundle this in Compile.hs or something so we don't need loose data
 // files in a sedition distribution.
 
+#include <assert.h>
 #include <regex.h>
 #include <string.h>
 
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
+
+#define MAXGROUP 9
+struct match_t {
+    // State for next_match
+    const char *regexp;
+    int cflags;
+
+    bool result;
+    regmatch_t matches[MAXGROUP + 1];
+};
+typedef struct match_t match_t;
 
 //
 // String functions
@@ -29,6 +41,13 @@ static void free_string(string* s)
     s->buf = 0;
 }
 
+static void store_cstr(string* dst, const char* src, size_t n)
+{
+    ensure_len_discard(dst, n);
+    memcpy(dst->buf, src, n);
+    dst->len = n;
+}
+
 static void copy(string* dst, string* src)
 {
     ensure_len_discard(dst, src->len);
@@ -47,28 +66,82 @@ static void concat_newline(string* dst, string* a, string* b)
     dst->len = n;
 }
 
+static void concat(string* dst, string* a, string* b)
+{
+    const size_t n = a->len + b->len;
+    ensure_len_discard(dst, n);
+
+    char *p = mempcpy(dst->buf, a->buf, a->len);
+    memcpy(p, b->buf, b->len);
+    dst->len = n;
+}
+
+static void substring(string* dst, string* src, size_t i1, size_t i2)
+{
+    assert(i1 <= src->len && i2 <= src->len);
+    assert(i1 <= i2);
+    const size_t n = i2 - i1;
+    ensure_len_discard(dst, n);
+    memcpy(dst->buf, src->buf + i1, n);
+    dst->len = n;
+}
+
+static void trans(string* dst, const char* from, const char* to, string* src)
+{
+    ensure_len_discard(dst, src->len);
+    assert(strlen(to) >= strlen(from));
+    for (size_t i = 0; i < src->len; i++) {
+        char c = src->buf[i];
+        const char *p = strchr(from, c);
+        if (p) {
+            c = to[p - from];
+        }
+        dst->buf[i] = c;
+    }
+    dst->len = src->len;
+}
+
 //
 // Regex functions
 //
 
-static bool checkRE(string* s, const char* regexp, int cflags)
+static void match_regexp(match_t* m, string* s, const char* regexp, int cflags,
+                         size_t offset)
 {
+    memset(m, 0, sizeof(*m));
+
+    if (offset >= s->len) {
+        return;
+    }
+
     regex_t re;
-    regmatch_t match;
     int res = regcomp(&re, regexp, cflags);
     if (res) {
         fprintf(stderr, "regcomp: error %d in %s\n", res, regexp);
         abort();
     }
-    match.rm_so = 0;
-    match.rm_eo = s->len;
-    res = regexec(&re, s->buf, 0, &match, REG_STARTEND);
+
+    m->regexp = regexp;
+    m->cflags = cflags;
+    m->matches[0].rm_so = offset;
+    m->matches[0].rm_eo = s->len;
+    res = regexec(&re, s->buf, MAXGROUP, m->matches, REG_STARTEND);
     if (res != 0 && res != REG_NOMATCH) {
         fprintf(stderr, "regexec: error %d in %s\n", res, regexp);
         abort();
     }
     regfree(&re);
-    return res == 0;
+    m->result = (res == 0);
+}
+
+static void copy_match(match_t* dst, match_t* src)
+{
+    memcpy(dst, src, sizeof(match_t));
+}
+
+static void next_match(match_t* dst, match_t* src, string* s)
+{
+    match_regexp(dst, s, src->regexp, src->cflags, src->matches[0].rm_eo);
 }
 
 //
@@ -78,7 +151,7 @@ static bool checkRE(string* s, const char* regexp, int cflags)
 static void write_file(const char* path, string* src)
 {
     // TODO Appends newline?
-    fprintf(stderr, "UNIMPL: write to %s: %s\n", path, src->buf);
+    fprintf(stderr, "UNIMPL: write to %s: %.*s\n", path, (int)src->len, src->buf);
 }
 
 static void print(FILE* fp, string* s)

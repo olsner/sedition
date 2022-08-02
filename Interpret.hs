@@ -139,6 +139,8 @@ hMaybeGetLine h = do
     if eof then pure Nothing
            else Just <$> C.hGetLine h
 
+type Match = [MatchArray]
+
 data SedState program = SedState
   { program :: program
   , files :: Map Int File
@@ -147,6 +149,7 @@ data SedState program = SedState
   , extendedRegex :: Bool
   , predicates :: Set Int
   , strings :: Map Int S
+  , matches :: Map Int Match
 
   , ipcState :: Maybe IPCState
 }
@@ -188,6 +191,7 @@ initialState ipc ere pgm file0 = do
   , files = M.singleton 0 file0
   , lineNumber = 0
   , strings = M.empty
+  , matches = M.empty
   , lastRegex = Nothing
   , predicates = S.empty
   , ipcState = ipcState
@@ -211,7 +215,14 @@ getPred (IR.Pred n) = S.member n . predicates <$> get
 setString :: IR.SVar -> S -> SedM ()
 setString (IR.SVar n) value =
     modify $ \s -> s { strings = M.insert n value (strings s) }
+-- TODO Remove fromMaybe, it should never happen that we read a string before
+-- setting it.
 getString (IR.SVar n) = gets (fromMaybe "" . M.lookup n . strings)
+
+setMatch :: IR.MVar -> Match -> SedM ()
+setMatch (IR.MVar n) value =
+    modify $ \s -> s { matches = M.insert n value (matches s) }
+getMatch (IR.MVar n) = gets (fromJust . M.lookup n . matches)
 
 runIRLabel :: H.Label -> SedM ()
 runIRLabel entry = do
@@ -237,11 +248,15 @@ runIR (IR.SetP p cond) = setPred p =<< case cond of
   IR.Bool b -> return b
   IR.Line l -> gets ((l ==) . lineNumber)
   IR.EndLine l -> gets ((l <) . lineNumber)
-  IR.Match svar re -> checkRE svar re
-  IR.MatchLastRE svar -> checkRE svar =<< getLastRegex
   IR.AtEOF fd -> liftIO . fileIsEOF =<< gets (fromJust . M.lookup fd . files)
   IR.PendingIPC -> hasPendingIPC =<< gets ipcState
+  IR.IsMatch m -> not . null <$> getMatch m
 runIR (IR.SetS s expr) = setString s =<< evalStringExpr expr
+runIR (IR.SetM m expr) = setMatch m =<< case expr of
+  IR.Match svar re -> checkRE svar re
+  IR.MatchLastRE svar -> checkRE svar =<< getLastRegex
+  IR.NextMatch m2 _ -> tail <$> getMatch m2
+  IR.MVarRef m2 -> getMatch m2
 runIR (IR.If p t f) = do
   b <- getPred p
   runIRLabel (if b then t else f)
@@ -311,7 +326,9 @@ getLastRegex = gets $ \SedState { lastRegex = last } -> case last of
 checkRE svar (RE _ bre ere) = do
   p <- getString svar
   re <- gets (selectRegex bre ere . extendedRegex)
-  return (matchTest re p)
+  -- TODO Use matchonce instead and clean up all the old Subst stuff that the
+  -- IR lowering handles now. After fixing it so it actually works, that is.
+  return (matchAll re p)
 
 selectRegex _ ere True = ere
 selectRegex bre _ False = bre
@@ -320,7 +337,10 @@ evalStringExpr :: IR.StringExpr -> SedM S
 evalStringExpr (IR.SConst s) = return s
 evalStringExpr (IR.SVarRef svar) = getString svar
 evalStringExpr (IR.SRandomString) = liftIO randomString
-evalStringExpr (IR.SSubst svar sub stype) = substitute sub stype =<< getString svar
+evalStringExpr (IR.SSubst mvar svar sub stype) = do
+    s <- getString svar
+    m <- getMatch mvar
+    substitute sub stype s m
 evalStringExpr (IR.STrans from to str) =
     trans from to <$> getString str
 -- TODO Should this do something special if 'a' is empty?
@@ -328,6 +348,26 @@ evalStringExpr (IR.SAppendNL a b) = do
     a <- getString a
     b <- getString b
     return (C.concat [a, "\n", b])
+evalStringExpr (IR.SAppend a b) = do
+    a <- getString a
+    b <- getString b
+    return (a <> b)
+evalStringExpr (IR.SSubstring s start end) = do
+  s <- getString s
+  startix <- resolve start s
+  endix <- resolve end s
+  return (substring startix endix s)
+  where
+    substring start end = C.take (end - start) . C.drop start
+    resolve IR.SIStart _ = return 0
+    resolve IR.SIEnd   s = return (C.length s)
+    resolve (IR.SIMatchStart m)   _ = groupStart 0 m
+    resolve (IR.SIMatchEnd m)     _ = groupEnd 0 m
+    resolve (IR.SIGroupStart m i) _ = groupStart i m
+    resolve (IR.SIGroupEnd m i)   _ = groupEnd i m
+    groupStart i m = fst . (! i) . head <$> getMatch m
+    groupLen i m = snd . (! i) . head <$> getMatch m
+    groupEnd i m = (+) <$> groupStart i m <*> groupLen i m
 
 -- TODO We ought to provide secure random numbers
 randomString = C.pack <$> replicateM 32 (randomRIO ('A','Z'))
@@ -364,11 +404,8 @@ doMessage m = gets ipcState >>= f
         debug ("Messaging " ++ show m)
         liftIO (drive (bus ipcState) m)
 
-substitute sub stype p = do
-  (RE _ bre ere) <- getLastRegex
-  useExtRE <- gets extendedRegex
-  let pat = selectRegex bre ere useExtRE
-  let matches@(_:_) = match stype pat p
+substitute sub stype p m = do
+  let matches@(_:_) = selectMatches stype m
   let newp = B.toLazyByteString (subst p sub matches)
   debug ("Subst: " ++ show p ++ " => " ++ show newp)
   return (L.toStrict newp)
@@ -393,9 +430,9 @@ subst p rep matches = go 0 matches
         replace1 (BackReference i) = group i
         group n = (uncurry substr) (match ! n)
 
-match SubstFirst re p = take 1 (matchAll re p)
-match SubstAll re p = matchAll re p
-match (SubstNth i) re p = take 1 . drop (i - 1) $ matchAll re p
+selectMatches SubstAll = id
+selectMatches SubstFirst = take 1
+selectMatches (SubstNth i) = take 1 . drop (i - 1)
 
 trans :: S -> S -> S -> S
 trans from to p = C.map f p

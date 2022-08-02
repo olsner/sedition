@@ -15,6 +15,7 @@ import LivePred (livePredPass)
 import LiveString (liveStringPass)
 --import SameString (sameStringPass)
 import RedundantBranches (redundantBranchesPass)
+-- TODO Add liveness pass for match registers
 
 --debugBwd = debugBwdJoins trace (const True)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
