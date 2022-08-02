@@ -603,7 +603,7 @@ tSub m s sub = case sub of
   WholeMatch -> emitString (SSubstring s (SIMatchStart m) (SIMatchEnd m))
   BackReference i ->
     emitString (SSubstring s (SIGroupStart m i) (SIGroupEnd m i))
-  SetCaseConv _ -> emitString emptyS
+  SetCaseConv _ -> comment "UNIMPL: case conversion" >> emitString emptyS
   -- _ -> error (show sub)
 
 tConcat [] = emitString emptyS
@@ -625,8 +625,6 @@ tSubst m s sub flags = case flags of
     m' <- emitMatch (NextMatch m s)
     tSubst m' s sub (SubstNth (n - 1))
   SubstAll -> mdo
-    comment "+SubstAll"
-
     sres <- emitString (SSubstring s SIStart (SIMatchStart m))
     m' <- emitMatch (MVarRef m)
 
@@ -640,19 +638,15 @@ tSubst m s sub flags = case flags of
 
     hasNextMatch <- finishBlock' (If p hasNextMatch lastMatch)
 
-    comment "hasNextMatch"
     mid <- emitString (SSubstring s (SIMatchEnd m') (SIMatchStart mnext))
-    comment ("between-match text in: " ++ show mid)
     emit (SetS sres (SAppend s1 mid))
     emit (SetM m' (MVarRef mnext))
 
     lastMatch <- emitBranch' loop
 
-    comment "lastMatch"
     suffix <- emitString (SSubstring s (SIMatchEnd m') SIEnd)
     emit (SetS sres (SAppend s1 suffix))
 
-    comment "-SubstAll"
     return sres
 
 tTest ifTrue maybeTarget = mdo
