@@ -34,7 +34,7 @@ programHeader ere program = "\n\
     "static const int re_cflags = " <> cflags <> ";\n" <>
     "int main() {\n"
   where
-    declare t s var = stmt ("static " <> t <> " " <> s var)
+    declare t s var = "static " <> t <> " " <> s var <> "; " <> comment (showB var)
     preds = IR.allPredicates program
     strings = IR.allStrings program
     files = IR.allFiles program
