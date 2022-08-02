@@ -148,10 +148,14 @@ static void next_match(match_t* dst, match_t* src, string* s)
 // File and I/O functions
 //
 
-static void write_file(const char* path, string* src)
+static void write_file(const char* path, string* s)
 {
-    // TODO Appends newline?
-    fprintf(stderr, "UNIMPL: write to %s: %.*s\n", path, (int)src->len, src->buf);
+    if (strcmp(path, "/dev/stderr") == 0) {
+        fwrite(s->buf, 1, s->len, stderr);
+        fprintf(stderr, "\n");
+    } else {
+        fprintf(stderr, "UNIMPL: write to %s: %.*s\n", path, (int)s->len, s->buf);
+    }
 }
 
 static void print(FILE* fp, string* s)
