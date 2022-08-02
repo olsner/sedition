@@ -68,7 +68,6 @@ static bool checkRE(string* s, const char* regexp, int cflags)
         abort();
     }
     regfree(&re);
-    fprintf(stderr, "checkRE: res %d for %s on %.*s\n", res, regexp, (int)s->len, s->buf);
     return res == 0;
 }
 
