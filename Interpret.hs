@@ -412,7 +412,7 @@ formatLiteral width s = lineWrap width (C.lines (C.append (escape s) "\n"))
     escapeChar c | isPrint c = C.singleton c
                  | otherwise = C.pack (printf "\\%03o" (ord c))
 
-    lineWrap 0 ss = C.concat (map (flip C.append eol) ss)
+    lineWrap 0 ss = C.concat (map (<> eol) ss)
     lineWrap width ss = C.concat (concatMap (wrap width) ss)
 
     eol = "$\n"

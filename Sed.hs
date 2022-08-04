@@ -20,6 +20,7 @@ import System.IO
 #if DEBUG
 import System.IO.Unsafe
 #endif
+import System.Process (rawSystem)
 
 import Text.Printf (printf)
 
@@ -35,7 +36,8 @@ data Options = Options
   , autoprint :: Bool
   , enableIPC :: Bool
   , scripts :: [Either S FilePath]
-  , outputFile :: FilePath
+  , cOutputFile :: FilePath
+  , exeOutputFile :: FilePath
   , dumpParse :: Bool
   , dumpOptimizedIR :: Bool
   , dumpOriginalIR :: Bool
@@ -49,7 +51,8 @@ defaultOptions = Options
     , autoprint = True
     , enableIPC = True
     , scripts = []
-    , outputFile = "out.c"
+    , cOutputFile = "out.c"
+    , exeOutputFile = "a.out"
     , dumpParse = False
     , dumpOptimizedIR = False
     , dumpOriginalIR = False
@@ -59,7 +62,8 @@ defaultOptions = Options
     , fuel = 1000000 }
 addScript s o = o { scripts = Left (C.pack s) : scripts o }
 addScriptFile f o = o { scripts = Right f : scripts o }
-setOutputFile f o = o { outputFile = f }
+setOutputFile f o = o { cOutputFile = f }
+setExeOutputFile f o = o { exeOutputFile = f }
 setFuel f o = o { fuel = f }
 
 sedOptions =
@@ -77,7 +81,9 @@ sedOptions =
   -- , Option [] ["sandbox"] (NoArg Sandbox) "operate in sandbox mode (unimplemented GNU sed feature)"
   , Option ['t'] ["time"] (NoArg $ \o -> o { timeIt = True }) "Time optimization and execution of the program"
   , Option ['c'] ["compile"] (NoArg $ \o -> o { runIt = False, compileIt = True }) "Don't run the program, compile it to C instead."
+  , Option [] ["run"] (NoArg $ \o -> o { runIt = True }) "Compile, compile and then run."
   , Option ['o'] [] (ReqArg setOutputFile "OUTPUT_FILE") "Path to compiled output file."
+  , Option [] ["exe"] (ReqArg setExeOutputFile "EXEC_FILE") "Path to compiled executable."
   ]
 
 -- TODO Include source file/line info here, thread through to the parser...
@@ -94,15 +100,15 @@ getScript options inputs = case scripts options of
     ss <- flagScript options
     return (ss, inputs)
 
--- Currently unimplemented for non-extended regexps. We should be handling the
--- extended/basic switch earlier and e.g. actually parse the regexps in
--- sedition so that we can also output them in re2c syntax and/or use TDFA in
--- the interpreter.
-compileProgram :: Bool -> Bool -> (H.Label, Program) -> FilePath -> IO ExitCode
+compileProgram :: Bool -> Bool -> (H.Label, Program) -> FilePath -> IO ()
 compileProgram ipc ere (label, program) ofile = do
     let compiled = compileIR ipc ere label program
     C.writeFile ofile compiled
-    return ExitSuccess
+
+compileC cFile exeFile = rawSystem "cc" ["-g", "-Og", cFile, "-o", exeFile]
+
+-- TODO Use some realPath function instead of ./, in case a full path is used.
+runExecutable exe inputs = rawSystem ("./" ++ exe) (map C.unpack inputs)
 
 timestamp :: IO UTCTime
 timestamp = getCurrentTime
@@ -154,23 +160,43 @@ do_main args = do
     reportTime "Generate IR" tStartGenerateIR tEndGenerateIR
     reportTime "Optimize" tStartOpt tEndOpt
 
-  when runIt $ do
-    tProgStart <- timestamp
-    file0 <- inputListFile (map C.unpack inputs)
-    status <- catch
-      (runProgram enableIPC extendedRegexps (entryLabel,program') file0)
-      return
-    tProgEnd <- timestamp
+  flip catch exitWith $ do
+    when compileIt $ do
+      tCompileStart <- timestamp
+      compileProgram enableIPC extendedRegexps (entryLabel, program') cOutputFile
+      tCompileEnd <- timestamp
 
-    when timeIt $ do
-      reportTime "Running" tProgStart tProgEnd
+      when timeIt $ do
+        reportTime "Compile (Sed)" tCompileStart tCompileEnd
 
-    exitWith status
+    -- Dabburu kanpairu!
+    -- TODO or pipe the compiled C code directly into gcc so we can do it in
+    -- one pass without an extra file inbetween.
+    when (compileIt && runIt) $ do
+      tCompileStart <- timestamp
+      status <- compileC cOutputFile exeOutputFile
+      tCompileEnd <- timestamp
 
-  when compileIt $ do
-    status <- catch
-      (compileProgram enableIPC extendedRegexps (entryLabel, program') outputFile)
-      return
-    exitWith status
+      when timeIt $ do
+        reportTime "Compile (C)" tCompileStart tCompileEnd
+
+      when (status /= ExitSuccess) $ exitWith status
+
+    when runIt $ do
+      tProgStart <- timestamp
+      status <- if compileIt
+        then runExecutable exeOutputFile inputs
+        else do
+          file0 <- inputListFile (map C.unpack inputs)
+          runProgram enableIPC extendedRegexps (entryLabel,program') file0
+      tProgEnd <- timestamp
+
+      when timeIt $ do
+        reportTime "Running" tProgStart tProgEnd
+
+      when (status /= ExitSuccess) $ exitWith status
+
+  return ExitSuccess
+
 
 main = do_main =<< getArgs

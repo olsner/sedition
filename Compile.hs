@@ -1,4 +1,4 @@
-{-# LANGUAGE OverloadedStrings,GADTs,TypeFamilies,RankNTypes #-}
+{-# LANGUAGE OverloadedStrings,GADTs,TypeFamilies,RankNTypes,TemplateHaskell #-}
 
 module Compile (compileIR) where
 
@@ -8,6 +8,7 @@ import Compiler.Hoopl as H
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy.Char8 as L
 import Data.ByteString.Builder as B
+import Data.FileEmbed (embedStringFile)
 import Data.Word
 
 import System.Exit
@@ -16,25 +17,18 @@ import AST
 import qualified IR
 import IR (Program)
 
--- TODO Include re2c and maxnmatch
--- Include the "runtime" (or inline it)
--- Declare global variables
--- Find and declare all strings, predicates and files
-programHeader ere program = "\n\
-    \#define _GNU_SOURCE\n\
-    \#include <stdbool.h>\n\
-    \#include <stdio.h>\n\
-    \#include <stdlib.h>\n\
-    \#include \"sedition.h\"\n\
-    \static int lineNumber;\n\
-    \static bool hasPendingIPC;\n\
+seditionRuntime = $(embedStringFile "sedition.h")
+
+programHeader ere program =
+    "static bool hasPendingIPC;\n\
     \static const char* lastRegex;\n" <>
     foldMap (declare "bool" pred) preds <>
     foldMap (declare "string" stringvar) strings <>
     foldMap (declare "FILE*" fd) files <>
     foldMap (declare "match_t" match) matches <>
     "static const int re_cflags = " <> cflags <> ";\n" <>
-    "int main() {\n"
+    "int main(int argc, const char *argv[]) {\n" <>
+    "open_input(argc, argv);\n"
   where
     declare t s var = "static " <> t <> " " <> s var <> "; " <> comment (showB var)
     preds = IR.allPredicates program
@@ -44,11 +38,12 @@ programHeader ere program = "\n\
     cflags | ere       = "REG_EXTENDED"
            | otherwise = "0"
 
-programFooter = "\n;\n}\n"
+programFooter = "}\n"
 
 compileIR :: Bool -> Bool -> H.Label -> Program -> S
 compileIR _ipc ere entry program = L.toStrict . toLazyByteString $
-  programHeader ere program
+  seditionRuntime
+  <> programHeader ere program
   <> goto entry
   <> foldMap compileBlock blocks
   <> programFooter
@@ -136,7 +131,8 @@ compileInsn (IR.CloseFile i) = sfun "close_file" [fd i]
 compileInsn (IR.SetLastRE re) = setLastRegex re
 compileInsn (IR.Message s) = sfun "send_message" [string s]
 
-compileInsn (IR.PrintConstS i s) = sfun "file_printf" [fd i, "%s\n", cstring s]
+compileInsn (IR.PrintConstS i s) =
+  sfun "file_printf" [fd i, cstring "%s\n", cstring s]
 compileInsn (IR.Print i s) = sfun "print" [fd i, string s]
 -- TODO Make the literal-formatting a string function instead, so that this is
 -- not a special Print operation. Likewise for PrintLineNumber.
@@ -170,7 +166,7 @@ setLastRegex re = stmt (lastRegex <> " = " <> cstring (reString re))
 setString :: IR.SVar -> IR.StringExpr -> Builder
 setString t (IR.SConst s) = fun "store_cstr" [string t, cstring s, intDec (C.length s)]
 setString t (IR.SVarRef svar) = fun "copy" [string t, string svar]
-setString t (IR.SRandomString) = fun "randomString" [string t]
+setString t (IR.SRandomString) = fun "random_string" [string t]
 setString t (IR.STrans from to s) =
   -- TODO compile transformations into functions. Might require that we add
   -- statefulness to cache them and to output functions outside of main though.

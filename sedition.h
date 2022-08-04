@@ -1,9 +1,17 @@
-// TODO Bundle this in Compile.hs or something so we don't need loose data
-// files in a sedition distribution.
+// START OF RTS
+
+#define _GNU_SOURCE
+#undef NDEBUG
 
 #include <assert.h>
 #include <regex.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <sys/random.h>
 
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
@@ -18,6 +26,8 @@ struct match_t {
     regmatch_t matches[MAXGROUP + 1];
 };
 typedef struct match_t match_t;
+
+static int lineNumber;
 
 //
 // String functions
@@ -101,6 +111,18 @@ static void trans(string* dst, const char* from, const char* to, string* src)
     dst->len = src->len;
 }
 
+static void random_string(string* dst)
+{
+    uint8_t temp[16];
+    getrandom(temp, sizeof(temp), 0);
+
+    ensure_len_discard(dst, 2 * sizeof(temp) + 1);
+    for (size_t i = 0; i < sizeof(temp); i++) {
+        snprintf(dst->buf + 2 * i, 3, "%02x", temp[i]);
+    }
+    dst->len = 2 * sizeof(temp);
+}
+
 //
 // Regex functions
 //
@@ -158,6 +180,19 @@ static void write_file(const char* path, string* s)
     }
 }
 
+static void file_printf(FILE* fp, const char* fmt, ...)
+{
+    va_list ap;
+    va_start(ap, fmt);
+
+    // TODO Track input and output separately so that fd 0 can be stdin/out?
+    // Or change the semantics of file descriptors a bit...
+    if (fp == NULL) fp = stdout;
+    vfprintf(fp, fmt, ap);
+
+    va_end(ap);
+}
+
 static void print(FILE* fp, string* s)
 {
     // TODO Track input and output separately so that fd 0 can be stdin/out?
@@ -165,6 +200,11 @@ static void print(FILE* fp, string* s)
     if (fp == NULL) fp = stdout;
     fwrite(s->buf, 1, s->len, fp);
     fprintf(fp, "\n");
+}
+
+static void print_lit(FILE* fp, int width, string* s)
+{
+    print(fp, s);
 }
 
 static bool is_eof(FILE* fp)
@@ -177,7 +217,14 @@ static void read_line(string* s, FILE* fp)
 {
     if (fp == NULL) fp = stdin;
     ssize_t res = getline(&s->buf, &s->alloc, fp);
+    // TODO Open next input file
     if (res < 0) exit(0);
+
+    lineNumber++;
+    // Strip newline (I think we should do that?)
+    if (s->buf[res-1] == '\n') {
+        res--;
+    }
     s->len = res;
 }
 
@@ -195,3 +242,17 @@ static void get_message(string* s)
     fprintf(stderr, "UNIMPL: IPC get_message\n");
     abort();
 }
+
+static FILE* open_input(int argc, const char *argv[])
+{
+    assert(argc <= 2);
+    if (argc == 2) {
+        // NB: Instead of actually returning the file, we redirect stdin. A bit
+        // hacky since we don't have the code for mapping the bidiretional
+        // stream "0" to two files here.
+        freopen(argv[1], "r", stdin);
+    }
+    return NULL;
+}
+
+// END OF RTS
