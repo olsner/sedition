@@ -172,12 +172,12 @@ static void next_match(match_t* dst, match_t* src, string* s)
 
 static void write_file(const char* path, string* s)
 {
-    if (strcmp(path, "/dev/stderr") == 0) {
-        fwrite(s->buf, 1, s->len, stderr);
-        fprintf(stderr, "\n");
-    } else {
-        fprintf(stderr, "UNIMPL: write to %s: %.*s\n", path, (int)s->len, s->buf);
+    FILE* fp = stderr;
+    if (strcmp(path, "/dev/stderr") != 0) {
+        fprintf(stderr, "UNIMPL: write to %s: ", path);
     }
+    fwrite(s->buf, 1, s->len, fp);
+    fprintf(fp, "\n");
 }
 
 static void file_printf(FILE* fp, const char* fmt, ...)
