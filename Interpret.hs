@@ -277,12 +277,6 @@ runIR (IR.SetLastRE re) = setLastRegex re
 runIR (IR.Message s) = doMessage =<< getString s
 
 runIR (IR.Print i s) = printTo i =<< getString s
-runIR (IR.PrintLiteral w i s) = do
-    p <- getString s
-    putStrTo i (formatLiteral w p)
-runIR (IR.PrintLineNumber i) = do
-    l <- gets lineNumber
-    printTo i (C.pack (show l))
 runIR (IR.Quit code) = liftIO (exitWith code)
 runIR (IR.Comment s) = debug ("*** " ++ s)
 
@@ -361,6 +355,8 @@ evalStringExpr (IR.SSubstring s start end) = do
     groupStart i m = fst . (! i) . head <$> getMatch m
     groupLen i m = snd . (! i) . head <$> getMatch m
     groupEnd i m = (+) <$> groupStart i m <*> groupLen i m
+evalStringExpr (IR.SFormatLiteral w s) = formatLiteral w <$> getString s
+evalStringExpr (IR.SGetLineNumber) = gets (C.pack . show . lineNumber)
 
 -- TODO We ought to provide secure random numbers
 randomString = C.pack <$> replicateM 32 (randomRIO ('A','Z'))
@@ -403,8 +399,11 @@ trans from to p = C.map f p
     f c | Just i <- C.elemIndex c from = C.index to i
         | otherwise = c
 
+-- C.init because Print appends a newline and this output always ends with a
+-- newline. The added newline is relevant to get the correct $ at the end of
+-- the formatted literal.
 formatLiteral :: Int -> S -> S
-formatLiteral width s = lineWrap width (C.lines (C.append (escape s) "\n"))
+formatLiteral width s = C.init (lineWrap width (C.lines (escape s <> "\n")))
   where
     escape = C.concatMap escapeChar
     escapeChar '\\' = "\\\\"

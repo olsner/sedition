@@ -124,6 +124,18 @@ static void random_string(string* dst)
     dst->len = 2 * sizeof(temp);
 }
 
+static void format_literal(string* dst, int width, string* s)
+{
+    copy(dst, s);
+}
+
+static void format_int(string* dst, int i)
+{
+    char temp[32];
+    snprintf(temp, sizeof(temp), "%d", i);
+    store_cstr(dst, temp, strlen(temp));
+}
+
 //
 // Regex functions
 //
@@ -171,15 +183,6 @@ static void next_match(match_t* dst, match_t* src, string* s)
 // File and I/O functions
 //
 
-static void file_printf(FILE* fp, const char* fmt, ...)
-{
-    va_list ap;
-    va_start(ap, fmt);
-    assert(fp);
-    vfprintf(fp, fmt, ap);
-    va_end(ap);
-}
-
 static void print(FILE* fp, string* s)
 {
     assert(fp);
@@ -194,11 +197,6 @@ static void write_file(const char* path, string* s)
     FILE* fp = fopen(path, "a");
     print(fp, s);
     fclose(fp);
-}
-
-static void print_lit(FILE* fp, int width, string* s)
-{
-    print(fp, s);
 }
 
 static bool is_eof(FILE* fp)

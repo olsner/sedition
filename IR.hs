@@ -52,6 +52,8 @@ data StringExpr
   | SAppendNL SVar SVar
   | SAppend SVar SVar
   | SSubstring SVar SIndex SIndex
+  | SFormatLiteral Int SVar
+  | SGetLineNumber
   deriving (Show,Eq)
 emptyS = SConst ""
 
@@ -100,8 +102,6 @@ data Insn e x where
   SetM          :: MVar -> MatchExpr        -> Insn O O
   -- for n/N (which can never accept interrupts)
   Read          :: SVar -> FD               -> Insn O O
-  PrintLineNumber :: FD                     -> Insn O O
-  PrintLiteral  :: Int -> FD -> SVar        -> Insn O O
   Print         :: FD -> SVar               -> Insn O O
   Message       :: SVar                     -> Insn O O
 
@@ -479,8 +479,12 @@ readString fd = do
 tCmd :: AST.Cmd -> IRM ()
 tCmd (AST.Block xs) = tSeds xs
 tCmd (AST.Print fd) = tWhen pHasPattern $ emit (Print fd sPattern)
-tCmd (AST.PrintLineNumber fd) = emit (PrintLineNumber fd)
-tCmd (AST.PrintLiteral width) = tWhen pHasPattern $ emit (PrintLiteral width 0 sPattern)
+tCmd (AST.PrintLineNumber fd) = do
+    s <- emitString SGetLineNumber
+    emit (Print fd s)
+tCmd (AST.PrintLiteral width) = tWhen pHasPattern $ do
+    s <- emitString (SFormatLiteral width sPattern)
+    emit (Print 0 s)
 tCmd (AST.Message Nothing) = tWhen pHasPattern $ emit (Message sPattern)
 tCmd (AST.Message (Just s)) = do
     tmp <- emitCString s
@@ -671,8 +675,6 @@ allMatches graph = foldGraphNodes (S.union . usedMatches) graph S.empty
 
 usedFiles :: Insn e x -> Set FD
 usedFiles (Print i _) = S.singleton i
-usedFiles (PrintLineNumber i) = S.singleton i
-usedFiles (PrintLiteral i _ _) = S.singleton i
 usedFiles (Wait i) = S.singleton i
 usedFiles (Read _ i) = S.singleton i
 usedFiles (Listen i _ _) = S.singleton i
@@ -695,7 +697,6 @@ usedStrings (SetP _ c) = condUsedStrings c
 usedStrings (SetM _ m) = matchUsedStrings m
 usedStrings (Message s) = S.singleton s
 usedStrings (GetMessage s) = S.singleton s
-usedStrings (PrintLiteral _ _ s) = S.singleton s
 usedStrings (ShellExec s) = S.singleton s
 usedStrings (WriteFile _ s) = S.singleton s
 usedStrings _ = S.empty
@@ -705,8 +706,10 @@ stringExprStrings (STrans _ _ s) = S.singleton s
 stringExprStrings (SAppendNL s t) = S.insert s (S.singleton t)
 stringExprStrings (SAppend s t) = S.insert s (S.singleton t)
 stringExprStrings (SSubstring s _ _) = S.singleton s
+stringExprStrings (SFormatLiteral _ s) = S.singleton s
 stringExprStrings (SConst _) = S.empty
 stringExprStrings SRandomString = S.empty
+stringExprStrings SGetLineNumber = S.empty
 
 matchUsedStrings (Match s _) = S.singleton s
 matchUsedStrings (MatchLastRE s) = S.singleton s

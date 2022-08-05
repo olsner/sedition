@@ -34,7 +34,6 @@ kill _ = id
 -- Operations that read from a string variable 'gen' it.
 gen :: Insn e x -> LiveStringFact -> LiveStringFact
 gen (SetS _ expr) = genS expr
-gen (PrintLiteral _ _ s) = S.insert s
 gen (Print _ s) = S.insert s
 gen (Message s) = S.insert s
 gen (ShellExec s) = S.insert s
@@ -49,8 +48,10 @@ genS (SAppendNL s1 s2) = S.insert s1 . S.insert s2
 genS (SAppend s1 s2) = S.insert s1 . S.insert s2
 genS (STrans _ _ s) = S.insert s
 genS (SSubstring s _ _) = S.insert s
+genS (SFormatLiteral _ s) = S.insert s
 genS (SConst _) = id
 genS (SRandomString) = id
+genS (SGetLineNumber) = id
 
 liveStringTransfer :: BwdTransfer Insn LiveStringFact
 liveStringTransfer = mkBTransfer3 first middle last

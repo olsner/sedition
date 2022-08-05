@@ -150,12 +150,6 @@ compileInsn (IR.SetLastRE re) = setLastRegex re
 compileInsn (IR.Message s) = sfun "send_message" [string s]
 
 compileInsn (IR.Print i s) = sfun "print" [outfd i, string s]
--- TODO Make the literal-formatting a string function instead, so that this is
--- not a special Print operation. Likewise for PrintLineNumber.
-compileInsn (IR.PrintLiteral w i s) =
-  sfun "print_lit" [outfd i, intDec w, string s]
-compileInsn (IR.PrintLineNumber i) =
-    sfun "file_printf" [outfd i, cstring "%d\n", lineNumber]
 compileInsn (IR.Quit code) = stmt (fun "exit" [c_code code])
   where
     c_code (ExitFailure n) = intDec n
@@ -200,6 +194,9 @@ setString t (IR.SSubstring s start end) =
   where
       startix = resolveStringIndex s start
       endix = resolveStringIndex s end
+setString t (IR.SFormatLiteral w s) =
+    fun "format_literal" [string t, intDec w, string s]
+setString t (IR.SGetLineNumber) = fun "format_int" [string t, lineNumber]
 
 resolveStringIndex :: IR.SVar -> IR.SIndex -> Builder
 resolveStringIndex s ix = case ix of
