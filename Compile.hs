@@ -20,19 +20,22 @@ import IR (Program)
 seditionRuntime = $(embedStringFile "sedition.h")
 
 programHeader ere program =
-    "static bool hasPendingIPC;\n\
-    \static const char* lastRegex;\n" <>
-    foldMap (declare "bool" pred) preds <>
-    foldMap (declare "string" stringvar) strings <>
-    foldMap (declare "FILE*" infd) files <>
-    foldMap (declare "FILE*" outfd) files <>
-    foldMap (declare "match_t" match) matches <>
-    "static const int re_cflags = " <> cflags <> ";\n" <>
-    "int main(int argc, const char *argv[]) {\n" <>
+    "int main(int argc, const char *argv[]) {\n\
+    \bool hasPendingIPC = false;\n\
+    \const char* lastRegex = NULL;\n" <>
+    foldMap (declare "bool" pred " = false") preds <>
+    foldMap (declare "string" stringvar mempty) strings <>
+    foldMap (declare "FILE*" infd " = NULL") files <>
+    foldMap (declare "FILE*" outfd " = NULL") files <>
+    foldMap (declare "match_t" match mempty) matches <>
+    foldMap (clear match) matches <>
+    foldMap (clear stringvar) strings <>
+    "const int re_cflags = " <> cflags <> ";\n" <>
     infd 0 <> " = next_input(argc, argv);\n" <>
     outfd 0 <> " = stdout;\n"
   where
-    declare t s var = "static " <> t <> " " <> s var <> "; " <> comment (showB var)
+    declare t s init var = t <> " " <> s var <> init <> ";\n"
+    clear s var = sfun "memset" ["&" <> s var, "0", fun "sizeof" [s var]]
     preds = IR.allPredicates program
     strings = IR.allStrings program
     files = IR.allFiles program
