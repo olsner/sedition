@@ -111,6 +111,7 @@ compileCond cond = case cond of
 
 cIf cond t f = fun "if" [cond] <> "{\n  " <> t <> "} else {\n  " <> f <> "}\n"
 cWhen cond t = fun "if" [cond] <> "{\n  " <> t <> "}\n"
+cWhile cond t = fun "while" [cond] <> "{\n  " <> t <> "}\n"
 
 compileMatch m (IR.Match svar re) = fun "match_regexp" [matchref m, string svar, cstring (reString re), re_cflags, "0"]
 compileMatch m (IR.MatchLastRE svar) = fun "match_regexp" [matchref m, string svar, lastRegex, re_cflags, "0"]
@@ -161,7 +162,7 @@ compileInsn (IR.Comment s) = comment (string8 s)
 
 compileInsn (IR.Wait i) = sfun "wait_or_event" [infd i]
 compileInsn (IR.Read svar 0) =
-    cWhen ("!" <> fun "read_line" [string svar, infd 0]) $
+    cWhile ("!" <> fun "read_line" [string svar, infd 0]) $
         -- should not touch output file
         sfun "close_file" [infd 0] <>
         infd 0 <> " = " <> sfun "next_input" ["argc", "argv"] <>
