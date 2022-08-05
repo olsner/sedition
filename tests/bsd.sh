@@ -344,7 +344,6 @@ append
 
 test_branch()
 {
-	echo >&2 Testing labels and branching
 	mark '5.1' ; $SED -n -e '
 b label4
 :label3
@@ -442,7 +441,6 @@ b
 
 test_pattern()
 {
-echo >&2 Pattern space commands
 # Check that the pattern space is deleted
 	mark '6.1' ; $SED -n -e '
 c\
