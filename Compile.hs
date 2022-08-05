@@ -20,7 +20,9 @@ import IR (Program)
 seditionRuntime = $(embedStringFile "sedition.h")
 
 programHeader ere program =
-    "int main(int argc, const char *argv[]) {\n\
+    "/* ^ runtime system */\n\
+    \/* v compiled program */\n\
+    \int main(int argc, const char *argv[]) {\n\
     \bool hasPendingIPC = false;\n\
     \const char* lastRegex = NULL;\n" <>
     foldMap (declare "bool" pred " = false") preds <>

@@ -1,9 +1,9 @@
-// START OF RTS
-
 #define _GNU_SOURCE
 #undef NDEBUG
 
 #include <assert.h>
+#include <ctype.h>
+#include <malloc.h>
 #include <regex.h>
 #include <stdarg.h>
 #include <stdbool.h>
@@ -40,8 +40,25 @@ static void ensure_len_discard(string* s, size_t n)
         free(s->buf);
         s->buf = malloc(n);
         if (!s->buf) abort();
-        s->alloc = n;
+        s->alloc = malloc_usable_size(s->buf);
         s->len = 0;
+    }
+}
+
+static size_t grow(size_t prev, size_t min)
+{
+    const size_t plus10 = prev + prev / 10;
+    // Grow 10% or directly to the given size
+    return min > plus10 ? min : plus10;
+}
+
+static void ensure_len(string* s, size_t n)
+{
+    if (n > s->alloc) {
+        n = grow(s->alloc, n);
+        s->buf = realloc(s->buf, n);
+        if (!s->buf) abort();
+        s->alloc = malloc_usable_size(s->buf);
     }
 }
 
@@ -57,6 +74,13 @@ static void store_cstr(string* dst, const char* src, size_t n)
     ensure_len_discard(dst, n);
     memcpy(dst->buf, src, n);
     dst->len = n;
+}
+
+static void append_str(string* dst, const char *str, size_t n)
+{
+    ensure_len(dst, dst->len + n);
+    memcpy(dst->buf + dst->len, str, n);
+    dst->len += n;
 }
 
 static void copy(string* dst, string* src)
@@ -126,7 +150,35 @@ static void random_string(string* dst)
 
 static void format_literal(string* dst, int width, string* s)
 {
-    copy(dst, s);
+    int col = 0;
+    dst->len = 0;
+    for (size_t i = 0; i < s->len; i++) {
+        char c = s->buf[i];
+        size_t prev = dst->len;
+        if (c == '\n') {
+            append_str(dst, "$\n", 2);
+            col = 0;
+        } else if (c == '\\') {
+            append_str(dst, "\\\\", 2);
+            col += 2;
+        } else if (!isprint(c)) {
+            // one more here to have room for a NUL
+            append_str(dst, "\\ooo", 5);
+            dst->len--;
+            snprintf(dst->buf + dst->len - 3, 4, "%03o", c);
+            col += 4;
+        } else {
+            append_str(dst, &c, 1);
+            col++;
+        }
+        // TODO Should be breaking before output? I think the haskell also gets
+        // this wrong if e.g. an octal escape would straddle a line break.
+        if (col >= width - 1) {
+            append_str(dst, "\\\n", 2);
+            col = 0;
+        }
+    }
+    append_str(dst, "$", 1);
 }
 
 static void format_int(string* dst, int i)
@@ -276,5 +328,3 @@ static void get_message(string* s)
     fprintf(stderr, "UNIMPL: IPC get_message\n");
     abort();
 }
-
-// END OF RTS
