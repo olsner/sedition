@@ -28,6 +28,7 @@ struct match_t {
 typedef struct match_t match_t;
 
 static int lineNumber;
+static int inputFileIndex;
 
 //
 // String functions
@@ -170,36 +171,29 @@ static void next_match(match_t* dst, match_t* src, string* s)
 // File and I/O functions
 //
 
-static void write_file(const char* path, string* s)
-{
-    FILE* fp = stderr;
-    if (strcmp(path, "/dev/stderr") != 0) {
-        fprintf(stderr, "UNIMPL: write to %s: ", path);
-    }
-    fwrite(s->buf, 1, s->len, fp);
-    fprintf(fp, "\n");
-}
-
 static void file_printf(FILE* fp, const char* fmt, ...)
 {
     va_list ap;
     va_start(ap, fmt);
-
-    // TODO Track input and output separately so that fd 0 can be stdin/out?
-    // Or change the semantics of file descriptors a bit...
-    if (fp == NULL) fp = stdout;
+    assert(fp);
     vfprintf(fp, fmt, ap);
-
     va_end(ap);
 }
 
 static void print(FILE* fp, string* s)
 {
-    // TODO Track input and output separately so that fd 0 can be stdin/out?
-    // Or change the semantics of file descriptors a bit...
-    if (fp == NULL) fp = stdout;
+    assert(fp);
     fwrite(s->buf, 1, s->len, fp);
     fprintf(fp, "\n");
+}
+
+static void write_file(const char* path, string* s)
+{
+    // TODO Should generate code to open a file, keep it open and write to it
+    // instead.
+    FILE* fp = fopen(path, "a");
+    print(fp, s);
+    fclose(fp);
 }
 
 static void print_lit(FILE* fp, int width, string* s)
@@ -209,24 +203,50 @@ static void print_lit(FILE* fp, int width, string* s)
 
 static bool is_eof(FILE* fp)
 {
-    if (fp == NULL) fp = stdin;
+    if (fp == NULL) return true;
     return feof(fp);
 }
 
-static void read_line(string* s, FILE* fp)
+static bool read_line(string* s, FILE* fp)
 {
-    if (fp == NULL) fp = stdin;
+    if (fp == NULL) return false;
+
     ssize_t res = getline(&s->buf, &s->alloc, fp);
-    // TODO Open next input file
-    if (res < 0) exit(0);
+    if (res < 0) return false;
 
     lineNumber++;
-    // Strip newline (I think we should do that?)
     if (s->buf[res-1] == '\n') {
         res--;
     }
     s->len = res;
+    return true;
 }
+
+static FILE* next_input(int argc, const char *argv[])
+{
+    // Starts at 0, first input file is at argv[1]
+    inputFileIndex++;
+    if (inputFileIndex == 1 && argc == 1) {
+        // No input files - use stdin
+        return stdin;
+    }
+    if (argc > inputFileIndex) {
+        return fopen(argv[inputFileIndex], "r");
+    }
+    // EOF
+    return NULL;
+}
+
+static void close_file(FILE* fp)
+{
+    if (fp && fp != stdin) {
+        fclose(fp);
+    }
+}
+
+//
+// IPC Functions: unimplemented mostly
+//
 
 static void wait_or_event(FILE* fp)
 {
@@ -241,18 +261,6 @@ static void get_message(string* s)
 {
     fprintf(stderr, "UNIMPL: IPC get_message\n");
     abort();
-}
-
-static FILE* open_input(int argc, const char *argv[])
-{
-    assert(argc <= 2);
-    if (argc == 2) {
-        // NB: Instead of actually returning the file, we redirect stdin. A bit
-        // hacky since we don't have the code for mapping the bidiretional
-        // stream "0" to two files here.
-        freopen(argv[1], "r", stdin);
-    }
-    return NULL;
 }
 
 // END OF RTS

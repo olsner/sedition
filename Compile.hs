@@ -24,11 +24,13 @@ programHeader ere program =
     \static const char* lastRegex;\n" <>
     foldMap (declare "bool" pred) preds <>
     foldMap (declare "string" stringvar) strings <>
-    foldMap (declare "FILE*" fd) files <>
+    foldMap (declare "FILE*" infd) files <>
+    foldMap (declare "FILE*" outfd) files <>
     foldMap (declare "match_t" match) matches <>
     "static const int re_cflags = " <> cflags <> ";\n" <>
     "int main(int argc, const char *argv[]) {\n" <>
-    "open_input(argc, argv);\n"
+    infd 0 <> " = next_input(argc, argv);\n" <>
+    outfd 0 <> " = stdout;\n"
   where
     declare t s var = "static " <> t <> " " <> s var <> "; " <> comment (showB var)
     preds = IR.allPredicates program
@@ -66,7 +68,8 @@ stringvar (IR.SVar s) = "S" <> intDec s
 pred (IR.Pred p) = "P" <> intDec p
 match (IR.MVar m) = "M" <> intDec m
 matchref (IR.MVar m) = "&M" <> intDec m
-fd i = "F" <> intDec i
+infd i = "inF" <> intDec i
+outfd i = "outF" <> intDec i
 lineNumber = "lineNumber"
 hasPendingIPC = "hasPendingIPC"
 lastRegex = "lastRegex"
@@ -103,13 +106,18 @@ compileCond cond = case cond of
   IR.Line l -> intDec l <> " == " <> lineNumber
   IR.EndLine l -> intDec l <> " < " <> lineNumber
   IR.IsMatch mvar -> match mvar <> ".result"
-  IR.AtEOF i -> fun "is_eof" [fd i]
+  IR.AtEOF i -> fun "is_eof" [infd i]
   IR.PendingIPC -> hasPendingIPC
+
+cIf cond t f = fun "if" [cond] <> "{\n  " <> t <> "} else {\n  " <> f <> "}\n"
+cWhen cond t = fun "if" [cond] <> "{\n  " <> t <> "}\n"
 
 compileMatch m (IR.Match svar re) = fun "match_regexp" [matchref m, string svar, cstring (reString re), re_cflags, "0"]
 compileMatch m (IR.MatchLastRE svar) = fun "match_regexp" [matchref m, string svar, lastRegex, re_cflags, "0"]
 compileMatch m (IR.NextMatch m2 s) = fun "next_match" [matchref m, matchref m2, string s]
 compileMatch m (IR.MVarRef m2) = fun "copy_match" [matchref m, matchref m2]
+
+closeFile i = sfun "close_file" [infd i] <> sfun "close_file" [outfd i]
 
 compileInsn :: IR.Insn e x -> Builder
 compileInsn (IR.Label lbl) = label lbl <> ":\n"
@@ -117,37 +125,48 @@ compileInsn (IR.Branch l) = goto l
 compileInsn (IR.SetP p cond) = stmt (pred p <> " = " <> compileCond cond)
 compileInsn (IR.SetS s expr) = stmt (setString s expr)
 compileInsn (IR.SetM m expr) = stmt (compileMatch m expr)
-compileInsn (IR.If p t f) = fun "if" [pred p] <> goto t <> "else " <> goto f
+compileInsn (IR.If p t f) = cIf (pred p) (goto t) (goto f)
 compileInsn (IR.Listen i maybeHost port) =
-  sfun "sock_listen" [fd i, chost maybeHost, intDec port]
+  sfun "sock_listen" [infd i, chost maybeHost, intDec port]
   where
     chost (Just host) = cstring host
     chost Nothing = "NULL"
-compileInsn (IR.Accept s c) = stmt (fd c <> " = " <> fun "accept" [fd s])
+compileInsn (IR.Accept s c) = stmt (infd c <> " = " <> fun "accept" [infd s])
 compileInsn (IR.Fork entry next) = sfun "FORK" [label entry, label next]
-compileInsn (IR.Redirect i j) = sfun "redirect_file" [fd i, fd j]
-compileInsn (IR.CloseFile i) = sfun "close_file" [fd i]
+compileInsn (IR.Redirect i j) =
+  closeFile i <>
+  stmt (outfd i <> " = " <> outfd j) <>
+  stmt (infd i <> " = " <> outfd j) <>
+  stmt (outfd j <> " = NULL") <>
+  stmt (infd j <> " = NULL")
+compileInsn (IR.CloseFile i) = closeFile i
 
 compileInsn (IR.SetLastRE re) = setLastRegex re
 compileInsn (IR.Message s) = sfun "send_message" [string s]
 
 compileInsn (IR.PrintConstS i s) =
-  sfun "file_printf" [fd i, cstring "%s\n", cstring s]
-compileInsn (IR.Print i s) = sfun "print" [fd i, string s]
+  sfun "file_printf" [outfd i, cstring "%s\n", cstring s]
+compileInsn (IR.Print i s) = sfun "print" [outfd i, string s]
 -- TODO Make the literal-formatting a string function instead, so that this is
 -- not a special Print operation. Likewise for PrintLineNumber.
 compileInsn (IR.PrintLiteral w i s) =
-  sfun "print_lit" [fd i, intDec w, string s]
+  sfun "print_lit" [outfd i, intDec w, string s]
 compileInsn (IR.PrintLineNumber i) =
-    sfun "file_printf" [fd i, cstring "%d\n", lineNumber]
+    sfun "file_printf" [outfd i, cstring "%d\n", lineNumber]
 compileInsn (IR.Quit code) = stmt (fun "exit" [c_code code])
   where
     c_code (ExitFailure n) = intDec n
     c_code ExitSuccess = "EXIT_SUCCESS"
 compileInsn (IR.Comment s) = comment (string8 s)
 
-compileInsn (IR.Wait i) = sfun "wait_or_event" [fd i]
-compileInsn (IR.Read svar i) = sfun "read_line" [string svar, fd i]
+compileInsn (IR.Wait i) = sfun "wait_or_event" [infd i]
+compileInsn (IR.Read svar 0) =
+    cWhen ("!" <> fun "read_line" [string svar, infd 0]) $
+        -- should not touch output file
+        sfun "close_file" [infd 0] <>
+        infd 0 <> " = " <> sfun "next_input" ["argc", "argv"] <>
+        "if (" <> infd 0 <> " == NULL) exit(0);\n"
+compileInsn (IR.Read svar i) = sfun "read_line" [string svar, infd i]
 compileInsn (IR.GetMessage svar) = sfun "get_message" [string svar]
 
 -- Not quite right - all referenced files should be created/truncated before
