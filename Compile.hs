@@ -106,11 +106,12 @@ compileCond cond = case cond of
   IR.Line l -> intDec l <> " == " <> lineNumber
   IR.EndLine l -> intDec l <> " < " <> lineNumber
   IR.IsMatch mvar -> match mvar <> ".result"
+  IR.AtEOF 0 -> fun "is_all_eof" ["&" <> infd 0, "argc", "argv"]
   IR.AtEOF i -> fun "is_eof" [infd i]
   IR.PendingIPC -> hasPendingIPC
 
 cIf cond t f = fun "if" [cond] <> "{\n  " <> t <> "} else {\n  " <> f <> "}\n"
-cWhen cond t = fun "if" [cond] <> "{\n  " <> t <> "}\n"
+--cWhen cond t = fun "if" [cond] <> "{\n  " <> t <> "}\n"
 cWhile cond t = fun "while" [cond] <> "{\n  " <> t <> "}\n"
 
 compileMatch m (IR.Match svar re) = fun "match_regexp" [matchref m, string svar, cstring (reString re), re_cflags, "0"]

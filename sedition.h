@@ -203,8 +203,13 @@ static void print_lit(FILE* fp, int width, string* s)
 
 static bool is_eof(FILE* fp)
 {
-    if (fp == NULL) return true;
-    return feof(fp);
+    assert(fp);
+    int c = getc(fp);
+    if (c == EOF) {
+        return true;
+    }
+    ungetc(c, fp);
+    return false;
 }
 
 static bool read_line(string* s, FILE* fp)
@@ -242,6 +247,17 @@ static void close_file(FILE* fp)
     if (fp && fp != stdin) {
         fclose(fp);
     }
+}
+
+static bool is_all_eof(FILE** pfp, int argc, const char *argv[])
+{
+    FILE* fp = *pfp;
+    while (fp && is_eof(fp)) {
+        close_file(fp);
+        fp = next_input(argc, argv);
+    }
+    *pfp = fp;
+    return fp == NULL;
 }
 
 //
