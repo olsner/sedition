@@ -276,7 +276,6 @@ runIR (IR.CloseFile i) = closeFile i
 runIR (IR.SetLastRE re) = setLastRegex re
 runIR (IR.Message s) = doMessage =<< getString s
 
-runIR (IR.PrintConstS i s) = printTo i s
 runIR (IR.Print i s) = printTo i =<< getString s
 runIR (IR.PrintLiteral w i s) = do
     p <- getString s

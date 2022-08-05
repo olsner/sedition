@@ -149,8 +149,6 @@ compileInsn (IR.CloseFile i) = closeFile i
 compileInsn (IR.SetLastRE re) = setLastRegex re
 compileInsn (IR.Message s) = sfun "send_message" [string s]
 
-compileInsn (IR.PrintConstS i s) =
-  sfun "file_printf" [outfd i, cstring "%s\n", cstring s]
 compileInsn (IR.Print i s) = sfun "print" [outfd i, string s]
 -- TODO Make the literal-formatting a string function instead, so that this is
 -- not a special Print operation. Likewise for PrintLineNumber.

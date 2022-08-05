@@ -100,7 +100,6 @@ data Insn e x where
   SetM          :: MVar -> MatchExpr        -> Insn O O
   -- for n/N (which can never accept interrupts)
   Read          :: SVar -> FD               -> Insn O O
-  PrintConstS   :: FD -> S                  -> Insn O O
   PrintLineNumber :: FD                     -> Insn O O
   PrintLiteral  :: Int -> FD -> SVar        -> Insn O O
   Print         :: FD -> SVar               -> Insn O O
@@ -527,8 +526,8 @@ tCmd (AST.Clear) = do
     t <- emitString emptyS
     setString sPattern t
     emit (SetP pHasPattern cFalse)
-tCmd (AST.Change replacement) = do
-    emit (PrintConstS 0 replacement)
+tCmd (AST.Change s) = do
+    emitCString s >>= \s -> emit (Print 0 s)
     branchNextCycleNoPrint
 tCmd (AST.Delete) = branchNextCycleNoPrint
 tCmd (AST.Redirect dst (Just src)) = emit (Redirect dst src)
@@ -569,7 +568,7 @@ tCmd (AST.Exchange maybeReg) = do
     tmp <- emitString (SVarRef space)
     setString space sPattern
     setString sPattern tmp
-tCmd (AST.Insert s) = emit (PrintConstS 0 s)
+tCmd (AST.Insert s) = emitCString s >>= \s -> emit (Print 0 s)
 tCmd (AST.Append s) = do
     tIf pHasQueuedOutput ifTrue ifFalse
   where
@@ -672,7 +671,6 @@ allMatches graph = foldGraphNodes (S.union . usedMatches) graph S.empty
 
 usedFiles :: Insn e x -> Set FD
 usedFiles (Print i _) = S.singleton i
-usedFiles (PrintConstS i _) = S.singleton i
 usedFiles (PrintLineNumber i) = S.singleton i
 usedFiles (PrintLiteral i _ _) = S.singleton i
 usedFiles (Wait i) = S.singleton i
