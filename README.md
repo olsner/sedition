@@ -8,20 +8,40 @@ This is a dialect of sed, extended with some useful features:
   run in a new thread
 * Inter-thread communications
 * Extended hold space, a key/value store extending the normal single hold space
-* Built-in optimizer and (eventually) compiler
+* Built-in optimizer and compiler
 
 This tries to be compatible with GNU sed, so it implements some GNU extensions
 and none of the added sedition features should interfere with GNU ones.
 
+
 ## Building and Getting Started
 
-* Install ghc (>= 8.0.2 for a working version of hoopl) and cabal-install, make
-  sure they're in your PATH.
+* Install ghc and cabal-install, make sure they're in your PATH.
 * Install Haskell prerequisites: `./boot.sh`
 * Build with `make`
 
 The produced sed executable accepts the usual sed command-line options. (But
 not all of them are implemented yet.)
+
+
+## Compiling sed programs
+
+The compiler outputs C code that in turn needs to be compiled to an executable.
+(Integrating the C compilation into sedition is still TODO.)
+
+    ./sed -c [sed flags] -f foo.sed -o foo.c
+    cc -o foo foo.c
+
+The compiled output currently requires the POSIX regexp API with support for
+the `REG_STARTEND` flag (a BSD extension, also supported by glibc). Eventually
+the regular expressions will be compiled into the C code with re2c or an
+internal regular expression compiler.
+
+Most sedition-specific features are still unimplemented in the compiler, e.g.
+IPC, forks and networking. Use the `-I` flag to sedition to disable IPC.
+
+To compile and run in one command, you can use the `runsed` wrapper script.
+
 
 ## Examples
 
@@ -71,10 +91,12 @@ not all of them are implemented yet.)
 
     (See also the m command.)
 
+
 ## Added commands
 
 Only commands added over GNU sed (or significantly altered) will be documented
 here.
+
 
 ### I/O commands
 
@@ -105,6 +127,7 @@ depending on the direction of I/O. This neatly maps to sockets.
   Output pattern space to the given file descriptor. If no file descriptor is
   given, print to file 0.
 
+
 ### Networking
 
 * `L sfd [host]:port`
@@ -121,6 +144,7 @@ depending on the direction of I/O. This neatly maps to sockets.
   previously open with number `cfd`.
 
   `sfd` must be a file descriptor previously opened for listening using `L`.
+
 
 ### Threading and messaging
 
@@ -157,6 +181,7 @@ depending on the direction of I/O. This neatly maps to sockets.
 
   If no message is given, the current pattern space will be broadcast instead.
 
+
 ### Extended hold-space
 
 `g`, `G`, `h`, `H` and `x` are extended to take an optional register name. When
@@ -165,6 +190,7 @@ hold space. When used with names, each name identifies its own hold space.
 
 Hold spaces are separate for each thread, but inherit the previously set values
 from whatever thread created them.
+
 
 #### Special registers
 
