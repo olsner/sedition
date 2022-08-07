@@ -37,7 +37,6 @@ gen (SetS _ expr) = genS expr
 gen (Print _ s) = S.insert s
 gen (Message s) = S.insert s
 gen (ShellExec s) = S.insert s
-gen (WriteFile _ s) = S.insert s
 gen (SetM _ (Match s _)) = S.insert s
 gen (SetM _ (MatchLastRE s)) = S.insert s
 gen _ = id

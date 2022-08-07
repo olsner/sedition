@@ -100,7 +100,7 @@ data Insn e x where
   SetP          :: Pred -> Cond             -> Insn O O
   SetS          :: SVar -> StringExpr       -> Insn O O
   SetM          :: MVar -> MatchExpr        -> Insn O O
-  -- for n/N (which can never accept interrupts)
+  -- for n/N (which can never accept interrupts), and R
   Read          :: SVar -> FD               -> Insn O O
   Print         :: FD -> SVar               -> Insn O O
   Message       :: SVar                     -> Insn O O
@@ -108,13 +108,15 @@ data Insn e x where
   SetLastRE     :: RE                       -> Insn O O
 
   ShellExec     :: SVar                     -> Insn O O
-  Listen        :: Int -> (Maybe S) -> Int  -> Insn O O
-  Accept        :: Int -> Int               -> Insn O O
-  Redirect      :: Int -> Int               -> Insn O O
-  CloseFile     :: Int                      -> Insn O O
+  Listen        :: FD -> (Maybe S) -> FD    -> Insn O O
+  Accept        :: FD -> FD                 -> Insn O O
+  Redirect      :: FD -> FD                 -> Insn O O
   Comment       :: String                   -> Insn O O
 
-  WriteFile     :: S -> SVar                -> Insn O O
+  OpenFile      :: FD -> Bool -> S         -> Insn O O
+  -- Reads a whole file at once, where normal Read just reads the next line.
+  ReadFile      :: SVar -> FD               -> Insn O O
+  CloseFile     :: FD                       -> Insn O O
 
 deriving instance Show (Insn e x)
 deriving instance Eq (Insn e x)
@@ -140,6 +142,7 @@ data IRState = State
   , autoprint :: Bool
   , sourceLabels :: Map S Label
   , holdSpaces :: Map S SVar
+  , externalFiles :: Map (S, Bool) FD
   , nextCycleLabels :: (Label, Label)
   , program :: Graph Insn O O
   }
@@ -152,7 +155,15 @@ instance Show (Graph Insn e x) where
 
 invalidLabel :: String -> Label
 invalidLabel s = error ("Invalid label: " ++ s)
-startState autoprint = State firstNormalPred autoprint M.empty M.empty (dummyCycleLabel, dummyCycleLabel) emptyGraph
+startState autoprint = State
+  { firstFreeUnique = firstNormalPred
+  , autoprint = autoprint
+  , sourceLabels = M.empty
+  , holdSpaces = M.empty
+  , externalFiles = M.empty
+  , nextCycleLabels = (dummyCycleLabel, dummyCycleLabel)
+  , program = emptyGraph
+  }
 dummyCycleLabel = invalidLabel "uninitialized next-cycle label"
 
 instance Show Pred where
@@ -211,6 +222,19 @@ withNewString f = do
     next <- newString
     _ <- f next
     return next
+
+getExternalFD :: S -> Bool -> IRM FD
+getExternalFD path write = do
+  prev <- gets externalFiles
+  case M.lookup (path, write) prev of
+    Just fd -> return fd
+    Nothing -> do
+      let fd = nextFd prev
+      modify $ \s -> s { externalFiles = M.insert (path, write) fd prev }
+      return fd
+  where
+    -- Negative FD's for external files
+    nextFd = negate . succ . M.size
 
 setPattern s = setString sPattern s >> emit (SetP pHasPattern cTrue)
 
@@ -311,6 +335,8 @@ checkQueuedOutput =
     setString sOutputQueue =<< emitString emptyS
     emit (SetP pHasQueuedOutput cFalse)
 
+openFile (path, write) fd = emit (OpenFile fd write path)
+
 -- Entry points to generate:
 -- * pre-first line code (if any)
 -- * interrupt reception (for new-cycle code)
@@ -324,7 +350,8 @@ tProgram seds = mdo
   emit (SetP pPreFirst cTrue)
   emit (SetP pRunNormal cFalse)
 
-  start <- label
+  start <- emitBranch' openUsedFiles
+
   -- Actual normal program here
   tSeds seds
 
@@ -364,6 +391,11 @@ tProgram seds = mdo
 
   emit (SetP pPreFirst cFalse)
   emit (SetP pRunNormal cFalse)
+
+  openUsedFiles <- emitBranch' start
+
+  filesToOpen <- gets (M.toList . externalFiles)
+  mapM_ (uncurry openFile) filesToOpen
 
   exit <- emitBranch' start
 
@@ -573,22 +605,17 @@ tCmd (AST.Exchange maybeReg) = do
     setString space sPattern
     setString sPattern tmp
 tCmd (AST.Insert s) = emitCString s >>= \s -> emit (Print 0 s)
-tCmd (AST.Append s) = do
-    tIf pHasQueuedOutput ifTrue ifFalse
-  where
-    -- already set to true, so no need to update predicate. Just append to
-    -- the queue.
-    ifTrue = do
-        temp <- emitCString s
-        temp2 <- emitString (SAppendNL sOutputQueue temp)
-        setString sOutputQueue temp2
-    -- If there's no queued output yet, we know we can simply replace the
-    -- queued output with a constant.
-    ifFalse = do
-        emit (SetP pHasQueuedOutput cTrue)
-        temp <- emitCString s
-        setString sOutputQueue temp
-tCmd (AST.WriteFile path) = emit (WriteFile path sPattern)
+tCmd (AST.Append s) = tAppendOutputQueue =<< emitCString s
+tCmd (AST.ReadFile path) = do
+    fd <- getExternalFD path False
+    p <- emitNewPred (AtEOF fd)
+    tWhenNot p $ do
+        s <- newString
+        emit (ReadFile s fd)
+        tAppendOutputQueue s
+tCmd (AST.WriteFile path) = do
+    fd <- getExternalFD path True
+    emit (Print fd sPattern)
 tCmd (AST.Quit print status) = () <$ do
   when print $ do
     printIfAuto
@@ -596,10 +623,23 @@ tCmd (AST.Quit print status) = () <$ do
   finishBlock' (Quit status)
 tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
 
+tAppendOutputQueue s = tIf pHasQueuedOutput ifTrue ifFalse
+  where
+    -- already set to true, so no need to update predicate. Just append to
+    -- the queue.
+    ifTrue = setString sOutputQueue =<< emitString (SAppendNL sOutputQueue s)
+    -- If there's no queued output yet, we know we can simply replace the
+    -- queued output with a constant.
+    ifFalse = do
+        emit (SetP pHasQueuedOutput cTrue)
+        setString sOutputQueue s
+
 tSubstAction SActionNone _ = return ()
 tSubstAction SActionExec res = emit (ShellExec res)
 tSubstAction (SActionPrint n) res = emit (Print n res)
-tSubstAction (SActionWriteFile path) res = emit (WriteFile path res)
+tSubstAction (SActionWriteFile path) res = do
+    fd <- getExternalFD path True
+    emit (Print fd res)
 
 tSub m s sub = case sub of
   Literal lit -> emitCString lit
@@ -681,6 +721,8 @@ usedFiles (Listen i _ _) = S.singleton i
 usedFiles (Accept s c) = S.fromList [s, c]
 usedFiles (Redirect i j) = S.fromList [i, j]
 usedFiles (CloseFile i) = S.singleton i
+usedFiles (ReadFile _ i) = S.singleton i
+usedFiles (OpenFile i _ _) = S.singleton i
 usedFiles (SetP _ c) = condUsedFiles c
 usedFiles _ = S.empty
 
@@ -698,7 +740,6 @@ usedStrings (SetM _ m) = matchUsedStrings m
 usedStrings (Message s) = S.singleton s
 usedStrings (GetMessage s) = S.singleton s
 usedStrings (ShellExec s) = S.singleton s
-usedStrings (WriteFile _ s) = S.singleton s
 usedStrings _ = S.empty
 
 stringExprStrings (SVarRef s) = S.singleton s

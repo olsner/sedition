@@ -242,18 +242,10 @@ static void print(FILE* fp, string* s)
     fprintf(fp, "\n");
 }
 
-static void write_file(const char* path, string* s)
-{
-    // TODO Should generate code to open a file, keep it open and write to it
-    // instead.
-    FILE* fp = fopen(path, "a");
-    print(fp, s);
-    fclose(fp);
-}
-
 static bool is_eof(FILE* fp)
 {
-    assert(fp);
+    if (fp == NULL) return true;
+
     int c = getc(fp);
     if (c == EOF) {
         return true;
@@ -262,19 +254,44 @@ static bool is_eof(FILE* fp)
     return false;
 }
 
+static void strip_trailing_newline(string* s)
+{
+    if (s->buf[s->len - 1] == '\n') {
+        s->len--;
+    }
+}
+
 static bool read_line(string* s, FILE* fp)
 {
     if (fp == NULL) return false;
 
     ssize_t res = getline(&s->buf, &s->alloc, fp);
     if (res < 0) return false;
-
-    lineNumber++;
-    if (s->buf[res-1] == '\n') {
-        res--;
-    }
     s->len = res;
+
+    // TODO Only increment on fd 0?
+    lineNumber++;
+    strip_trailing_newline(s);
     return true;
+}
+
+static void read_file(string* s, FILE* fp)
+{
+    assert(fp);
+
+    s->len = 0;
+    ensure_len(s, 1024);
+    while (true) {
+        if (s->len == s->alloc) {
+            ensure_len(s, s->alloc + 1);
+        }
+        ssize_t res = fread(s->buf + s->len, 1, s->alloc - s->len, fp);
+        if (res <= 0) break;
+
+        s->len += res;
+    }
+
+    strip_trailing_newline(s);
 }
 
 static FILE* next_input(int argc, const char *argv[])
@@ -290,6 +307,11 @@ static FILE* next_input(int argc, const char *argv[])
     }
     // EOF
     return NULL;
+}
+
+static FILE* open_file(const char *path, bool write)
+{
+    return fopen(path, write ? "w" : "r");
 }
 
 static void close_file(FILE* fp)

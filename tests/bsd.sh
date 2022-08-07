@@ -486,7 +486,6 @@ test_print()
 	mark '7.3' ; $SED -e '3,12w lines4' lines1
 	echo w results
 	cat lines4
-    # TODO Implement ReadFile
 	mark '7.4' ; $SED -e '4r lines2' lines1
     # Seems like /dev/dds is just some device file that doesn't exist.
 	mark '7.5' ; $SED -e '5r /dev/dds' lines1

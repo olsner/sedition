@@ -67,14 +67,17 @@ compileBlock block = fold (mempty :: Builder)
 goto :: H.Label -> Builder
 goto l = stmt ("goto " <> label l)
 
+idIntDec i | i >= 0    = intDec i
+           | otherwise = "_" <> intDec (negate i)
+
 label l = showB l
 string (IR.SVar s) = "&S" <> intDec s
 stringvar (IR.SVar s) = "S" <> intDec s
 pred (IR.Pred p) = "P" <> intDec p
 match (IR.MVar m) = "M" <> intDec m
 matchref (IR.MVar m) = "&M" <> intDec m
-infd i = "inF" <> intDec i
-outfd i = "outF" <> intDec i
+infd i = "inF" <> idIntDec i
+outfd i = "outF" <> idIntDec i
 lineNumber = "lineNumber"
 hasPendingIPC = "hasPendingIPC"
 lastRegex = "lastRegex"
@@ -94,6 +97,8 @@ cstring s = "\"" <> foldMap quoteC (C.unpack s) <> "\""
     toWord8 = fromIntegral . fromEnum
 
 showB x = string8 (show x)
+bool True = "true"
+bool False = "false"
 intercalateB _   [] = mempty
 intercalateB sep (x:xs) = x <> go sep xs
   where
@@ -106,8 +111,7 @@ stmt builder = builder <> ";\n"
 comment builder = "// " <> builder <> "\n"
 
 compileCond cond = case cond of
-  IR.Bool True -> "true"
-  IR.Bool False -> "false"
+  IR.Bool b -> bool b
   IR.Line l -> intDec l <> " == " <> lineNumber
   IR.EndLine l -> intDec l <> " < " <> lineNumber
   IR.IsMatch mvar -> match mvar <> ".result"
@@ -168,13 +172,12 @@ compileInsn (IR.Read svar 0) =
 compileInsn (IR.Read svar i) = sfun "read_line" [string svar, infd i]
 compileInsn (IR.GetMessage svar) = sfun "get_message" [string svar]
 
--- Not quite right - all referenced files should be created/truncated before
--- the first written line, then all subsequent references continue writing
--- without reopening the file.
--- Probably the IR step should assign a file descriptor for each used output
--- file, generate code to open them on startup and then this should be done
--- through (Print fd) instead.
-compileInsn (IR.WriteFile path svar) = sfun "write_file" [cstring path, string svar]
+compileInsn (IR.OpenFile fd write path) =
+    sfun "close_file" [fdvar] <>
+    fdvar <> " = " <> sfun "open_file" [cstring path, bool write]
+  where
+    fdvar = (if write then outfd else infd) fd
+compileInsn (IR.ReadFile svar fd) = sfun "read_file" [string svar, infd fd]
 compileInsn (IR.ShellExec svar) = sfun "shell_exec" [string svar]
 
 --compileInsn cmd = fatal ("compileInsn: Unhandled instruction " ++ show cmd)

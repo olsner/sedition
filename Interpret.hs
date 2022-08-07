@@ -8,6 +8,7 @@ module Interpret (runProgram, inputListFile) where
 import Compiler.Hoopl as H hiding ((<*>))
 
 import Control.Concurrent
+import Control.Exception
 import Control.Monad
 import Control.Monad.IO.Class
 import Control.Monad.Trans.State.Strict
@@ -66,6 +67,8 @@ data File
 instance Show File where
   show (NormalFile {}) = "NormalFile{}"
   show (SocketFile s) = "SocketFile " ++ show s
+
+nullFile = NormalFile (pure True) (pure Nothing) (pure Nothing) (\_ -> pure ())
 
 rawHandleFile :: Handle -> Handle -> File
 rawHandleFile inh outh = NormalFile (hIsEOF inh) (hMaybeGetLine inh) (error "filePeekLine in rawHandleFile") (C.hPutStr outh)
@@ -130,6 +133,23 @@ inputListFile inputs = do
 
     nextFile (return ()) ()
     threadedFile (NormalFile isEOF maybeGetLine (error "filePeekLine in inputListFile") C.putStr)
+
+outputHandleFile h = nullFile { filePutStr = putstr }
+  where
+    putstr s = do
+     C.hPutStr h s
+     hFlush h -- TODO Close files on exit so their buffers get flushed. Probably requires adding some shutdown code?
+inputHandleFile h = (rawHandleFile h h) { filePutStr = \_ -> return () }
+
+outputFile path = outputHandleFile <$> openFile path WriteMode
+inputFile path = inputHandleFile <$> openFile path ReadMode
+
+fileFile write path = catch (f path) errorHandler
+  where
+    f | write     = outputFile
+      | otherwise = inputFile
+    errorHandler :: IOException -> IO File
+    errorHandler _ = return nullFile
 
 hMaybeGetLine :: Handle -> IO (Maybe S)
 hMaybeGetLine h = do
@@ -292,15 +312,10 @@ runIR (IR.GetMessage svar) = do
     Right message <- liftIO (takeMVar v)
     setString svar message
 
--- Not quite right - all referenced files should be created/truncated before
--- the first written line, then all subsequent references continue writing
--- without reopening the file.
--- Probably the IR step should assign a file descriptor for each used output
--- file, generate code to open them on startup and then this should be done
--- through (Print fd) instead.
-runIR (IR.WriteFile path svar) = do
-  s <- getString svar
-  liftIO $ C.appendFile (C.unpack path) (C.append s "\n")
+runIR (IR.ReadFile svar i) = do
+  setString svar =<< readWholeFile i
+runIR (IR.OpenFile i write path) =
+  setFile i =<< liftIO (fileFile write (C.unpack path))
 
 runIR (IR.ShellExec svar) = do
     cmd <- getString svar
@@ -459,6 +474,14 @@ maybeGetLine i = do
     case maybeLine of
      Just l | 0 <- i -> incrementLineNumber >> return (Just l)
      _ -> return maybeLine
+
+readWholeFile i = go True ""
+  where
+    go firstLine acc = do
+      maybeLine <- maybeGetLine i
+      case maybeLine of
+        Just l -> go False (if firstLine then l else acc <> "\n" <> l)
+        Nothing -> return acc
 
 peekLine :: Int -> StateT (SedState p) IO (Maybe S)
 peekLine i = do

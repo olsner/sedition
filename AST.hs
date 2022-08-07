@@ -115,6 +115,7 @@ data Cmd
 
   | ReadFile S
   | WriteFile S
+  -- TODO line variants of r/w (R/W). Need parsing and IR code.
 
   | Message (Maybe S)
 
