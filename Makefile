@@ -33,10 +33,10 @@ run-parsertest: ParserTest
 # There are a handful of failing BSD tests still, so ignore failures so we get
 # to the other test suites.
 run-bsdtests: sed
-	-cd tests && ./bsd.sh
+	cd tests && ./bsd.sh
 
 run-bsdtests-compiled: sed
-	-cd tests && ./bsd.sh ../runsed
+	cd tests && ./bsd.sh ../runsed
 
 run-gnused-tests: sed
 	@if test -d gnused; \
