@@ -144,6 +144,7 @@ compileInsn (IR.Branch l) = goto l
 compileInsn (IR.SetP p cond) = stmt (pred p <> " = " <> compileCond cond)
 compileInsn (IR.SetS s expr) = stmt (setString s expr)
 compileInsn (IR.SetM m expr) = stmt (compileMatch m expr)
+compileInsn (IR.AppendS s s2) = sfun "concat_inplace" [string s, string s2]
 compileInsn (IR.If p t f) = cIf (pred p) (goto t) (goto f)
 compileInsn (IR.Listen i maybeHost port) =
   sfun "sock_listen" [infd i, chost maybeHost, intDec port]

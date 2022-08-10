@@ -111,6 +111,14 @@ static void concat(string* dst, string* a, string* b)
     dst->len = n;
 }
 
+static void concat_inplace(string* dst, string* b)
+{
+    const size_t n = dst->len + b->len;
+    ensure_len(dst, n);
+    memcpy(dst->buf + dst->len, b->buf, b->len);
+    dst->len = n;
+}
+
 static void substring(string* dst, string* src, size_t i1, size_t i2)
 {
     assert(i1 <= src->len && i2 <= src->len);

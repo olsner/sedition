@@ -233,9 +233,7 @@ getPred (IR.Pred n) = S.member n . predicates <$> get
 setString :: IR.SVar -> S -> SedM ()
 setString (IR.SVar n) value =
     modify $ \s -> s { strings = M.insert n value (strings s) }
--- TODO Remove fromMaybe, it should never happen that we read a string before
--- setting it.
-getString (IR.SVar n) = gets (fromMaybe "" . M.lookup n . strings)
+getString (IR.SVar n) = gets (fromJust . M.lookup n . strings)
 
 setMatch :: IR.MVar -> Match -> SedM ()
 setMatch (IR.MVar n) value =
@@ -275,6 +273,10 @@ runIR (IR.SetM m expr) = setMatch m =<< case expr of
   IR.MatchLastRE svar -> checkRE svar =<< getLastRegex
   IR.NextMatch m2 _ -> tail <$> getMatch m2
   IR.MVarRef m2 -> getMatch m2
+runIR (IR.AppendS s s2) = do
+  a <- getString s
+  b <- getString s2
+  setString s (a <> b)
 runIR (IR.If p t f) = do
   b <- getPred p
   runIRLabel (if b then t else f)

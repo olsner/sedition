@@ -99,6 +99,7 @@ data Insn e x where
 
   SetP          :: Pred -> Cond             -> Insn O O
   SetS          :: SVar -> StringExpr       -> Insn O O
+  AppendS       :: SVar -> SVar             -> Insn O O
   SetM          :: MVar -> MatchExpr        -> Insn O O
   -- for n/N (which can never accept interrupts), and R
   Read          :: SVar -> FD               -> Insn O O
