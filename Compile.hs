@@ -24,6 +24,7 @@ programHeader ere program =
     \/* v compiled program */\n\
     \int main(int argc, const char *argv[]) {\n\
     \bool hasPendingIPC = false;\n\
+    \int exit_status = EXIT_SUCCESS;\n\
     \const char* lastRegex = NULL;\n" <>
     foldMap (declare "bool" pred " = false") preds <>
     foldMap (declare "string" stringvar mempty) strings <>
@@ -45,7 +46,12 @@ programHeader ere program =
     cflags | ere       = "REG_EXTENDED"
            | otherwise = "0"
 
-programFooter = "}\n"
+programFooter program = "exit:\n" <>
+    foldMap closeFile files <>
+    "return exit_status;\n" <>
+    "}\n"
+  where
+    files = IR.allFiles program
 
 compileIR :: Bool -> Bool -> H.Label -> Program -> S
 compileIR _ipc ere entry program = L.toStrict . toLazyByteString $
@@ -53,7 +59,7 @@ compileIR _ipc ere entry program = L.toStrict . toLazyByteString $
   <> programHeader ere program
   <> goto entry
   <> foldMap compileBlock blocks
-  <> programFooter
+  <> programFooter program
   where GMany _ blocks _ = program
 
 -- compileBlock :: Block IR.Insn e x -> Builder
@@ -65,7 +71,9 @@ compileBlock block = fold (mempty :: Builder)
     f insn builder = builder <> compileInsn insn
 
 goto :: H.Label -> Builder
-goto l = stmt ("goto " <> label l)
+goto l = goto' (label l)
+
+goto' l = stmt ("goto " <> l)
 
 idIntDec i | i >= 0    = intDec i
            | otherwise = "_" <> intDec (negate i)
@@ -156,7 +164,8 @@ compileInsn (IR.SetLastRE re) = setLastRegex re
 compileInsn (IR.Message s) = sfun "send_message" [string s]
 
 compileInsn (IR.Print i s) = sfun "print" [outfd i, string s]
-compileInsn (IR.Quit code) = stmt (fun "exit" [c_code code])
+compileInsn (IR.Quit code) =
+    stmt ("exit_status = " <> c_code code) <> goto' "exit"
   where
     c_code (ExitFailure n) = intDec n
     c_code ExitSuccess = "EXIT_SUCCESS"
@@ -168,7 +177,7 @@ compileInsn (IR.Read svar 0) =
         -- should not touch output file
         sfun "close_file" [infd 0] <>
         infd 0 <> " = " <> sfun "next_input" ["argc", "argv"] <>
-        "if (" <> infd 0 <> " == NULL) exit(0);\n"
+        "if (" <> infd 0 <> " == NULL) goto exit;\n"
 compileInsn (IR.Read svar i) = sfun "read_line" [string svar, infd i]
 compileInsn (IR.GetMessage svar) = sfun "get_message" [string svar]
 
