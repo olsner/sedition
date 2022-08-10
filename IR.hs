@@ -650,9 +650,11 @@ tSub m s sub = case sub of
   SetCaseConv _ -> comment "UNIMPL: case conversion" >> emitString emptyS
   -- _ -> error (show sub)
 
-tConcat [] = emitString emptyS
 tConcat [x] = return x
-tConcat (x:xs) = emitString . SAppend x =<< tConcat xs
+tConcat xs  = emitString emptyS >>= go xs
+  where
+    go []     acc = return acc
+    go (x:xs) acc = emit (AppendS acc x) >> go xs acc
 
 tSubs m s subs = tConcat =<< mapM (tSub m s) subs
 
