@@ -39,9 +39,13 @@ gen (AppendS _ s) = S.insert s
 gen (Print _ s) = S.insert s
 gen (Message s) = S.insert s
 gen (ShellExec s) = S.insert s
-gen (SetM _ (Match s _)) = S.insert s
-gen (SetM _ (MatchLastRE s)) = S.insert s
+gen (SetM _ expr) = genM expr
 gen _ = id
+
+genM (Match s _) = S.insert s
+genM (MatchLastRE s) = S.insert s
+genM (NextMatch _ s) = S.insert s
+genM (MVarRef _) = id
 
 genS :: StringExpr -> LiveStringFact -> LiveStringFact
 genS (SVarRef s) = S.insert s

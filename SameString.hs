@@ -11,6 +11,7 @@ import Compiler.Hoopl as H hiding ((<*>))
 
 import Data.Map (Map)
 import qualified Data.Map as M
+import Data.Maybe
 import Debug.Trace
 
 import IR
@@ -26,7 +27,8 @@ constLattice = DataflowLattice
        = if new == old then (NoChange, PElem new)
          else               (SomeChange, Top)
 
-deleteValues value = M.filter (/= value)
+deleteValues value = M.map (\x -> if x == value then Top else x)
+changeString s = deleteValues (PElem s)
 
 sameStringTransfer :: FwdTransfer Insn SameStringFact
 sameStringTransfer = mkFTransfer3 first middle last
@@ -39,10 +41,12 @@ sameStringTransfer = mkFTransfer3 first middle last
     middle :: Insn O O -> SameStringFact -> SameStringFact
     -- When changing s, we also need to invalidate other references to s in the
     -- *values* of the fact base. That's annoying.
-    middle (SetS s (SVarRef s2)) = M.insert s (PElem s2)
-    middle (SetS s _)            = M.insert s Top
+    middle (SetS s (SVarRef s2)) = changeString s . M.insert s (PElem s2)
+    middle (SetS s _)            = changeString s . M.insert s Top
+    middle (AppendS s _)         = changeString s . M.insert s Top
     middle (GetMessage s)        = M.insert s Top
     middle (Read s _)            = M.insert s Top
+    middle (ReadFile s _)        = M.insert s Top
     middle _insn                 = id
 
     -- O C
@@ -56,41 +60,47 @@ sameString = deepFwdRw rw
   where
     -- Operations that read from a string variable can be rewritten to use the
     -- incoming variable instead, if that is constant.
-    -- TODO Annoying duplication of return/Just/mkMiddle and pattern matching
-    -- on the helpers. And where is fuel consumed? Perhaps every variable
-    -- replaced should consume its own fuel so that we can bisect with enough
-    -- detail.
+    -- Note that we only rewrite the input variables.
     rw :: FuelMonad m => Insn e x -> SameStringFact -> m (Maybe (Graph Insn e x))
-    rw (SetS s expr) f | Just expr' <- rwE expr f = return (Just (mkMiddle (SetS s expr')))
-    rw (SetP p cond) f | Just cond' <- rwC cond f = return (Just (mkMiddle (SetP p cond')))
-    rw (SetM m expr) f | Just expr' <- rwM expr f = return (Just (mkMiddle (SetM m expr')))
-    rw (Print fd s) f | Just s' <- var s f = return (Just (mkMiddle (Print fd s')))
-    rw (WriteFile path s) f | Just s' <- var s f = return (Just (mkMiddle (WriteFile path s')))
-    -- rw (Message s) =
-    -- rw (PrintLiteral _ _ s) =
-    -- rw (ShellExec s) =
-    -- rw (WriteFile _ s) =
+    rw (SetS s expr)   f = return (mkMiddle . SetS s <$> rwE expr f)
+    rw (SetP p cond)   f = return (mkMiddle . SetP p <$> rwC cond f)
+    rw (SetM m expr)   f = return (mkMiddle . SetM m <$> rwM expr f)
+    rw (Print fd s)    f = return (mkMiddle <$> var1 (Print fd) s f)
+    rw (AppendS s1 s2) f = return (mkMiddle <$> var1 (AppendS s1) s2 f)
+    rw (Message s)     f = return (mkMiddle <$> var1 Message s f)
+    rw (ShellExec s)   f = return (mkMiddle <$> var1 ShellExec s f)
     rw _ _ = return Nothing
 
-    rwE (SVarRef s)        f = SVarRef <$> var s f
-    rwE (SAppendNL s1 s2)  f = SAppendNL <$> var s1 f <*> var s2 f
-    rwE (SAppend s1 s2)    f = SAppend <$> var s1 f <*> var s2 f
-    rwE (STrans from to s) f = STrans from to <$> var s f
+    rwE (SVarRef s)        f = var1 SVarRef s f
+    rwE (SAppendNL s1 s2)  f = var2 SAppendNL s1 s2 f
+    rwE (SAppend s1 s2)    f = var2 SAppend s1 s2 f
+    rwE (STrans from to s) f = var1 (STrans from to) s f
+    rwE (SFormatLiteral w s) f = var1 (SFormatLiteral w) s f
+    rwE (SSubstring s i j) f = var1 (\s -> SSubstring s i j) s f
     rwE _                  _ = Nothing
 
-    rwM (Match s re)       f = Match <$> var s f <*> pure re
-    rwM (MatchLastRE s)    f = MatchLastRE <$> var s f
+    rwM (Match s re)       f = var1 (\s -> Match s re) s f
+    rwM (MatchLastRE s)    f = var1 MatchLastRE s f
+    rwM (NextMatch m s)    f = var1 (NextMatch m) s f
     rwM _                  _ = Nothing
 
     rwC _                  _ = Nothing
 
-    var s f | Just (PElem t) <- M.lookup s f = Just t
-            | otherwise                      = Nothing
+    -- Don't return Just x unless at least one of the arguments were rewritten.
+    -- Avoids wasting optimization fuel when nothing changes.
+    var2 :: (SVar -> SVar -> a) -> SVar -> SVar -> SameStringFact -> Maybe a
+    var2 con s1 s2 f | s1' <- var1 id s1 f, s2' <- var1 id s2 f =
+        if isJust s1' || isJust s2'
+          then Just (con (fromMaybe s1 s1') (fromMaybe s2 s2'))
+          else Nothing
+
+    var1 :: (SVar -> a) -> SVar -> SameStringFact -> Maybe a
+    var1 con s f | Just (PElem t) <- M.lookup s f = Just (con t)
+                 | otherwise                      = Nothing
 
 
 sameStringPass :: FuelMonad m => FwdPass m Insn SameStringFact
-sameStringPass = FwdPass
+sameStringPass = {- debugFwdJoins trace (const True) $ -} FwdPass
   { fp_lattice = constLattice
   , fp_transfer = sameStringTransfer
   , fp_rewrite = sameString }
-
