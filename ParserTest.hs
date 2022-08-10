@@ -106,6 +106,10 @@ tests =
   -- , ("s|foo|\\032|", [Sed Always (subst' "foo" [Literal "&"])])
   -- , ("s|foo|\\32|", [Sed Always (subst' "foo" [Literal "&"])])
   -- , ("s|foo|\\000|", [Sed Always (subst' "foo" [Literal "\0"])])
+
+  -- These (from dc.sed) should be parsed as back references followed by a
+  -- literal number.
+  , ("s/.*/\\38\\37\\30/", [Sed Always (subst' ".*" [BackReference 3, Literal "8", BackReference 3, Literal "7", BackReference 3, Literal "0"])])
   , ("s/./(&)/", [Sed Always (subst' "." [Literal "(", WholeMatch, Literal ")"])])
   -- TODO: fails parsing because of the \xc4. Is it not matched by anyChar or
   -- something? (Note, this isn't a hex escape, it's a byte C4 in the input.)
