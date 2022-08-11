@@ -558,6 +558,11 @@ u2/g' lines1
 		echo 'eeefff' | $SED -e 'p' -e 's/e/X/p' -e ':x' \
 		    -e 's//Y/p' -e '/f/bx'
 	fi
+	# Check that all 9 back references work.
+	mark '8.17' ; echo '123456789' | $SED -e 's/\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)/\9\8\7\6\5\4\3\2\1/g'
+	# Actually works fine without setting REG_NOTBOL properly. Seems to be
+	# implied when REG_STARTEND is used with a positive offset.
+	mark '8.18' ; echo 'aaa' | $SED -e 's/^a/b/g'
 }
 
 test_sedition()
