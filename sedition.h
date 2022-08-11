@@ -34,17 +34,6 @@ static int inputFileIndex;
 // String functions
 //
 
-static void ensure_len_discard(string* s, size_t n)
-{
-    if (n > s->alloc) {
-        free(s->buf);
-        s->buf = malloc(n);
-        if (!s->buf) abort();
-        s->alloc = malloc_usable_size(s->buf);
-        s->len = 0;
-    }
-}
-
 static size_t grow(size_t prev, size_t min)
 {
     const size_t plus10 = prev + prev / 10;
@@ -52,11 +41,32 @@ static size_t grow(size_t prev, size_t min)
     return min > plus10 ? min : plus10;
 }
 
+static void ensure_len_discard(string* s, size_t n)
+{
+    if (n > s->alloc) {
+        n = grow(s->alloc, n);
+        if (s->alloc) {
+            free(s->buf);
+        }
+        s->buf = malloc(n);
+        if (!s->buf) abort();
+        s->alloc = malloc_usable_size(s->buf);
+        s->len = 0;
+    }
+}
+
 static void ensure_len(string* s, size_t n)
 {
     if (n > s->alloc) {
         n = grow(s->alloc, n);
-        s->buf = realloc(s->buf, n);
+        if (s->alloc == 0) {
+            // Copy static string to new heap buffer.
+            char *new_buf = malloc(n);
+            memcpy(new_buf, s->buf, s->len);
+            s->buf = new_buf;
+        } else {
+            s->buf = realloc(s->buf, n);
+        }
         if (!s->buf) abort();
         s->alloc = malloc_usable_size(s->buf);
     }
@@ -64,12 +74,21 @@ static void ensure_len(string* s, size_t n)
 
 static void free_string(string* s)
 {
-    free(s->buf);
+    if (s->alloc > 0) {
+        free(s->buf);
+    }
     s->alloc = s->len = 0;
     s->buf = 0;
 }
 
-static void store_cstr(string* dst, const char* src, size_t n)
+static void set_str_const(string* dst, const char* src, size_t n)
+{
+    dst->alloc = 0;
+    dst->buf = (char*)src;
+    dst->len = n;
+}
+
+static void copy_cstr(string* dst, const char* src, size_t n)
 {
     ensure_len_discard(dst, n);
     memcpy(dst->buf, src, n);
@@ -113,10 +132,7 @@ static void concat(string* dst, string* a, string* b)
 
 static void concat_inplace(string* dst, string* b)
 {
-    const size_t n = dst->len + b->len;
-    ensure_len(dst, n);
-    memcpy(dst->buf + dst->len, b->buf, b->len);
-    dst->len = n;
+    append_str(dst, b->buf, b->len);
 }
 
 static void substring(string* dst, string* src, size_t i1, size_t i2)
@@ -193,7 +209,7 @@ static void format_int(string* dst, int i)
 {
     char temp[32];
     snprintf(temp, sizeof(temp), "%d", i);
-    store_cstr(dst, temp, strlen(temp));
+    copy_cstr(dst, temp, strlen(temp));
 }
 
 //

@@ -195,7 +195,7 @@ compileInsn (IR.ShellExec svar) = sfun "shell_exec" [string svar]
 setLastRegex re = stmt (lastRegex <> " = " <> cstring (reString re))
 
 setString :: IR.SVar -> IR.StringExpr -> Builder
-setString t (IR.SConst s) = fun "store_cstr" [string t, cstring s, intDec (C.length s)]
+setString t (IR.SConst s) = fun "set_str_const" [string t, cstring s, intDec (C.length s)]
 setString t (IR.SVarRef svar) = fun "copy" [string t, string svar]
 setString t (IR.SRandomString) = fun "random_string" [string t]
 setString t (IR.STrans from to s) =
