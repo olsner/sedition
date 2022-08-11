@@ -205,7 +205,9 @@ static void match_regexp(match_t* m, string* s, const char* regexp, int cflags,
 {
     memset(m, 0, sizeof(*m));
 
-    if (offset >= s->len) {
+    // Stop matching when we've consumed the whole string, but allow a zero
+    // length match if it comes first?
+    if (offset && offset >= s->len) {
         return;
     }
 
