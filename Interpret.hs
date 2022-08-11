@@ -242,7 +242,9 @@ getPred (IR.Pred n) = S.member n . predicates <$> get
 setString :: IR.SVar -> S -> SedM ()
 setString (IR.SVar n) value =
     modify $ \s -> s { strings = M.insert n value (strings s) }
-getString (IR.SVar n) = gets (fromJust . M.lookup n . strings)
+-- TODO Figure out why synsedizer triggers a fromJust error here... we
+-- shouldn't be reading unset strings...
+getString (IR.SVar n) = gets (fromMaybe "" . M.lookup n . strings)
 
 setMatch :: IR.MVar -> Match -> SedM ()
 setMatch (IR.MVar n) value =
