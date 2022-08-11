@@ -163,8 +163,7 @@ data SedState program = SedState
   { program :: program
   , files :: Map Int File
   , lineNumber :: Int
-  , lastRegex :: Maybe RE
-  , extendedRegex :: Bool
+  , lastRegex :: Maybe IR.RE
   , predicates :: Set Int
   , strings :: Map Int S
   , matches :: Map Int Match
@@ -202,7 +201,7 @@ forkIPCState (Just state) = do
   _ <- forkIO (busRider passenger box)
   return $ Just state { passenger = passenger, box = Mailbox box }
 
-initialState ipc ere pgm file0 = do
+initialState ipc pgm file0 = do
   ipcState <- if ipc then Just <$> newIPCState else return Nothing
   return SedState {
     program = pgm
@@ -213,7 +212,6 @@ initialState ipc ere pgm file0 = do
   , lastRegex = Nothing
   , predicates = S.empty
   , ipcState = ipcState
-  , extendedRegex = ere
   }
 forkState pgm = get >>= \state -> liftIO $ do
   ipcState' <- forkIPCState (ipcState state)
@@ -326,20 +324,15 @@ runIR (IR.ShellExec svar) = do
 --runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
 
 setLastRegex re = modify $ \state -> state { lastRegex = Just re }
-getLastRegex :: StateT (SedState p) IO RE
+getLastRegex :: StateT (SedState p) IO IR.RE
 getLastRegex = gets $ \SedState { lastRegex = last } -> case last of
     Just re -> re
     Nothing -> fatal "no previous regular expression"
 
-checkRE svar (RE _ bre ere) = do
-  p <- getString svar
-  re <- gets (selectRegex bre ere . extendedRegex)
-  -- TODO Use matchonce instead and clean up all the old Subst stuff that the
-  -- IR lowering handles now. After fixing it so it actually works, that is.
-  return (matchAll re p)
-
-selectRegex _ ere True = ere
-selectRegex bre _ False = bre
+-- TODO Use matchOnce instead to avoid unnecessary work. (NextMatch handling
+-- gets more tricky since it will need to know how to "continue" after a
+-- previous match.)
+checkRE svar (IR.RE _ re) = matchAll re <$> getString svar
 
 evalStringExpr :: IR.StringExpr -> SedM S
 evalStringExpr (IR.SConst s) = return s
@@ -514,8 +507,8 @@ hasPendingIPC (Just (IPCState { box = Mailbox mvar })) = do
       _ -> return False
 hasPendingIPC _ = return False
 
-runProgram :: Bool -> Bool -> (H.Label, Program) -> File -> IO ExitCode
-runProgram ipc ere (label, program) file0 = do
-    state <- initialState ipc ere program file0
+runProgram :: Bool -> (H.Label, Program) -> File -> IO ExitCode
+runProgram ipc (label, program) file0 = do
+    state <- initialState ipc program file0
     evalStateT (runIRLabel label) state
     return ExitSuccess

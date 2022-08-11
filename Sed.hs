@@ -136,7 +136,7 @@ do_main args = do
     exitSuccess
 
   tStartGenerateIR <- timestamp
-  let (entryLabel, program) = toIR autoprint seds
+  let (entryLabel, program) = toIR autoprint extendedRegexps seds
   tEndGenerateIR <- program `seq` timestamp
 
   when (dumpOriginalIR) $
@@ -188,7 +188,7 @@ do_main args = do
         then runExecutable exeOutputFile inputs
         else do
           file0 <- inputListFile (map C.unpack inputs)
-          runProgram enableIPC extendedRegexps (entryLabel,program') file0
+          runProgram enableIPC (entryLabel,program') file0
       tProgEnd <- timestamp
 
       when timeIt $ do

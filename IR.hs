@@ -16,6 +16,8 @@ import qualified Data.Set as S
 
 import System.Exit
 
+import Text.Regex.Posix
+
 import AST hiding (Cmd(..), Address(..), Label)
 import qualified AST
 
@@ -69,6 +71,30 @@ data SIndex
 newtype MVar = MVar Int deriving (Ord,Eq)
 instance Show MVar where
   show (MVar n) = "M" ++ show n
+
+-- TODO Replace with a "register" kind of thing and explicit compilation of
+-- regular expressions? It's mainly for the benefit of the compiler's output
+-- to have a predefined ID per regular expression and an explicit operation
+-- that does compilation, avoiding having to add statefulness to it.
+-- The IR pass could merge similar regexes, but there's likely not much point
+-- to that.
+data RE = RE S Regex
+
+instance Show RE where
+  show (RE s _) = show s
+instance Eq RE where
+  RE s _ == RE t _ = s == t
+instance Ord RE where
+  compare (RE s _) (RE t _) = compare s t
+
+reString (RE s _) = s
+
+compileRE :: Maybe S -> IRM (Maybe RE)
+compileRE (Just s) = gets (Just . RE s . selectSyntax . extendedRegexps)
+  where
+    selectSyntax False = makeRegexOpts blankCompOpt defaultExecOpt s
+    selectSyntax True  = makeRegexOpts compExtended defaultExecOpt s
+compileRE Nothing = return Nothing
 
 -- Note that we can't immediately replace the "last regexp" state with a match
 -- variable since pattern space may be modified between calls, or it may be
@@ -141,6 +167,7 @@ type Program = Graph IR.Insn C C
 data IRState = State
   { firstFreeUnique :: Unique
   , autoprint :: Bool
+  , extendedRegexps :: Bool
   , sourceLabels :: Map S Label
   , holdSpaces :: Map S SVar
   , externalFiles :: Map (S, Bool) FD
@@ -156,9 +183,10 @@ instance Show (Graph Insn e x) where
 
 invalidLabel :: String -> Label
 invalidLabel s = error ("Invalid label: " ++ s)
-startState autoprint = State
+startState autoprint ere = State
   { firstFreeUnique = firstNormalPred
   , autoprint = autoprint
+  , extendedRegexps = ere
   , sourceLabels = M.empty
   , holdSpaces = M.empty
   , externalFiles = M.empty
@@ -321,8 +349,8 @@ ifCheck c tx fx = do
 
 type IRM = State IRState
 
-toIR :: Bool -> [Sed] -> (Label, Graph Insn C C)
-toIR autoprint seds = evalState go (startState autoprint)
+toIR :: Bool -> Bool -> [Sed] -> (Label, Graph Insn C C)
+toIR autoprint ere seds = evalState go (startState autoprint ere)
   where
    go = do
     entry <- newLabel
@@ -466,7 +494,7 @@ emitMatch match = withMatch $ \m -> emit (SetM m match) >> return m
 
 tCheck (AST.Line 0) = return pPreFirst
 tCheck (AST.Line n) = emitNewPred (Line n)
-tCheck (AST.Match mre) = fst <$> tCheckMatch mre
+tCheck (AST.Match mre) = fst <$> (tCheckMatch =<< compileRE mre)
 tCheck (AST.IRQ) = return pIntr
 tCheck (AST.EOF) = emitNewPred (AtEOF 0)
 
@@ -570,7 +598,7 @@ tCmd (AST.Delete) = branchNextCycleNoPrint
 tCmd (AST.Redirect dst (Just src)) = emit (Redirect dst src)
 tCmd (AST.Redirect dst Nothing) = emit (CloseFile dst)
 tCmd (AST.Subst mre sub flags actions) = do
-  (p, m) <- tCheckMatch mre
+  (p, m) <- tCheckMatch =<< compileRE mre
   tWhen p $ do
     setLastSubst True
     s <- tSubst m sPattern sub flags

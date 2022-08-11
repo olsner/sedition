@@ -15,7 +15,7 @@ import System.Exit
 
 import AST
 import qualified IR
-import IR (Program)
+import IR (Program, reString)
 
 seditionRuntime = $(embedStringFile "sedition.h")
 
