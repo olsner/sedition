@@ -222,7 +222,8 @@ static void match_regexp(match_t* m, string* s, const char* regexp, int cflags,
     m->cflags = cflags;
     m->matches[0].rm_so = offset;
     m->matches[0].rm_eo = s->len;
-    res = regexec(&re, s->buf, MAXGROUP, m->matches, REG_STARTEND);
+    const int flags = offset ? REG_NOTBOL : 0;
+    res = regexec(&re, s->buf, MAXGROUP, m->matches, REG_STARTEND | flags);
     if (res != 0 && res != REG_NOMATCH) {
         fprintf(stderr, "regexec: error %d in %s\n", res, regexp);
         abort();
