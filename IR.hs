@@ -16,8 +16,6 @@ import qualified Data.Set as S
 
 import System.Exit
 
-import Text.Regex.Posix
-
 import AST hiding (Cmd(..), Address(..), Label)
 import qualified AST
 
@@ -72,29 +70,20 @@ newtype MVar = MVar Int deriving (Ord,Eq)
 instance Show MVar where
   show (MVar n) = "M" ++ show n
 
--- TODO Replace with a "register" kind of thing and explicit compilation of
--- regular expressions? It's mainly for the benefit of the compiler's output
--- to have a predefined ID per regular expression and an explicit operation
--- that does compilation, avoiding having to add statefulness to it.
--- The IR pass could merge similar regexes, but there's likely not much point
--- to that.
-data RE = RE S Regex
-
+newtype RE = RE Int deriving (Ord,Eq)
 instance Show RE where
-  show (RE s _) = show s
-instance Eq RE where
-  RE s _ == RE t _ = s == t
-instance Ord RE where
-  compare (RE s _) (RE t _) = compare s t
+  show (RE n) = "R" ++ show n
 
-reString (RE s _) = s
+newRE :: IRM RE
+newRE = RE <$> freshUnique
 
 compileRE :: Maybe S -> IRM (Maybe RE)
-compileRE (Just s) = gets (Just . RE s . selectSyntax . extendedRegexps)
-  where
-    selectSyntax False = makeRegexOpts blankCompOpt defaultExecOpt s
-    selectSyntax True  = makeRegexOpts compExtended defaultExecOpt s
 compileRE Nothing = return Nothing
+compileRE (Just s) = do
+    ext <- gets extendedRegexps
+    r <- newRE
+    emit (CompileRE r s ext)
+    return (Just r)
 
 -- Note that we can't immediately replace the "last regexp" state with a match
 -- variable since pattern space may be modified between calls, or it may be
@@ -132,6 +121,7 @@ data Insn e x where
   Print         :: FD -> SVar               -> Insn O O
   Message       :: SVar                     -> Insn O O
 
+  CompileRE     :: RE -> S -> Bool        -> Insn O O
   SetLastRE     :: RE                       -> Insn O O
 
   ShellExec     :: SVar                     -> Insn O O
@@ -743,6 +733,8 @@ allFiles :: Program -> Set FD
 allFiles graph = foldGraphNodes (S.union . usedFiles) graph S.empty
 allMatches :: Program -> Set MVar
 allMatches graph = foldGraphNodes (S.union . usedMatches) graph S.empty
+allRegexps :: Program -> Set RE
+allRegexps graph = foldGraphNodes (S.union . usedRegexps) graph S.empty
 
 usedFiles :: Insn e x -> Set FD
 usedFiles (Print i _) = S.singleton i
@@ -815,3 +807,10 @@ condUsedStrings _ = S.empty
 
 condUsedFiles (AtEOF i) = S.singleton i
 condUsedFiles _ = S.empty
+
+-- Every regexp is compiled if it is used anywhere, so don't bother checking
+-- other instrucitons :) Unless we add a dead regexp pass somewhere?
+usedRegexps :: Insn e x -> Set RE
+usedRegexps (CompileRE re _ _) = S.singleton re
+usedRegexps _ = S.empty
+

@@ -100,9 +100,9 @@ getScript options inputs = case scripts options of
     ss <- flagScript options
     return (ss, inputs)
 
-compileProgram :: Bool -> Bool -> (H.Label, Program) -> FilePath -> IO ()
-compileProgram ipc ere (label, program) ofile = do
-    let compiled = compileIR ipc ere label program
+compileProgram :: Bool -> (H.Label, Program) -> FilePath -> IO ()
+compileProgram ipc (label, program) ofile = do
+    let compiled = compileIR ipc label program
     C.writeFile ofile compiled
 
 compileC cFile exeFile = rawSystem "cc" ["-g", "-Og", cFile, "-o", exeFile]
@@ -163,7 +163,7 @@ do_main args = do
   flip catch exitWith $ do
     when compileIt $ do
       tCompileStart <- timestamp
-      compileProgram enableIPC extendedRegexps (entryLabel, program') cOutputFile
+      compileProgram enableIPC (entryLabel, program') cOutputFile
       tCompileEnd <- timestamp
 
       when timeIt $ do

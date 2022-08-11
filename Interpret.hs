@@ -32,7 +32,7 @@ import System.IO.Unsafe
 import System.Random
 
 import Text.Printf (printf)
-import Text.Regex.Base hiding (match)
+import Text.Regex.Posix hiding (match)
 
 import AST
 import Bus
@@ -157,16 +157,26 @@ hMaybeGetLine h = do
     if eof then pure Nothing
            else Just <$> C.hGetLine h
 
+data RE = RE S Regex
+
+instance Show RE where
+  show (RE s _) = show s
+instance Eq RE where
+  RE s _ == RE t _ = s == t
+instance Ord RE where
+  compare (RE s _) (RE t _) = compare s t
+
 type Match = [MatchArray]
 
 data SedState program = SedState
   { program :: program
   , files :: Map Int File
   , lineNumber :: Int
-  , lastRegex :: Maybe IR.RE
+  , lastRegex :: Maybe Int
   , predicates :: Set Int
   , strings :: Map Int S
   , matches :: Map Int Match
+  , regexps :: Map Int RE
 
   , ipcState :: Maybe IPCState
 }
@@ -209,6 +219,7 @@ initialState ipc pgm file0 = do
   , lineNumber = 0
   , strings = M.empty
   , matches = M.empty
+  , regexps = M.empty
   , lastRegex = Nothing
   , predicates = S.empty
   , ipcState = ipcState
@@ -267,7 +278,7 @@ runIR (IR.SetP p cond) = setPred p =<< case cond of
   IR.IsMatch m -> not . null <$> getMatch m
 runIR (IR.SetS s expr) = setString s =<< evalStringExpr expr
 runIR (IR.SetM m expr) = setMatch m =<< case expr of
-  IR.Match svar re -> checkRE svar re
+  IR.Match svar re -> checkRE svar =<< getRegex re
   IR.MatchLastRE svar -> checkRE svar =<< getLastRegex
   IR.NextMatch m2 _ -> tail <$> getMatch m2
   IR.MVarRef m2 -> getMatch m2
@@ -293,6 +304,7 @@ runIR (IR.Fork entry next) = do
 runIR (IR.Redirect i j) = redirectFile i j
 runIR (IR.CloseFile i) = closeFile i
 
+runIR (IR.CompileRE re s ere) = setRegex re (compileRE s ere)
 runIR (IR.SetLastRE re) = setLastRegex re
 runIR (IR.Message s) = doMessage =<< getString s
 
@@ -323,16 +335,32 @@ runIR (IR.ShellExec svar) = do
 
 --runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
 
-setLastRegex re = modify $ \state -> state { lastRegex = Just re }
-getLastRegex :: StateT (SedState p) IO IR.RE
-getLastRegex = gets $ \SedState { lastRegex = last } -> case last of
-    Just re -> re
-    Nothing -> fatal "no previous regular expression"
+setRegex :: IR.RE -> RE -> SedM ()
+setRegex (IR.RE n) re = modify $ \s -> s { regexps = f (regexps s) }
+  -- TODO Map probably has one of these insert-but-don't-replace functions...
+  where f rvars | Just _ <- M.lookup n rvars = rvars
+                | otherwise                  = M.insert n re rvars
+
+getRegex (IR.RE n) = gets (fromJust . M.lookup n . regexps)
+
+setLastRegex (IR.RE n) = modify $ \state -> state { lastRegex = Just n }
+getLastRegex :: SedM RE
+getLastRegex = do
+    last <- gets lastRegex
+    case last of
+      Just n  -> getRegex (IR.RE n)
+      Nothing -> fatal "no previous regular expression"
+
+compileRE :: S -> Bool -> RE
+compileRE s ere = RE s (makeRegexOpts compOpt defaultExecOpt s)
+  where
+    compOpt | ere       = compExtended
+            | otherwise = blankCompOpt
 
 -- TODO Use matchOnce instead to avoid unnecessary work. (NextMatch handling
 -- gets more tricky since it will need to know how to "continue" after a
 -- previous match.)
-checkRE svar (IR.RE _ re) = matchAll re <$> getString svar
+checkRE svar (RE _ re) = matchAll re <$> getString svar
 
 evalStringExpr :: IR.StringExpr -> SedM S
 evalStringExpr (IR.SConst s) = return s

@@ -16,11 +16,17 @@
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
 
+struct re_t {
+    bool init;
+    regex_t regex;
+    const char *str;
+};
+typedef struct re_t re_t;
+
 #define MAXGROUP 9
 struct match_t {
-    // State for next_match
-    const char *regexp;
-    int cflags;
+    // Possible required for next_match
+    const re_t *regex;
 
     bool result;
     regmatch_t matches[MAXGROUP + 1];
@@ -216,8 +222,27 @@ static void format_int(string* dst, int i)
 // Regex functions
 //
 
-static void match_regexp(match_t* m, string* s, const char* regexp, int cflags,
-                         size_t offset)
+static void compile_regexp(re_t* re, const char* regexp, bool ere)
+{
+    if (re->init) {
+        return;
+    }
+
+    int res = regcomp(&re->regex, regexp, ere ? REG_EXTENDED : 0);
+    if (res) {
+        fprintf(stderr, "regcomp: error %d in %s\n", res, regexp);
+        abort();
+    }
+    re->init = true;
+    re->str = regexp;
+}
+
+static void free_regexp(re_t* re)
+{
+    regfree(&re->regex);
+}
+
+static void match_regexp(match_t* m, string* s, const re_t* regex, size_t offset)
 {
     memset(m, 0, sizeof(*m));
 
@@ -227,25 +252,16 @@ static void match_regexp(match_t* m, string* s, const char* regexp, int cflags,
         return;
     }
 
-    regex_t re;
-    int res = regcomp(&re, regexp, cflags);
-    if (res) {
-        fprintf(stderr, "regcomp: error %d in %s\n", res, regexp);
-        abort();
-    }
-
-    m->regexp = regexp;
-    m->cflags = cflags;
+    m->regex = regex;
     m->matches[0].rm_so = offset;
     m->matches[0].rm_eo = s->len;
     // REG_STARTEND with non-zero offset seems to imply REG_NOTBOL in glibc.
-    const int flags = offset ? REG_NOTBOL : 0;
-    res = regexec(&re, s->buf, MAXGROUP + 1, m->matches, REG_STARTEND | flags);
+    const int flags = REG_STARTEND | (offset ? REG_NOTBOL : 0);
+    int res = regexec(&regex->regex, s->buf, MAXGROUP + 1, m->matches, flags);
     if (res != 0 && res != REG_NOMATCH) {
-        fprintf(stderr, "regexec: error %d in %s\n", res, regexp);
+        fprintf(stderr, "regexec: error %d in %s\n", res, regex->str);
         abort();
     }
-    regfree(&re);
     m->result = (res == 0);
 }
 
@@ -256,7 +272,7 @@ static void copy_match(match_t* dst, match_t* src)
 
 static void next_match(match_t* dst, match_t* src, string* s)
 {
-    match_regexp(dst, s, src->regexp, src->cflags, src->matches[0].rm_eo);
+    match_regexp(dst, s, src->regex, src->matches[0].rm_eo);
 }
 
 //

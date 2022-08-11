@@ -15,25 +15,27 @@ import System.Exit
 
 import AST
 import qualified IR
-import IR (Program, reString)
+import IR (Program)
 
 seditionRuntime = $(embedStringFile "sedition.h")
 
-programHeader ere program =
+programHeader program =
     "/* ^ runtime system */\n\
     \/* v compiled program */\n\
     \int main(int argc, const char *argv[]) {\n\
     \bool hasPendingIPC = false;\n\
     \int exit_status = EXIT_SUCCESS;\n\
-    \const char* lastRegex = NULL;\n" <>
+    \const re_t* lastRegex = NULL;\n" <>
     foldMap (declare "bool" pred " = false") preds <>
     foldMap (declare "string" stringvar mempty) strings <>
     foldMap (declare "FILE*" infd " = NULL") files <>
     foldMap (declare "FILE*" outfd " = NULL") files <>
     foldMap (declare "match_t" match mempty) matches <>
+    foldMap (declare "re_t" regexvar mempty) regexps <>
+    -- TODO Make things static again to get rid of the need for so much init
     foldMap (clear match) matches <>
     foldMap (clear stringvar) strings <>
-    "const int re_cflags = " <> cflags <> ";\n" <>
+    foldMap (clear regexvar) regexps <>
     infd 0 <> " = next_input(argc, argv);\n" <>
     outfd 0 <> " = stdout;\n"
   where
@@ -43,8 +45,7 @@ programHeader ere program =
     strings = IR.allStrings program
     files = IR.allFiles program
     matches = IR.allMatches program
-    cflags | ere       = "REG_EXTENDED"
-           | otherwise = "0"
+    regexps = IR.allRegexps program
 
 programFooter program = "exit:\n" <>
     foldMap closeFile files <>
@@ -53,10 +54,10 @@ programFooter program = "exit:\n" <>
   where
     files = IR.allFiles program
 
-compileIR :: Bool -> Bool -> H.Label -> Program -> S
-compileIR _ipc ere entry program = L.toStrict . toLazyByteString $
+compileIR :: Bool -> H.Label -> Program -> S
+compileIR _ipc entry program = L.toStrict . toLazyByteString $
   seditionRuntime
-  <> programHeader ere program
+  <> programHeader program
   <> goto entry
   <> foldMap compileBlock blocks
   <> programFooter program
@@ -86,10 +87,13 @@ match (IR.MVar m) = "M" <> intDec m
 matchref (IR.MVar m) = "&M" <> intDec m
 infd i = "inF" <> idIntDec i
 outfd i = "outF" <> idIntDec i
+
+regexvar (IR.RE i) = "RE" <> intDec i
+regex r = "&" <> regexvar r
+
 lineNumber = "lineNumber"
 hasPendingIPC = "hasPendingIPC"
 lastRegex = "lastRegex"
-re_cflags = "re_cflags"
 
 cstring s = "\"" <> foldMap quoteC (C.unpack s) <> "\""
   where
@@ -131,8 +135,8 @@ cIf cond t f = fun "if" [cond] <> "{\n  " <> t <> "} else {\n  " <> f <> "}\n"
 --cWhen cond t = fun "if" [cond] <> "{\n  " <> t <> "}\n"
 cWhile cond t = fun "while" [cond] <> "{\n  " <> t <> "}\n"
 
-compileMatch m (IR.Match svar re) = fun "match_regexp" [matchref m, string svar, cstring (reString re), re_cflags, "0"]
-compileMatch m (IR.MatchLastRE svar) = fun "match_regexp" [matchref m, string svar, lastRegex, re_cflags, "0"]
+compileMatch m (IR.Match svar re) = fun "match_regexp" [matchref m, string svar, regex re, "0"]
+compileMatch m (IR.MatchLastRE svar) = fun "match_regexp" [matchref m, string svar, lastRegex, "0"]
 compileMatch m (IR.NextMatch m2 s) = fun "next_match" [matchref m, matchref m2, string s]
 compileMatch m (IR.MVarRef m2) = fun "copy_match" [matchref m, matchref m2]
 
@@ -161,6 +165,7 @@ compileInsn (IR.Redirect i j) =
   stmt (infd j <> " = NULL")
 compileInsn (IR.CloseFile i) = closeFile i
 
+compileInsn (IR.CompileRE re s ere) = sfun "compile_regexp" [regex re, cstring s, bool ere]
 compileInsn (IR.SetLastRE re) = setLastRegex re
 compileInsn (IR.Message s) = sfun "send_message" [string s]
 
@@ -192,7 +197,7 @@ compileInsn (IR.ShellExec svar) = sfun "shell_exec" [string svar]
 
 --compileInsn cmd = fatal ("compileInsn: Unhandled instruction " ++ show cmd)
 
-setLastRegex re = stmt (lastRegex <> " = " <> cstring (reString re))
+setLastRegex re = stmt (lastRegex <> " = " <> regex re)
 
 setString :: IR.SVar -> IR.StringExpr -> Builder
 setString t (IR.SConst s) = fun "set_str_const" [string t, cstring s, intDec (C.length s)]
