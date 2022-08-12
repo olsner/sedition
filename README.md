@@ -16,6 +16,10 @@ and none of the added sedition features should interfere with GNU ones.
 
 ## Building and Getting Started
 
+* Check out the submodules. Currently forked versions are needed for both
+  regex-posix (to handle embedded NULs) and hoopl (for compat with new GHCs).
+  Build and install them locally. The regex-posix changes requires a libc that
+  implements the `REG_STARTEND` flag.
 * Install ghc and cabal-install, make sure they're in your PATH.
 * Install Haskell prerequisites: `./boot.sh`
 * Build with `make`
