@@ -82,11 +82,6 @@ ugly=(
     inplace-selinux
     nulldata
     obinary
-    # Valgrind tests for bugs.
-    bug32082
-    bug32271-2
-    invalid-mb-seq-UMR
-    newline-dfa-bug
     # Eugh. Multibyte encodings. I think we're simply not going to support
     # that. Input is simply 8-bit bytes (or perhaps ISO-8859-1).
     badenc
@@ -112,8 +107,19 @@ ugly=(
     posix-mode-N
     sandbox
 )
+# valgrind tests are pointless on sedition
+valgrind=(
+    # Valgrind tests for bugs.
+    bug32082
+    bug32271-2
+    invalid-mb-seq-UMR
+    newline-dfa-bug
+)
 
-if [ $# -gt 0 ]; then
+if [ "$1" = "--all" ]; then
+    tests=( ${good[@]} ${bad[@]} ${ugly[@]} )
+    quiet="&>/dev/null"
+elif [ $# -gt 0 ]; then
     tests=( "$@" )
     quiet=
 else
