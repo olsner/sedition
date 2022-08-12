@@ -344,7 +344,6 @@ append
 
 test_branch()
 {
-	echo >&2 Testing labels and branching
 	mark '5.1' ; $SED -n -e '
 b label4
 :label3
@@ -442,7 +441,6 @@ b
 
 test_pattern()
 {
-echo >&2 Pattern space commands
 # Check that the pattern space is deleted
 	mark '6.1' ; $SED -n -e '
 c\
@@ -488,7 +486,6 @@ test_print()
 	mark '7.3' ; $SED -e '3,12w lines4' lines1
 	echo w results
 	cat lines4
-    # TODO Implement ReadFile
 	mark '7.4' ; $SED -e '4r lines2' lines1
     # Seems like /dev/dds is just some device file that doesn't exist.
 	mark '7.5' ; $SED -e '5r /dev/dds' lines1
@@ -561,6 +558,11 @@ u2/g' lines1
 		echo 'eeefff' | $SED -e 'p' -e 's/e/X/p' -e ':x' \
 		    -e 's//Y/p' -e '/f/bx'
 	fi
+	# Check that all 9 back references work.
+	mark '8.17' ; echo '123456789' | $SED -e 's/\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)/\9\8\7\6\5\4\3\2\1/g'
+	# Actually works fine without setting REG_NOTBOL properly. Seems to be
+	# implied when REG_STARTEND is used with a positive offset.
+	mark '8.18' ; echo 'aaa' | $SED -e 's/^a/b/g'
 }
 
 test_sedition()

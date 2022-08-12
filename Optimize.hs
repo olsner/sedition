@@ -15,6 +15,7 @@ import LivePred (livePredPass)
 import LiveString (liveStringPass)
 --import SameString (sameStringPass)
 import RedundantBranches (redundantBranchesPass)
+-- TODO Add liveness pass for match registers
 
 --debugBwd = debugBwdJoins trace (const True)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
@@ -26,11 +27,10 @@ optimizeOnce entry program = do
   (program,_,_) <- analyzeAndRewriteBwd livePredPass entries program mapEmpty
   (program,_,_) <- analyzeAndRewriteFwd constPredPass entries program mapEmpty
   (program,_,_) <- analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
-  -- Realized this isn't safe yet, it doesn't track modifications to variables
-  -- it is optimizing other variables to. (e.g. the hold/pattern swap would
-  -- optimize down to everything getting set to either of the inputs).
-  -- (program,_,_) <- analyzeAndRewriteFwd sameStringPass entries program mapEmpty
   (program,_,_) <- analyzeAndRewriteBwd liveStringPass entries program mapEmpty
+  -- This doesn't seem to do much for runtime, so skip it. Should be more
+  -- relevant when we try to analyze the contents of strings though.
+  --(program,_,_) <- analyzeAndRewriteFwd sameStringPass entries program mapEmpty
   return program
 
 optToFix f original = do

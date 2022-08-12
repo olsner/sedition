@@ -24,7 +24,8 @@ liveLattice = DataflowLattice
               j = new `S.union` old
               ch = changeIf (S.size j > S.size old)
 
--- Operations that write to a string variable kill it
+-- Operations that write to a string variable kill it (i.e. the previous value
+-- is now irrelevant).
 kill :: Insn e x -> LiveStringFact -> LiveStringFact
 kill (SetS s _) = S.delete s
 kill (GetMessage s) = S.delete s
@@ -34,44 +35,60 @@ kill _ = id
 -- Operations that read from a string variable 'gen' it.
 gen :: Insn e x -> LiveStringFact -> LiveStringFact
 gen (SetS _ expr) = genS expr
-gen (PrintLiteral _ _ s) = S.insert s
+gen (AppendS _ s) = S.insert s
 gen (Print _ s) = S.insert s
 gen (Message s) = S.insert s
 gen (ShellExec s) = S.insert s
-gen (WriteFile _ s) = S.insert s
-gen (SetP _ (Match s _)) = S.insert s
-gen (SetP _ (MatchLastRE s)) = S.insert s
+gen (SetM _ expr) = genM expr
 gen _ = id
+
+genM (Match s _) = S.insert s
+genM (MatchLastRE s) = S.insert s
+genM (NextMatch _ s) = S.insert s
+genM (MVarRef _) = id
 
 genS :: StringExpr -> LiveStringFact -> LiveStringFact
 genS (SVarRef s) = S.insert s
 genS (SAppendNL s1 s2) = S.insert s1 . S.insert s2
-genS (SSubst s _ _) = S.insert s
+genS (SAppend s1 s2) = S.insert s1 . S.insert s2
 genS (STrans _ _ s) = S.insert s
+genS (SSubstring s _ _) = S.insert s
+genS (SFormatLiteral _ s) = S.insert s
 genS (SConst _) = id
 genS (SRandomString) = id
+genS (SGetLineNumber) = id
 
 liveStringTransfer :: BwdTransfer Insn LiveStringFact
 liveStringTransfer = mkBTransfer3 first middle last
   where
     first :: Insn C O -> LiveStringFact -> LiveStringFact
     first (Label _)  f = f
-    -- TODO Which order should gen and kill be done to work correctly when a
-    -- variable is both killed and genned? This matches what we do in LivePred.
     middle :: Insn O O -> LiveStringFact -> LiveStringFact
-    middle insn = kill insn . gen insn
+    middle insn = gen insn . kill insn
     last :: Insn O C -> FactBase LiveStringFact -> LiveStringFact
-    last insn = kill insn . gen insn . facts (successors insn)
+    last insn = gen insn . kill insn . facts (successors insn)
 
     fact f l = fromMaybe S.empty (mapLookup l f)
     facts ls f = S.unions (map (fact f) ls)
 
 liveString :: FuelMonad m => BwdRewrite m Insn LiveStringFact
-liveString = mkBRewrite rw
+liveString = mkBRewrite3 norw rw norw
   where
-    rw :: FuelMonad m => Insn e x -> Fact x LiveStringFact -> m (Maybe (Graph Insn e x))
-    rw (SetS s _) f | not (S.member s f) = return (Just emptyGraph)
-    -- Read and GetMessage both have side effects, so don't remove those.
+    remove :: FuelMonad m => m (Maybe (Graph Insn O O))
+    remove = return (Just emptyGraph)
+    replace :: FuelMonad m => [Insn O O] -> m (Maybe (Graph Insn O O))
+    replace new = return (Just (mkMiddles new))
+    dead s f = not (S.member s f)
+
+    norw :: FuelMonad m => Insn e x -> Fact x LiveStringFact -> m (Maybe (Graph Insn e x))
+    norw _ _ = return Nothing
+    rw :: FuelMonad m => Insn O O -> Fact O LiveStringFact -> m (Maybe (Graph Insn O O))
+    rw (SetS s _) f | dead s f = remove
+    rw (SetS s (SAppend s1 s2)) f
+                    | dead s1 f = replace [AppendS s1 s2, SetS s (SVarRef s1)]
+    rw (AppendS s _) f | dead s f = remove
+    -- Read and GetMessage both have side effects, so don't remove those even
+    -- if the result is unused.
     rw _ _ = return Nothing
 
 liveStringPass :: FuelMonad m => BwdPass m Insn LiveStringFact
@@ -79,5 +96,4 @@ liveStringPass = BwdPass
   { bp_lattice = liveLattice
   , bp_transfer = liveStringTransfer
   , bp_rewrite = liveString }
-
 

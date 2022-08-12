@@ -125,7 +125,7 @@ slashWith re term = BS.concat <$> many p <* char term
 stringTerm :: Char -> Parser S
 stringTerm term = slashWith False term
 
-pRegexp :: Char -> Parser (Maybe RE)
+pRegexp :: Char -> Parser (Maybe S)
 pRegexp term = re <$> slashWith True term
 
 -- Parse a replacement and the closing terminator. \ escapes the terminator and

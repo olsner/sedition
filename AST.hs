@@ -4,32 +4,14 @@ module AST where
 
 import System.Exit
 
-import Text.Regex.Posix
-
 import Data.ByteString.Char8 as C
 type S = ByteString
 
--- Keeps both basic and extended here, then selects variant on execution. Just
--- to avoid threading dialects all the way into the parser. (though maybe
--- Trifecta does allow some parser state we can hook into...)
--- Still feels wrong. Maybe this should just be the string, the IR can contain
--- Regex and the IR translation can also have a flag in its monad state for
--- which dialect to compile into.
-data RE = forall r . (RegexLike r S) => RE S r r
 type Label = S
 
-instance Show RE where
-  show (RE s _ _) = show s
-instance Eq RE where
-  RE s _ _ == RE t _ _ = s == t
-instance Ord RE where
-  compare (RE s _ _) (RE t _ _) = compare s t
-
-re :: S -> Maybe RE
+re :: S -> Maybe S
 re s | C.null s  = Nothing
-     | otherwise = Just (RE s bre ere)
-       where bre = makeRegexOpts blankCompOpt defaultExecOpt s
-             ere = makeRegexOpts compExtended defaultExecOpt s
+     | otherwise = Just s
 
 data CaseConv
   = NoConv
@@ -60,7 +42,7 @@ data SubstAction
   | SActionExec
   deriving (Show, Ord, Eq)
 
-data Address = Line Int | Match (Maybe RE) | EOF | IRQ
+data Address = Line Int | Match (Maybe S) | EOF | IRQ
     deriving (Show, Ord, Eq)
 data MaybeAddress
   -- Perhaps the "Always" case should not be here since that allows e.g. (NotAddr Always)
@@ -88,7 +70,7 @@ data Cmd
   | Accept Int Int
   | Redirect Int (Maybe Int)
   -- s///
-  | Subst (Maybe RE) Replacement SubstType SubstAction
+  | Subst (Maybe S) Replacement SubstType SubstAction
   -- y///
   | Trans S S
 
@@ -113,6 +95,7 @@ data Cmd
 
   | ReadFile S
   | WriteFile S
+  -- TODO line variants of r/w (R/W). Need parsing and IR code.
 
   | Message (Maybe S)
 

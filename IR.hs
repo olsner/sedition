@@ -11,6 +11,8 @@ import Control.Monad.Trans.State.Strict
 
 import Data.Map (Map)
 import qualified Data.Map as M
+import Data.Set (Set)
+import qualified Data.Set as S
 
 import System.Exit
 
@@ -30,16 +32,8 @@ data Cond
   | Line Int
   -- current line > l (tested after the first line has been processed)
   | EndLine Int
-  -- Possible extension: explicit "match" registers to track several precomputed
-  -- matches at once, and use that instead of MatchLastRE.
-  -- A complication: pattern space may change but the last regexp is the same,
-  -- so should repeat the match but optimize repeated match against unchanged
-  -- pattern space elsewhere.
-  -- I also think the last regexp is dynamic so we'd need to track a global for
-  -- that similar to internal predicates and string variables.
-  | Match SVar RE
-  | MatchLastRE SVar
   | Bool Bool
+  | IsMatch MVar
   deriving (Show,Eq)
 cTrue = Bool True
 cFalse = Bool False
@@ -49,16 +43,64 @@ data StringExpr
   = SConst S
   | SVarRef SVar
   | SRandomString
-  -- Subst last match against current pattern. See Match TODO about match regs.
-  | SSubst SVar Replacement SubstType
   -- from to string
   | STrans S S SVar
+  -- TODO Replace with more appends and perhaps a predefined svar that contains
+  -- a newline. Also investigate if it's always adding the newline or only when
+  -- the strings are empty, then more code will need to be generated to use
+  -- SAppend.
   | SAppendNL SVar SVar
+  | SAppend SVar SVar
+  | SSubstring SVar SIndex SIndex
+  | SFormatLiteral Int SVar
+  | SGetLineNumber
   deriving (Show,Eq)
 emptyS = SConst ""
 
+data SIndex
+  = SIStart
+  | SIEnd
+  | SIMatchStart MVar
+  | SIMatchEnd MVar
+  | SIGroupStart MVar Int
+  | SIGroupEnd MVar Int
+  deriving (Show,Eq)
+
+newtype MVar = MVar Int deriving (Ord,Eq)
+instance Show MVar where
+  show (MVar n) = "M" ++ show n
+
+newtype RE = RE Int deriving (Ord,Eq)
+instance Show RE where
+  show (RE n) = "R" ++ show n
+
+newRE :: IRM RE
+newRE = RE <$> freshUnique
+
+compileRE :: Maybe S -> IRM (Maybe RE)
+compileRE Nothing = return Nothing
+compileRE (Just s) = do
+    ext <- gets extendedRegexps
+    r <- newRE
+    emit (CompileRE r s ext)
+    return (Just r)
+
+-- Note that we can't immediately replace the "last regexp" state with a match
+-- variable since pattern space may be modified between calls, or it may be
+-- applied to a different string variable.
+data MatchExpr
+  = Match SVar RE
+  | MatchLastRE SVar
+  -- Get a new mvar that starts at match n+1 into mvar. Used for iteration.
+  -- Also needs the source string to continue regexp matching in case all
+  -- matches are not actually captured on the first match.
+  | NextMatch MVar SVar
+  | MVarRef MVar
+  deriving (Show,Eq)
+
 data Insn e x where
   Label         :: Label                    -> Insn C O
+
   Branch        :: Label                    -> Insn O C
   If            :: Pred -> Label -> Label   -> Insn O C
   Fork          :: Label -> Label           -> Insn O C
@@ -72,24 +114,26 @@ data Insn e x where
 
   SetP          :: Pred -> Cond             -> Insn O O
   SetS          :: SVar -> StringExpr       -> Insn O O
-  -- for n/N (which can never accept interrupts)
+  AppendS       :: SVar -> SVar             -> Insn O O
+  SetM          :: MVar -> MatchExpr        -> Insn O O
+  -- for n/N (which can never accept interrupts), and R
   Read          :: SVar -> FD               -> Insn O O
-  PrintConstS   :: FD -> S                  -> Insn O O
-  PrintLineNumber :: FD                     -> Insn O O
-  PrintLiteral  :: Int -> FD -> SVar        -> Insn O O
   Print         :: FD -> SVar               -> Insn O O
   Message       :: SVar                     -> Insn O O
 
+  CompileRE     :: RE -> S -> Bool        -> Insn O O
   SetLastRE     :: RE                       -> Insn O O
 
   ShellExec     :: SVar                     -> Insn O O
-  Listen        :: Int -> (Maybe S) -> Int  -> Insn O O
-  Accept        :: Int -> Int               -> Insn O O
-  Redirect      :: Int -> Int               -> Insn O O
-  CloseFile     :: Int                      -> Insn O O
+  Listen        :: FD -> (Maybe S) -> FD    -> Insn O O
+  Accept        :: FD -> FD                 -> Insn O O
+  Redirect      :: FD -> FD                 -> Insn O O
   Comment       :: String                   -> Insn O O
 
-  WriteFile     :: S -> SVar                -> Insn O O
+  OpenFile      :: FD -> Bool -> S         -> Insn O O
+  -- Reads a whole file at once, where normal Read just reads the next line.
+  ReadFile      :: SVar -> FD               -> Insn O O
+  CloseFile     :: FD                       -> Insn O O
 
 deriving instance Show (Insn e x)
 deriving instance Eq (Insn e x)
@@ -108,11 +152,15 @@ instance HooplNode Insn where
   mkBranchNode = Branch
   mkLabelNode = Label
 
+type Program = Graph IR.Insn C C
+
 data IRState = State
   { firstFreeUnique :: Unique
   , autoprint :: Bool
+  , extendedRegexps :: Bool
   , sourceLabels :: Map S Label
   , holdSpaces :: Map S SVar
+  , externalFiles :: Map (S, Bool) FD
   , nextCycleLabels :: (Label, Label)
   , program :: Graph Insn O O
   }
@@ -125,7 +173,16 @@ instance Show (Graph Insn e x) where
 
 invalidLabel :: String -> Label
 invalidLabel s = error ("Invalid label: " ++ s)
-startState autoprint = State firstNormalPred autoprint M.empty M.empty (dummyCycleLabel, dummyCycleLabel) emptyGraph
+startState autoprint ere = State
+  { firstFreeUnique = firstNormalPred
+  , autoprint = autoprint
+  , extendedRegexps = ere
+  , sourceLabels = M.empty
+  , holdSpaces = M.empty
+  , externalFiles = M.empty
+  , nextCycleLabels = (dummyCycleLabel, dummyCycleLabel)
+  , program = emptyGraph
+  }
 dummyCycleLabel = invalidLabel "uninitialized next-cycle label"
 
 instance Show Pred where
@@ -137,6 +194,7 @@ instance Show Pred where
   show (Pred 5) = "P{has-pattern}"
   show (Pred n) = "P" ++ show n
 
+-- Also includes space for special string and match variables.
 firstNormalPred = 5
 
 pPreFirst = Pred 0
@@ -169,6 +227,7 @@ initBlock l = mkLabel l
 
 newLabel = freshLabel
 newPred = Pred <$> freshUnique
+newMatch = MVar <$> freshUnique
 
 newString :: IRM SVar
 newString = SVar <$> freshUnique
@@ -182,6 +241,19 @@ withNewString f = do
     next <- newString
     _ <- f next
     return next
+
+getExternalFD :: S -> Bool -> IRM FD
+getExternalFD path write = do
+  prev <- gets externalFiles
+  case M.lookup (path, write) prev of
+    Just fd -> return fd
+    Nothing -> do
+      let fd = nextFd prev
+      modify $ \s -> s { externalFiles = M.insert (path, write) fd prev }
+      return fd
+  where
+    -- Negative FD's for external files
+    nextFd = negate . succ . M.size
 
 setPattern s = setString sPattern s >> emit (SetP pHasPattern cTrue)
 
@@ -267,8 +339,8 @@ ifCheck c tx fx = do
 
 type IRM = State IRState
 
-toIR :: Bool -> [Sed] -> (Label, Graph Insn C C)
-toIR autoprint seds = evalState go (startState autoprint)
+toIR :: Bool -> Bool -> [Sed] -> (Label, Graph Insn C C)
+toIR autoprint ere seds = evalState go (startState autoprint ere)
   where
    go = do
     entry <- newLabel
@@ -281,6 +353,8 @@ checkQueuedOutput =
     emit (Print 0 sOutputQueue)
     setString sOutputQueue =<< emitString emptyS
     emit (SetP pHasQueuedOutput cFalse)
+
+openFile (path, write) fd = emit (OpenFile fd write path)
 
 -- Entry points to generate:
 -- * pre-first line code (if any)
@@ -295,7 +369,8 @@ tProgram seds = mdo
   emit (SetP pPreFirst cTrue)
   emit (SetP pRunNormal cFalse)
 
-  start <- label
+  start <- emitBranch' openUsedFiles
+
   -- Actual normal program here
   tSeds seds
 
@@ -335,6 +410,11 @@ tProgram seds = mdo
 
   emit (SetP pPreFirst cFalse)
   emit (SetP pRunNormal cFalse)
+
+  openUsedFiles <- emitBranch' start
+
+  filesToOpen <- gets (M.toList . externalFiles)
+  mapM_ (uncurry openFile) filesToOpen
 
   exit <- emitBranch' start
 
@@ -397,16 +477,26 @@ withCond' (NotAddr addr) whenTrue whenFalse = withCond' addr whenFalse whenTrue
 withCond addr x = withCond' addr x (return ())
 
 withNewPred f = newPred >>= \p -> f p >> return p
-emitNewPred cond = withNewPred $ \p -> emit (SetP p cond)
+emitNewPred cond = withNewPred $ \p -> emit (SetP p cond) >> return p
+
+withMatch f = newMatch >>= \m -> f m >> return m
+emitMatch match = withMatch $ \m -> emit (SetM m match) >> return m
 
 tCheck (AST.Line 0) = return pPreFirst
 tCheck (AST.Line n) = emitNewPred (Line n)
-tCheck (AST.Match (Just re)) = withNewPred $ \p -> do
-    emit (SetP p (Match sPattern re))
-    emit (SetLastRE re)
-tCheck (AST.Match Nothing) = emitNewPred (MatchLastRE sPattern)
+tCheck (AST.Match mre) = fst <$> (tCheckMatch =<< compileRE mre)
 tCheck (AST.IRQ) = return pIntr
 tCheck (AST.EOF) = emitNewPred (AtEOF 0)
+
+tCheckMatch (Just re) = do
+    m <- emitMatch (Match sPattern re)
+    p <- emitNewPred (IsMatch m)
+    emit (SetLastRE re)
+    return (p, m)
+tCheckMatch Nothing = do
+    m <- emitMatch (MatchLastRE sPattern)
+    p <- emitNewPred (IsMatch m)
+    return (p, m)
 
 tSed :: Sed -> IRM ()
 tSed (Sed Always (AST.Block xs)) = tSeds xs
@@ -440,8 +530,12 @@ readString fd = do
 tCmd :: AST.Cmd -> IRM ()
 tCmd (AST.Block xs) = tSeds xs
 tCmd (AST.Print fd) = tWhen pHasPattern $ emit (Print fd sPattern)
-tCmd (AST.PrintLineNumber fd) = emit (PrintLineNumber fd)
-tCmd (AST.PrintLiteral width) = tWhen pHasPattern $ emit (PrintLiteral width 0 sPattern)
+tCmd (AST.PrintLineNumber fd) = do
+    s <- emitString SGetLineNumber
+    emit (Print fd s)
+tCmd (AST.PrintLiteral width) = tWhen pHasPattern $ do
+    s <- emitString (SFormatLiteral width sPattern)
+    emit (Print 0 s)
 tCmd (AST.Message Nothing) = tWhen pHasPattern $ emit (Message sPattern)
 tCmd (AST.Message (Just s)) = do
     tmp <- emitCString s
@@ -487,17 +581,17 @@ tCmd (AST.Clear) = do
     t <- emitString emptyS
     setString sPattern t
     emit (SetP pHasPattern cFalse)
-tCmd (AST.Change replacement) = do
-    emit (PrintConstS 0 replacement)
+tCmd (AST.Change s) = do
+    emitCString s >>= \s -> emit (Print 0 s)
     branchNextCycleNoPrint
 tCmd (AST.Delete) = branchNextCycleNoPrint
 tCmd (AST.Redirect dst (Just src)) = emit (Redirect dst src)
 tCmd (AST.Redirect dst Nothing) = emit (CloseFile dst)
 tCmd (AST.Subst mre sub flags actions) = do
-  p <- tCheck (AST.Match mre)
+  (p, m) <- tCheckMatch =<< compileRE mre
   tWhen p $ do
     setLastSubst True
-    s <- emitString (SSubst sPattern sub flags)
+    s <- tSubst m sPattern sub flags
     setPattern s
     tSubstAction actions s
 tCmd (AST.Trans from to) = do
@@ -529,23 +623,18 @@ tCmd (AST.Exchange maybeReg) = do
     tmp <- emitString (SVarRef space)
     setString space sPattern
     setString sPattern tmp
-tCmd (AST.Insert s) = emit (PrintConstS 0 s)
-tCmd (AST.Append s) = do
-    tIf pHasQueuedOutput ifTrue ifFalse
-  where
-    -- already set to true, so no need to update predicate. Just append to
-    -- the queue.
-    ifTrue = do
-        temp <- emitCString s
-        temp2 <- emitString (SAppendNL sOutputQueue temp)
-        setString sOutputQueue temp2
-    -- If there's no queued output yet, we know we can simply replace the
-    -- queued output with a constant.
-    ifFalse = do
-        emit (SetP pHasQueuedOutput cTrue)
-        temp <- emitCString s
-        setString sOutputQueue temp
-tCmd (AST.WriteFile path) = emit (WriteFile path sPattern)
+tCmd (AST.Insert s) = emitCString s >>= \s -> emit (Print 0 s)
+tCmd (AST.Append s) = tAppendOutputQueue =<< emitCString s
+tCmd (AST.ReadFile path) = do
+    fd <- getExternalFD path False
+    p <- emitNewPred (AtEOF fd)
+    tWhenNot p $ do
+        s <- newString
+        emit (ReadFile s fd)
+        tAppendOutputQueue s
+tCmd (AST.WriteFile path) = do
+    fd <- getExternalFD path True
+    emit (Print fd sPattern)
 tCmd (AST.Quit print status) = () <$ do
   when print $ do
     printIfAuto
@@ -553,10 +642,76 @@ tCmd (AST.Quit print status) = () <$ do
   finishBlock' (Quit status)
 tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
 
+tAppendOutputQueue s = tIf pHasQueuedOutput ifTrue ifFalse
+  where
+    -- already set to true, so no need to update predicate. Just append to
+    -- the queue.
+    ifTrue = setString sOutputQueue =<< emitString (SAppendNL sOutputQueue s)
+    -- If there's no queued output yet, we know we can simply replace the
+    -- queued output with a constant.
+    ifFalse = do
+        emit (SetP pHasQueuedOutput cTrue)
+        setString sOutputQueue s
+
 tSubstAction SActionNone _ = return ()
 tSubstAction SActionExec res = emit (ShellExec res)
 tSubstAction (SActionPrint n) res = emit (Print n res)
-tSubstAction (SActionWriteFile path) res = emit (WriteFile path res)
+tSubstAction (SActionWriteFile path) res = do
+    fd <- getExternalFD path True
+    emit (Print fd res)
+
+tSub m s sub = case sub of
+  Literal lit -> emitCString lit
+  WholeMatch -> emitString (SSubstring s (SIMatchStart m) (SIMatchEnd m))
+  BackReference i ->
+    emitString (SSubstring s (SIGroupStart m i) (SIGroupEnd m i))
+  SetCaseConv _ -> comment "UNIMPL: case conversion" >> emitString emptyS
+  -- _ -> error (show sub)
+
+tConcat [x] = return x
+tConcat xs  = emitString emptyS >>= go xs
+  where
+    go []     acc = return acc
+    go (x:xs) acc = emit (AppendS acc x) >> go xs acc
+
+tSubs m s subs = tConcat =<< mapM (tSub m s) subs
+
+tSubst m s sub flags = case flags of
+  SubstFirst -> do
+    ss <- mapM (tSub m s) sub
+    -- TODO Analyze the regexp to see if it will always match from the
+    -- beginning and/or to the end of the string.
+    prefix <- emitString (SSubstring s SIStart (SIMatchStart m))
+    suffix <- emitString (SSubstring s (SIMatchEnd m) SIEnd)
+    tConcat ((prefix:ss) ++ [suffix])
+  SubstNth 1 -> tSubst m s sub SubstFirst
+  SubstNth n -> do
+    m' <- emitMatch (NextMatch m s)
+    tSubst m' s sub (SubstNth (n - 1))
+  SubstAll -> mdo
+    sres <- emitString (SSubstring s SIStart (SIMatchStart m))
+    m' <- emitMatch (MVarRef m)
+
+    loop <- label
+
+    mnext <- emitMatch (NextMatch m' s)
+    p <- emitNewPred (IsMatch mnext)
+
+    ss <- mapM (tSub m' s) sub
+    s1 <- tConcat (sres:ss)
+
+    hasNextMatch <- finishBlock' (If p hasNextMatch lastMatch)
+
+    mid <- emitString (SSubstring s (SIMatchEnd m') (SIMatchStart mnext))
+    emit (SetS sres (SAppend s1 mid))
+    emit (SetM m' (MVarRef mnext))
+
+    lastMatch <- emitBranch' loop
+
+    suffix <- emitString (SSubstring s (SIMatchEnd m') SIEnd)
+    emit (SetS sres (SAppend s1 suffix))
+
+    return sres
 
 tTest ifTrue maybeTarget = mdo
   comment ("test " ++ show ifTrue ++ " " ++ show target)
@@ -569,3 +724,93 @@ tTest ifTrue maybeTarget = mdo
   tIf pLastSubst (clear >> emitBranch' t) (clear >> emitBranch' f)
   l <- label
   return ()
+
+allPredicates :: Program -> Set Pred
+allPredicates graph = foldGraphNodes (S.union . usedPredicates) graph S.empty
+allStrings :: Program -> Set SVar
+allStrings graph = foldGraphNodes (S.union . usedStrings) graph S.empty
+allFiles :: Program -> Set FD
+allFiles graph = foldGraphNodes (S.union . usedFiles) graph S.empty
+allMatches :: Program -> Set MVar
+allMatches graph = foldGraphNodes (S.union . usedMatches) graph S.empty
+allRegexps :: Program -> Set RE
+allRegexps graph = foldGraphNodes (S.union . usedRegexps) graph S.empty
+
+usedFiles :: Insn e x -> Set FD
+usedFiles (Print i _) = S.singleton i
+usedFiles (Wait i) = S.singleton i
+usedFiles (Read _ i) = S.singleton i
+usedFiles (Listen i _ _) = S.singleton i
+usedFiles (Accept s c) = S.fromList [s, c]
+usedFiles (Redirect i j) = S.fromList [i, j]
+usedFiles (CloseFile i) = S.singleton i
+usedFiles (ReadFile _ i) = S.singleton i
+usedFiles (OpenFile i _ _) = S.singleton i
+usedFiles (SetP _ c) = condUsedFiles c
+usedFiles _ = S.empty
+
+usedPredicates :: Insn e x -> Set Pred
+usedPredicates (SetP p _) = S.singleton p
+usedPredicates (If p _ _) = S.singleton p
+usedPredicates _ = S.empty
+
+usedStrings :: Insn e x -> Set SVar
+usedStrings (Print _ s) = S.singleton s
+usedStrings (Read s _) = S.singleton s
+usedStrings (SetS s e) = S.insert s (stringExprStrings e)
+usedStrings (SetP _ c) = condUsedStrings c
+usedStrings (SetM _ m) = matchUsedStrings m
+usedStrings (Message s) = S.singleton s
+usedStrings (GetMessage s) = S.singleton s
+usedStrings (ShellExec s) = S.singleton s
+usedStrings _ = S.empty
+
+stringExprStrings (SVarRef s) = S.singleton s
+stringExprStrings (STrans _ _ s) = S.singleton s
+stringExprStrings (SAppendNL s t) = S.insert s (S.singleton t)
+stringExprStrings (SAppend s t) = S.insert s (S.singleton t)
+stringExprStrings (SSubstring s _ _) = S.singleton s
+stringExprStrings (SFormatLiteral _ s) = S.singleton s
+stringExprStrings (SConst _) = S.empty
+stringExprStrings SRandomString = S.empty
+stringExprStrings SGetLineNumber = S.empty
+
+matchUsedStrings (Match s _) = S.singleton s
+matchUsedStrings (MatchLastRE s) = S.singleton s
+matchUsedStrings (NextMatch _ s) = S.singleton s
+matchUsedStrings (MVarRef _) = S.empty
+
+usedMatches :: Insn e x -> Set MVar
+usedMatches (SetP _ c) = condUsedMatches c
+usedMatches (SetS _ s) = stringExprMatches s
+usedMatches (SetM m _) = S.singleton m
+usedMatches _ = S.empty
+
+stringExprMatches (SSubstring _ i1 i2) =
+  stringIndexMatches i1 (stringIndexMatches i2 S.empty)
+stringExprMatches _ = S.empty
+
+stringIndexMatches (SIMatchStart m) = S.insert m
+stringIndexMatches (SIMatchEnd m) = S.insert m
+stringIndexMatches (SIGroupStart m _) = S.insert m
+stringIndexMatches (SIGroupEnd m _) = S.insert m
+stringIndexMatches _ = id
+
+matchUsedMatches (NextMatch m _) = S.singleton m
+matchUsedMatches (MVarRef m) = S.singleton m
+matchUsedMatches _ = S.empty
+
+condUsedMatches (IsMatch m) = S.singleton m
+condUsedMatches _ = S.empty
+
+condUsedStrings _ = S.empty
+
+condUsedFiles (AtEOF i) = S.singleton i
+condUsedFiles _ = S.empty
+
+-- Every regexp is compiled if it is used anywhere, so don't bother checking
+-- other instrucitons :) Unless we add a dead regexp pass somewhere?
+usedRegexps :: Insn e x -> Set RE
+usedRegexps (CompileRE re _ _) = S.singleton re
+usedRegexps _ = S.empty
+

@@ -36,9 +36,9 @@ livePredTransfer = mkBTransfer3 first middle last
     first :: Insn C O -> LivePredFact -> LivePredFact
     first (Label _)  f = f
     middle :: Insn O O -> LivePredFact -> LivePredFact
-    middle insn = kill insn . gen insn
+    middle insn = gen insn . kill insn
     last :: Insn O C -> FactBase LivePredFact -> LivePredFact
-    last insn = kill insn . gen insn . facts (successors insn)
+    last insn = gen insn . kill insn . facts (successors insn)
 
     fact f l = fromMaybe S.empty (mapLookup l f)
     facts ls f = S.unions (map (fact f) ls)
