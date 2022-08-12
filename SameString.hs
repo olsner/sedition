@@ -4,6 +4,10 @@
 -- variable on every incoming branch. Should rewrite many uses of
 -- S{pattern-space} when we know statically which pattern-space value is being
 -- referred to.
+-- The tricky bit is handling mutable strings - when a variable changes we
+-- can no longer rewrite copies of it into references to the original variable.
+-- The effect of this compile-time optimization can probably also be achieved
+-- by having CoW strings and lazy substring/append at runtime.
 
 module SameString (sameStringPass) where
 
@@ -23,12 +27,19 @@ constLattice = DataflowLattice
  , fact_bot  = M.empty
  , fact_join = joinMaps (extendJoinDomain constFactAdd) }
  where
+   constFactAdd ::
+     Label -> OldFact SVar -> NewFact SVar -> (ChangeFlag, WithTop SVar)
    constFactAdd _ (OldFact old) (NewFact new)
        = if new == old then (NoChange, PElem new)
          else               (SomeChange, Top)
 
+-- TODO Make a reversible map that has an efficient way to do this?
 deleteValues value = M.map (\x -> if x == value then Top else x)
-changeString s = deleteValues (PElem s)
+-- s has changed value to new. Use "Top" when the value is not something we
+-- can represent in the mapping (i.e. anything except a copy of another string).
+-- When changing s, we also need to invalidate other references to s in the
+-- *values* of the fact base. That's annoying.
+changeString s new = deleteValues (PElem s) . M.insert s new
 
 sameStringTransfer :: FwdTransfer Insn SameStringFact
 sameStringTransfer = mkFTransfer3 first middle last
@@ -39,14 +50,12 @@ sameStringTransfer = mkFTransfer3 first middle last
 
     -- O O
     middle :: Insn O O -> SameStringFact -> SameStringFact
-    -- When changing s, we also need to invalidate other references to s in the
-    -- *values* of the fact base. That's annoying.
-    middle (SetS s (SVarRef s2)) = changeString s . M.insert s (PElem s2)
-    middle (SetS s _)            = changeString s . M.insert s Top
-    middle (AppendS s _)         = changeString s . M.insert s Top
-    middle (GetMessage s)        = M.insert s Top
-    middle (Read s _)            = M.insert s Top
-    middle (ReadFile s _)        = M.insert s Top
+    middle (SetS s (SVarRef s2)) = changeString s (PElem s2)
+    middle (SetS s _)            = changeString s Top
+    middle (AppendS s _)         = changeString s Top
+    middle (GetMessage s)        = changeString s Top
+    middle (Read s _)            = changeString s Top
+    middle (ReadFile s _)        = changeString s Top
     middle _insn                 = id
 
     -- O C
@@ -87,7 +96,8 @@ sameString = deepFwdRw rw
     rwC _                  _ = Nothing
 
     -- Don't return Just x unless at least one of the arguments were rewritten.
-    -- Avoids wasting optimization fuel when nothing changes.
+    -- Avoids wasting optimization fuel when nothing changes. Also return Just
+    -- if only one of the arguments changed so we don't miss a rewrite.
     var2 :: (SVar -> SVar -> a) -> SVar -> SVar -> SameStringFact -> Maybe a
     var2 con s1 s2 f | s1' <- var1 id s1 f, s2' <- var1 id s2 f =
         if isJust s1' || isJust s2'
