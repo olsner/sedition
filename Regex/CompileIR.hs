@@ -64,8 +64,7 @@ emitCases (cs, label) = foldMap emitCase cs <> gotoL label
 
 -- Calling convention for matcher functions:
 -- 
--- static bool FUN(match_t* m, string* s, const size_t orig_offset)
--- struct string { char* buf; size_t len; size_t alloc; };
+-- static bool FUN(match_t* m, const char* buf, size_t len, const size_t orig_offset)
 -- struct match_t { regmatch_t matches[]; }
 -- where regmatch_t has rm_so and rm_eo, corresponding to the even/odd tag
 -- orig_offset is > 0 when repeating a match for a global replace
@@ -80,16 +79,16 @@ emitCases (cs, label) = foldMap emitCase cs <> gotoL label
 -- the regexp search.
 genC :: Program -> Builder
 genC program@Program{..} =
-    stmt ("YYDEBUG(\"Starting match at %zu (of %zu)\\n\", orig_offset, s->len)") <>
-    stmt ("const char *const YYBEGIN = s->buf") <>
-    stmt ("const char *const YYLIMIT = s->buf + s->len") <>
-    sfun "YYSTATS" ["matched_chars", "s->len - orig_offset"] <>
+    stmt ("YYDEBUG(\"Starting match at %zu (of %zu)\\n\", orig_offset, len)") <>
+    stmt ("const char *const YYBEGIN = buf") <>
+    stmt ("const char *const YYLIMIT = buf + len") <>
+    sfun "YYSTATS" ["matched_chars", "len - orig_offset"] <>
     "#define YYPOS (YYCURSOR - YYBEGIN)\n" <>
     "#define YYEOF (YYCURSOR >= YYLIMIT)\n" <>
     "#define YYREMAINING (YYLIMIT - YYCURSOR)\n" <>
     "#define YYGET() (*YYCURSOR)\n" <>
     "#define YYNEXT() (YYCURSOR++)\n" <>
-    stmt ("const char *YYCURSOR = s->buf + orig_offset") <>
+    stmt ("const char *YYCURSOR = buf + orig_offset") <>
     stmt ("unsigned char YYCHAR = 0") <>
     stmt ("void *fallback_label = NULL") <>
     stmt ("const char *fallback_cursor = NULL") <>

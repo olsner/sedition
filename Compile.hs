@@ -23,7 +23,9 @@ import qualified Regex.CompileIR as Regex2C
 
 seditionRuntime :: IsString a => a
 seditionRuntime = $(embedStringFile "sedition.h")
-startingLine = length (lines seditionRuntime) + 2
+stringlib :: IsString a => a
+stringlib = $(embedStringFile "stringlib.h")
+startingLine = length (lines seditionRuntime ++ lines stringlib) + 2
 
 programHeader ofile program =
     "#line " <> intDec startingLine <> " " <> cstring ofile <> "\n" <>
@@ -39,12 +41,13 @@ programHeader ofile program =
     -- are always passed by address, so anything smart the C compiler can do
     -- with local variables might not apply anyway.) Other variables are local
     -- to allow the C compiler more freedom.
-    foldMap (declare "string" stringvar) strings <>
+    "static string S[" <> intDec numStrings <> "];\n" <>
     foldMap (declare "match_t" match) matches <>
     foldMap (init "bool" pred "false") preds <>
     foldMap (init "FILE*" infd "NULL") files <>
     foldMap (init "FILE*" outfd "NULL") files <>
     foldMap (init "bool" mpred "false") matches <>
+    sfun "init_string_heap" ["S", intDec numStrings] <>
     sfun "enable_stats_on_sigint" [] <>
     foldMap initRegexp regexps <>
     infd 0 <> " = next_input(argc, argv);\n" <>
@@ -53,12 +56,13 @@ programHeader ofile program =
     declare t s var = "static " <> t <> " " <> s var <> ";\n"
     init t s value var = t <> " " <> s var <> " = " <> value <> ";\n"
     preds = IR.allPredicates program
-    strings = IR.allStrings program
     files = IR.allFiles program
     matches = IR.allMatches program
     allRegexps = IR.allRegexps program
     regexps = filter needRegcomp allRegexps
     initRegexp re@IR.RE{..} = sfun "compile_regexp" [regex re, cstring reString, bool reERE]
+    strings = IR.allStrings program
+    numStrings = case maximum strings of IR.SVar i -> i + 1
 
 programFooter program = "exit:\n" <>
     foldMap closeFile files <>
@@ -76,7 +80,8 @@ programFooter program = "exit:\n" <>
 
 compileIR :: FilePath -> Bool -> H.Label -> Program -> S
 compileIR ofile _ipc entry program_in = toByteString $
-  seditionRuntime
+  stringlib
+  <> seditionRuntime
   <> programHeader (C.pack ofile) program
   <> gotoL entry
   <> foldMap compileBlock blocks
@@ -92,8 +97,7 @@ compileBlock block = fold (mempty :: Builder)
     f :: forall e x . IR.Insn e x -> Builder -> Builder
     f insn builder = builder <> compileInsn insn
 
-string (IR.SVar s) = "&S" <> intDec s
-stringvar (IR.SVar s) = "S" <> intDec s
+string (IR.SVar s) = "&S[" <> intDec s <> "]"
 pred (IR.Pred p) = "P" <> intDec p
 match (IR.MVar m) = "M" <> intDec m
 matchref (IR.MVar m) = "&M" <> intDec m
@@ -240,6 +244,8 @@ compileRE r@IR.RE{..} = wrapper body
             "(match_t* m, string* s, const size_t orig_offset) {\n" <>
         comment description <>
         comment ("Used tags: " <> showB reUsedTags) <>
+        stmt "size_t len" <>
+        "const char *const buf = " <> sfun "get_compact_string" ["s", "&len"] <>
         "bool result = false;\n" <> b <> "return result;\n}\n"
     match m = fun "match_regexp" [m, "s", "orig_offset", regex r, regexfun r]
     -- regcomp is run at start of main so we just need to forward the arguments.

@@ -14,7 +14,7 @@ maintainer:         olsner@gmail.com
 bug-reports:        https://github.com/olsner/sedition
 
 extra-source-files:
-    README.md sedition.h
+    README.md sedition.h stringlib.h
 
 source-repository head
   type:     git
