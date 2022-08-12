@@ -40,13 +40,17 @@ run-bsdtests-compiled: sed
 
 run-gnused-tests: sed
 	@if test -d gnused; \
-		then ./run-gnused-tests.sh gnused; \
+		then \
+			echo "Running GNU tests on interpreter..."; \
+			./run-gnused-tests.sh gnused; \
 		else echo "Check out GNU sed into a directory called gnused"; \
 	fi
 
 run-gnused-tests-compiled: sed
 	@if test -d gnused; \
-		then SED=`pwd`/runsed ./run-gnused-tests.sh gnused; \
+		then \
+			echo "Running GNU tests on compiler..."; \
+			SED=`pwd`/runsed ./run-gnused-tests.sh gnused; \
 		else echo "Check out GNU sed into a directory called gnused"; \
 	fi
 
