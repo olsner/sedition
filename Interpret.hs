@@ -447,8 +447,8 @@ formatLiteral width s = C.init (lineWrap width (C.lines (escape s <> "\n")))
   where
     escape = C.concatMap escapeChar
     escapeChar '\\' = "\\\\"
-    escapeChar c | isPrint c = C.singleton c
-                 | otherwise = C.pack (printf "\\%03o" (ord c))
+    escapeChar c | isPrint c && ord c < 128 = C.singleton c
+                 | otherwise                = C.pack (printf "\\%03o" (ord c))
 
     lineWrap 0 ss = C.concat (map (<> eol) ss)
     lineWrap width ss = C.concat (concatMap (wrap width) ss)

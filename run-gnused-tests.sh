@@ -47,6 +47,7 @@ good=(
     range-overlap
     stdin
     xemacs
+    8to7
 )
 # Failing tests that are bugs in sedition
 bad=(
@@ -93,9 +94,7 @@ ugly=(
     # locale dependent
     title-case
     word-delim
-    # tests about l/literals, which are formatted differently in sedition and
-    # the line width stuff is not implemented.
-    8to7
+    # tests some command-line stuff that isn't implemented.
     cmd-l
     # Error handling tests. Errors will look different anyway.
     colon-with-no-label

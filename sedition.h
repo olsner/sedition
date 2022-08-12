@@ -183,7 +183,7 @@ static void format_literal(string* dst, int width, string* s)
     int col = 0;
     dst->len = 0;
     for (size_t i = 0; i < s->len; i++) {
-        char c = s->buf[i];
+        uint8_t c = s->buf[i];
         size_t prev = dst->len;
         if (c == '\n') {
             append_str(dst, "$\n", 2);
@@ -191,8 +191,8 @@ static void format_literal(string* dst, int width, string* s)
         } else if (c == '\\') {
             append_str(dst, "\\\\", 2);
             col += 2;
-        } else if (!isprint(c)) {
-            // one more here to have room for a NUL
+        } else if (!isprint(c) || c >= 128) {
+            // one more here to have room for a NUL from snprintf
             append_str(dst, "\\ooo", 5);
             dst->len--;
             snprintf(dst->buf + dst->len - 3, 4, "%03o", c);
