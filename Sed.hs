@@ -105,7 +105,8 @@ compileProgram ipc (label, program) ofile = do
     let compiled = compileIR ipc label program
     C.writeFile ofile compiled
 
-compileC cFile exeFile = rawSystem "cc" ["-g", "-Og", cFile, "-o", exeFile]
+compileC cFile exeFile =
+    rawSystem "cc" ["-g", "-Og", cFile, "-o", exeFile, "-ltre"]
 
 -- TODO Use some realPath function instead of ./, in case a full path is used.
 runExecutable exe inputs = rawSystem ("./" ++ exe) (map C.unpack inputs)

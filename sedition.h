@@ -6,7 +6,6 @@
 #include <assert.h>
 #include <ctype.h>
 #include <malloc.h>
-#include <regex.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -14,6 +13,30 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/random.h>
+
+#define USE_TRE 1
+#if USE_TRE
+#include <tre/tre.h>
+#define sed_regcomp tre_regcomp
+#define sed_regfree tre_regfree
+#define sed_regnexec tre_regnexec
+#else
+#include <regex.h>
+#define sed_regcomp regcomp
+#define sed_regfree regfree
+static int sed_regnexec(const regex_t *preg, const char *string, size_t len,
+	 size_t nmatch, regmatch_t pmatch[], int eflags)
+{
+    regmatch_t def_pmatch[1];
+    if (nmatch == 0 || pmatch == NULL) {
+        pmatch = def_pmatch;
+        nmatch = 1;
+    }
+    pmatch[0].rm_so = 0;
+    pmatch[0].rm_eo = len;
+    return regexec(preg, string, nmatch, pmatch, eflags | REG_STARTEND);
+}
+#endif
 
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
@@ -229,7 +252,7 @@ static void format_int(string* dst, int i)
 
 static void compile_regexp(regex_t* re, const char* regexp, bool ere)
 {
-    int res = regcomp(re, regexp, ere ? REG_EXTENDED : 0);
+    int res = sed_regcomp(re, regexp, ere ? REG_EXTENDED : 0);
     if (res) {
         fprintf(stderr, "regcomp: error %d in %s\n", res, regexp);
         abort();
@@ -238,7 +261,7 @@ static void compile_regexp(regex_t* re, const char* regexp, bool ere)
 
 static void free_regexp(regex_t* re)
 {
-    regfree(re);
+    sed_regfree(re);
 }
 
 static void match_regexp(match_t* m, string* s, re_t* regex, size_t offset)
@@ -255,11 +278,18 @@ static void match_regexp(match_t* m, string* s, re_t* regex, size_t offset)
     m->matches[0].rm_so = offset;
     m->matches[0].rm_eo = s->len;
     // REG_STARTEND with non-zero offset seems to imply REG_NOTBOL in glibc.
-    const int flags = REG_STARTEND | (offset ? REG_NOTBOL : 0);
-    int res = regexec(regex, s->buf, MAXGROUP + 1, m->matches, flags);
+    const int flags = offset ? REG_NOTBOL : 0;
+    int res = sed_regnexec(regex, s->buf + offset, s->len - offset,
+            MAXGROUP + 1, m->matches, flags);
     if (res != 0 && res != REG_NOMATCH) {
         fprintf(stderr, "regexec: error %d\n", res);
         abort();
+    }
+    if (offset && res == 0) {
+        for (int i = 0; i < regex->re_nsub + 1; i++) {
+            m->matches[i].rm_so += offset;
+            m->matches[i].rm_eo += offset;
+        }
     }
     m->result = (res == 0);
 }
