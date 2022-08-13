@@ -55,12 +55,15 @@ programHeader program =
 programFooter program = "exit:\n" <>
     foldMap closeFile files <>
     foldMap freeRegex regexps <>
+    foldMap freeString strings <>
     "return exit_status;\n" <>
     "}\n"
   where
+    strings = IR.allStrings program
     files = IR.allFiles program
     regexps = M.keys (IR.allRegexps program)
     freeRegex re = sfun "free_regexp" [regex re]
+    freeString s = sfun "free_string" [string s]
 
 compileIR :: Bool -> H.Label -> Program -> S
 compileIR _ipc entry program = L.toStrict . toLazyByteString $

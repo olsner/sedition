@@ -85,6 +85,9 @@ static void free_string(string* s)
 
 static void set_str_const(string* dst, const char* src, size_t n)
 {
+    if (dst->alloc) {
+        free(dst->buf);
+    }
     dst->alloc = 0;
     dst->buf = (char*)src;
     dst->len = n;
@@ -134,6 +137,7 @@ static void concat(string* dst, string* a, string* b)
 
 static void concat_inplace(string* dst, string* b)
 {
+    assert(dst != b);
     append_str(dst, b->buf, b->len);
 }
 
