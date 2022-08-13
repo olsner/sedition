@@ -24,25 +24,21 @@ seditionRuntime = $(embedStringFile "sedition.h")
 programHeader program =
     "/* ^ runtime system */\n\
     \/* v compiled program */\n\
-    \int main(int argc, const char *argv[]) {\n\
-    \bool hasPendingIPC = false;\n\
-    \int exit_status = EXIT_SUCCESS;\n\
-    \re_t* lastRegex = NULL;\n" <>
-    foldMap (declare "bool" pred " = false") preds <>
-    foldMap (declare "string" stringvar mempty) strings <>
-    foldMap (declare "FILE*" infd " = NULL") files <>
-    foldMap (declare "FILE*" outfd " = NULL") files <>
-    foldMap (declare "match_t" match mempty) matches <>
-    foldMap (declare "re_t" regexvar mempty) regexpvars <>
-    -- TODO Make things static again to get rid of the need for so much init
-    foldMap (clear match) matches <>
-    foldMap (clear stringvar) strings <>
+    \static bool hasPendingIPC = false;\n\
+    \static int exit_status = EXIT_SUCCESS;\n\
+    \static re_t* lastRegex = NULL;\n" <>
+    foldMap (declare "bool" pred) preds <>
+    foldMap (declare "string" stringvar) strings <>
+    foldMap (declare "FILE*" infd) files <>
+    foldMap (declare "FILE*" outfd) files <>
+    foldMap (declare "match_t" match) matches <>
+    foldMap (declare "re_t" regexvar) regexpvars <>
+    "int main(int argc, const char *argv[]) {\n" <>
     foldMap compileRE (M.assocs regexps) <>
     infd 0 <> " = next_input(argc, argv);\n" <>
     outfd 0 <> " = stdout;\n"
   where
-    declare t s init var = t <> " " <> s var <> init <> ";\n"
-    clear s var = sfun "memset" ["&" <> s var, "0", fun "sizeof" [s var]]
+    declare t s var = "static " <> t <> " " <> s var <> ";\n"
     preds = IR.allPredicates program
     strings = IR.allStrings program
     files = IR.allFiles program
@@ -233,7 +229,7 @@ setString t (IR.SGetLineNumber) = fun "format_int" [string t, lineNumber]
 resolveStringIndex :: IR.SVar -> IR.SIndex -> Builder
 resolveStringIndex s ix = case ix of
   IR.SIStart -> "0"
-  IR.SIEnd -> stringvar s <> ".len"
+  IR.SIEnd -> fun "string_len" [string s]
   IR.SIMatchStart m -> groupStart m 0
   IR.SIMatchEnd m -> groupEnd m 0
   IR.SIGroupStart m i -> groupStart m i

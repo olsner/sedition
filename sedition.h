@@ -74,6 +74,11 @@ static void ensure_len(string* s, size_t n)
     }
 }
 
+static size_t string_len(string* s)
+{
+    return s->len;
+}
+
 static void free_string(string* s)
 {
     if (s->alloc > 0) {
