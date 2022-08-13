@@ -733,8 +733,8 @@ allFiles :: Program -> Set FD
 allFiles graph = foldGraphNodes (S.union . usedFiles) graph S.empty
 allMatches :: Program -> Set MVar
 allMatches graph = foldGraphNodes (S.union . usedMatches) graph S.empty
-allRegexps :: Program -> Set RE
-allRegexps graph = foldGraphNodes (S.union . usedRegexps) graph S.empty
+allRegexps :: Program -> Map RE (S, Bool)
+allRegexps graph = foldGraphNodes (M.union . usedRegexps) graph M.empty
 
 usedFiles :: Insn e x -> Set FD
 usedFiles (Print i _) = S.singleton i
@@ -810,7 +810,7 @@ condUsedFiles _ = S.empty
 
 -- Every regexp is compiled if it is used anywhere, so don't bother checking
 -- other instrucitons :) Unless we add a dead regexp pass somewhere?
-usedRegexps :: Insn e x -> Set RE
-usedRegexps (CompileRE re _ _) = S.singleton re
-usedRegexps _ = S.empty
+usedRegexps :: Insn e x -> Map RE (S, Bool)
+usedRegexps (CompileRE re s ere) = M.singleton re (s,ere)
+usedRegexps _ = M.empty
 

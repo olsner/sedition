@@ -16,17 +16,11 @@
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
 
-struct re_t {
-    bool init;
-    regex_t regex;
-    const char *str;
-};
-typedef struct re_t re_t;
+typedef regex_t re_t;
 
 #define MAXGROUP 9
 struct match_t {
-    // Possible required for next_match
-    const re_t *regex;
+    re_t *regex;
 
     bool result;
     regmatch_t matches[MAXGROUP + 1];
@@ -222,27 +216,21 @@ static void format_int(string* dst, int i)
 // Regex functions
 //
 
-static void compile_regexp(re_t* re, const char* regexp, bool ere)
+static void compile_regexp(regex_t* re, const char* regexp, bool ere)
 {
-    if (re->init) {
-        return;
-    }
-
-    int res = regcomp(&re->regex, regexp, ere ? REG_EXTENDED : 0);
+    int res = regcomp(re, regexp, ere ? REG_EXTENDED : 0);
     if (res) {
         fprintf(stderr, "regcomp: error %d in %s\n", res, regexp);
         abort();
     }
-    re->init = true;
-    re->str = regexp;
 }
 
-static void free_regexp(re_t* re)
+static void free_regexp(regex_t* re)
 {
-    regfree(&re->regex);
+    regfree(re);
 }
 
-static void match_regexp(match_t* m, string* s, const re_t* regex, size_t offset)
+static void match_regexp(match_t* m, string* s, re_t* regex, size_t offset)
 {
     memset(m, 0, sizeof(*m));
 
@@ -257,9 +245,9 @@ static void match_regexp(match_t* m, string* s, const re_t* regex, size_t offset
     m->matches[0].rm_eo = s->len;
     // REG_STARTEND with non-zero offset seems to imply REG_NOTBOL in glibc.
     const int flags = REG_STARTEND | (offset ? REG_NOTBOL : 0);
-    int res = regexec(&regex->regex, s->buf, MAXGROUP + 1, m->matches, flags);
+    int res = regexec(regex, s->buf, MAXGROUP + 1, m->matches, flags);
     if (res != 0 && res != REG_NOMATCH) {
-        fprintf(stderr, "regexec: error %d in %s\n", res, regex->str);
+        fprintf(stderr, "regexec: error %d\n", res);
         abort();
     }
     m->result = (res == 0);

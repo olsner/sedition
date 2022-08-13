@@ -9,6 +9,8 @@ import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy.Char8 as L
 import Data.ByteString.Builder as B
 import Data.FileEmbed (embedStringFile)
+import Data.Map (Map)
+import qualified Data.Map as M
 import Data.Word
 
 import System.Exit
@@ -25,17 +27,17 @@ programHeader program =
     \int main(int argc, const char *argv[]) {\n\
     \bool hasPendingIPC = false;\n\
     \int exit_status = EXIT_SUCCESS;\n\
-    \const re_t* lastRegex = NULL;\n" <>
+    \re_t* lastRegex = NULL;\n" <>
     foldMap (declare "bool" pred " = false") preds <>
     foldMap (declare "string" stringvar mempty) strings <>
     foldMap (declare "FILE*" infd " = NULL") files <>
     foldMap (declare "FILE*" outfd " = NULL") files <>
     foldMap (declare "match_t" match mempty) matches <>
-    foldMap (declare "re_t" regexvar mempty) regexps <>
+    foldMap (declare "re_t" regexvar mempty) regexpvars <>
     -- TODO Make things static again to get rid of the need for so much init
     foldMap (clear match) matches <>
     foldMap (clear stringvar) strings <>
-    foldMap (clear regexvar) regexps <>
+    foldMap compileRE (M.assocs regexps) <>
     infd 0 <> " = next_input(argc, argv);\n" <>
     outfd 0 <> " = stdout;\n"
   where
@@ -45,14 +47,20 @@ programHeader program =
     strings = IR.allStrings program
     files = IR.allFiles program
     matches = IR.allMatches program
+    regexps :: Map IR.RE (S, Bool)
     regexps = IR.allRegexps program
+    regexpvars = M.keys regexps
+    compileRE (re, (s, ere)) = sfun "compile_regexp" [regex re, cstring s, bool ere]
 
 programFooter program = "exit:\n" <>
     foldMap closeFile files <>
+    foldMap freeRegex regexps <>
     "return exit_status;\n" <>
     "}\n"
   where
     files = IR.allFiles program
+    regexps = M.keys (IR.allRegexps program)
+    freeRegex re = sfun "free_regexp" [regex re]
 
 compileIR :: Bool -> H.Label -> Program -> S
 compileIR _ipc entry program = L.toStrict . toLazyByteString $
@@ -165,7 +173,8 @@ compileInsn (IR.Redirect i j) =
   stmt (infd j <> " = NULL")
 compileInsn (IR.CloseFile i) = closeFile i
 
-compileInsn (IR.CompileRE re s ere) = sfun "compile_regexp" [regex re, cstring s, bool ere]
+-- Done in initialization
+compileInsn (IR.CompileRE _ _ _) = mempty
 compileInsn (IR.SetLastRE re) = setLastRegex re
 compileInsn (IR.Message s) = sfun "send_message" [string s]
 
