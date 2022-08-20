@@ -23,12 +23,19 @@ ParserTest: force sed
 	@mkdir -p $(OUTDIR)
 	$(GHC) $(GHCFLAGS) --make -main-is ParserTest $@
 
+RegexParserTest: force sed
+	@mkdir -p $(OUTDIR)
+	$(GHC) $(GHCFLAGS) --make -main-is RegexParserTest $@
+
 check: run-parsertest run-bsdtests run-gnused-tests compiler-tests
 test: check
 compiler-tests: run-bsdtests-compiled run-gnused-tests-compiled
 
 run-parsertest: ParserTest
 	./ParserTest
+
+run-regexparsertest: RegexParserTest
+	./RegexParserTest
 
 # There are a handful of failing BSD tests still, so ignore failures so we get
 # to the other test suites.
@@ -56,7 +63,8 @@ run-gnused-tests-compiled: sed
 
 MODULES = Sed Parser AST Bus ParserTest IR \
 	Optimize ConstPred RedundantBranches LivePred \
-	LiveString SameString Compile Interpret
+	LiveString SameString Compile Interpret \
+	Regex RegexParserTest
 
 clean:
 	rm -f sed Sed ParserTest
