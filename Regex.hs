@@ -215,12 +215,16 @@ hasAnchors AnchorStart     = True
 hasAnchors AnchorEnd       = True
 hasAnchors _               = False
 
-escapeNL = concatMap (\c -> case c of '\n' -> "\\n"; _ -> [c])
+re2cEsc = concatMap f
+  where
+    f '\n' = "\\n"
+    f ']'  = "\\]"
+    f c    = [c]
 
 re2c Any                    = "."
 re2c (Char c)               = show [c]
-re2c (CClass cs)            = "[" ++ escapeNL (shuffleClass cs) ++ "]"
-re2c (CNotClass cs)         = "[^" ++ escapeNL (shuffleClass cs) ++ "]"
+re2c (CClass cs)            = "[" ++ re2cEsc (shuffleClass cs) ++ "]"
+re2c (CNotClass cs)         = "[^" ++ re2cEsc (shuffleClass cs) ++ "]"
 re2c (Repeat m Nothing  r)  = re2c r ++ "{" ++ show m ++ ",}"
 re2c (Repeat m (Just n) r)  = re2c r ++ "{" ++ show m ++ "," ++ show n ++ "}"
 -- re2c anchors all regular expressions at the start implicitly. Not sure how
