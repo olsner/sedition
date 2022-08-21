@@ -266,8 +266,8 @@ re2c r re =
     "set_match(m, s, yypmatch + 2, yynmatch - 1, " <> regexfun r <> ");\n" <>
     "return; }\n" <>
     -- re2c requires a $ rule. What is this supposed to do?
-    "$ { m->result = false; return; }\n" <>
-    "* { m->result = false; return; }\n" <>
+    "$ { return; }\n" <>
+    "* { return; }\n" <>
     "*/\n"
   where
     re' = Regex.reanchor re
@@ -282,6 +282,8 @@ re2c r re =
       \const char *YYMARKER = NULL;\n\
       \const char *yypmatch[YYMAXNMATCH * 2];\n\
       \size_t yynmatch;\n\
+      \m->result = false;\n\
+      \if (offset && offset >= s->len) { return; }\n\
       \/*!stags:re2c format = 'const char *@@;\\n'; */\n\
       \/*!re2c\n\
       \    re2c:define:YYCTYPE = char;\n\
