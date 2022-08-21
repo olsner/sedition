@@ -2,8 +2,8 @@
 
 module RegexParserTest (main) where
 
-import Data.Set (Set)
-import qualified Data.Set as S
+import qualified Data.ByteString.Char8 as C
+import Data.List (nub)
 
 import System.Exit
 
@@ -13,25 +13,11 @@ import Regex
 
 data Dialect = BRE | ERE | Both deriving (Show,Ord,Eq)
 
-doTest (Both, input, result) = do
-    a <- doTest (BRE, input, result)
-    b <- doTest (ERE, input, result)
-    return (a && b)
-doTest (dialect, input, result) =
-  case parseOnly (pRegex (dialect == ERE)) input of
-   Success p | p == result -> return True -- putStrLn ("pass: " ++ input_str ++ " parsed to " ++ show p) >> return True
-             | otherwise   -> putStrLn ("fail: " ++ input_str ++ " did not parse to " ++ show result ++ " but " ++ show p) >> return False
-   Failure e -> putStrLn ("fail: " ++ input_str ++ " failed to parse:\n" ++ show e) >> return False
-  where
-    input_str = show dialect ++ " " ++ show input
-
 -- Abbreviations for reference results
 literal xs = Concat (map Char xs)
 star = Repeat 0 Nothing
 plus = Repeat 1 Nothing
 rep min max = Repeat min (Just max)
-
-doTests = mapM doTest
 
 tests =
   -- Simple
@@ -46,14 +32,32 @@ tests =
   , (BRE, "|", Char '|')
   , (ERE, "\\|", Char '|')
 
-  -- No bracket expression parsing yet
-  -- , (Both, "[/]", CClass (S.singleton '/'))
-  -- , (Both, "[|]", CClass (S.singleton '|'))
-  -- , (Both, "[^/]", CNotClass (S.singleton '/'))
-  -- TODO read up on escaping brackets or something
-  -- , (Both, "\\[", Char '[')
-  -- Escaped bracket in bracket should not end it?
-  --, ("s/[\\]/]foo/bar/", [Sed Always (subst "[\\]/]foo" "bar")])
+  -- Bracket expressions
+  , (Both, "[/]", CClass "/")
+  , (Both, "[|]", CClass "|")
+  , (Both, "[^/]", CNotClass "/")
+  -- ^ is only special when first
+  , (Both, "[a^]", CClass "a^")
+  , (Both, "[^^]", CNotClass "^")
+  -- Escaped bracket in bracket should end it, backslash is not special
+  , (Both, "[\\]/]f", Concat (CClass "\\" : map Char "/]f"))
+  , (Both, "[\\]", CClass "\\")
+  -- Escaped brackets otherwise should be escaped?
+  , (Both, "\\[", Char '[')
+  , (Both, "\\[]", literal "[]")
+  -- Ranges, and non-ranges with - at the end
+  , (Both, "[a-cx-z]", CClass "abcxyz")
+  , (Both, "[+--]", CClass "+,-")
+  , (Both, "[a-]", CClass "a-")
+  , (Both, "[^a-]", CNotClass "a-")
+  -- ']' first should be itself (otherwise it should terminate the bracket)
+  -- (not implemented)
+  -- , (Both, "[]]", CClass "]")
+  -- , (Both, "[^]]", CNotClass "]")
+  -- , (Both, "[^]-]", CNotClass "]-")
+  -- , (Both, "[]-]", CClass "]-")
+
+  -- back refs
   , (BRE, "\\(a\\)\\1", Concat [Group (Char 'a'), BackRef 1])
   , (ERE, "(a)\\1", Concat [Group (Char 'a'), BackRef 1])
 
@@ -84,6 +88,35 @@ tests =
   , (ERE, "a{1}", Char 'a')
   ]
 
+-- Test code
+
+doTest (Both, input, result) = do
+    a <- doTest (BRE, input, result)
+    b <- doTest (ERE, input, result)
+    return (a && b)
+doTest (dialect, input, result) =
+  case parseOnly (pRegex (dialect == ERE)) input of
+   Success p | p == result -> return True -- putStrLn ("pass: " ++ input_str ++ " parsed to " ++ show p) >> return True
+             | otherwise   -> putStrLn ("fail: " ++ input_str ++ " did not parse to " ++ show result ++ " but " ++ show p) >> return False
+   Failure e -> putStrLn ("fail: " ++ input_str ++ " failed to parse:\n" ++ show e) >> return False
+  where
+    input_str = show dialect ++ " " ++ show input
+doTests = mapM doTest
+
+-- Check that re-parsing the reString output produces the original regexp.
+-- We don't validate the reString output itself as the string representation
+-- can be a bit different from the input (e.g. variations of {n,m} that are
+-- equivalent to *, + or ?).
+doTestString input = do
+  case parseOnly (pRegex True) (C.pack $ reString input) of
+   Success p | p == input -> return True -- putStrLn ("pass: " ++ show input ++ " round-tripped to " ++ show p) >> return True
+             | otherwise   -> putStrLn ("fail: " ++ show input ++ " did not roundtrip to itself but " ++ show p) >> return False
+   Failure e -> putStrLn ("fail: " ++ show input ++ " failed to roundtrip parse:\n" ++ show e) >> return False
+
+doTestStrings tests = mapM doTestString results
+  where
+    results = nub $ map (\(_,_,result) -> result) tests
+
 counts :: [Bool] -> (Int,Int)
 counts [] = (0,0)
 counts (x:xs) | x = (trues + 1, falses)
@@ -91,9 +124,10 @@ counts (x:xs) | x = (trues + 1, falses)
               where (trues, falses) = counts xs
 
 main = do
-    results <- doTests tests
+    res1 <- doTests tests
+    res2 <- doTestStrings tests
+    let results = res1 ++ res2
     let (_passes, fails) = counts results
     case fails of
       0 -> putStrLn "OK" >> exitSuccess
-      -- putStrLn ("Finished " ++ show (length tests) ++ " tests")
       _ -> putStrLn (show fails ++ " tests failed") >> exitFailure

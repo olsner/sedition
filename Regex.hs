@@ -1,12 +1,13 @@
 {-# LANGUAGE OverloadedStrings, ApplicativeDo #-}
 
-module Regex (parseString, parseOnly, pRegex, Regex(..)) where
+module Regex (parseString, parseOnly, pRegex, Regex(..), reString) where
 
 import Control.Applicative
 
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as C
 import Data.Char (digitToInt)
+import Data.List (intercalate)
 import Data.Set (Set)
 
 import Text.Trifecta hiding (parseString)
@@ -15,8 +16,8 @@ import Text.Trifecta.Delta
 data Regex
   = Any
   | Char Char
-  | CClass (Set Char)
-  | CNotClass (Set Char)
+  | CClass [Char]
+  | CNotClass [Char]
   -- Min repeats and max repeats (Nothing for unlimited)
   | Repeat Int (Maybe Int) Regex
   | AnchorStart
@@ -28,19 +29,18 @@ data Regex
   | BackRef Int
   deriving (Show,Ord,Eq)
 
--- Assumes that Concat is never used elsewhere, so there can't be nested
--- concatenations or anything annoying like that.
+-- Assumes that Concat is never used elsewhere (i.e. this is a smart constructor
+-- for Concat), so there can't be nested concatenations to process here.
 rconcat :: [Regex] -> Regex
 rconcat [] = Empty
 rconcat [x] = x
 rconcat xs = Concat xs
 
-flatten (Concat xs) = concatMap flatten xs
-flatten x = [x]
-
 ror [] = Empty
 ror [a] = a
 ror xs = Or xs
+
+charRange min max = enumFromTo min max
 
 -- {m} = exactly m copies
 rep 1   Nothing         = id
@@ -50,8 +50,6 @@ rep min Nothing         = Repeat min (Just min)
 rep 1   (Just (Just 1)) = id
 rep min (Just max)      = Repeat min max
 
--- Parser utilities (some duplicated from Parser.hs...)
-maybeP p = option Nothing (Just <$> p)
 int :: Parser Int
 int = fromInteger <$> decimal
 
@@ -69,7 +67,7 @@ breBranch = rconcat <$> some breSimple
 breSimple = flip id <$> breNondupl <*> option id breDuplSym
 breNondupl = choice [breGroup, backRef, anchorStart, anchorEnd, breOneChar]
 
-breOneChar = breOrdChar <|> breQuotedChar <|> breAny -- <|> bracketExpression
+breOneChar = breOrdChar <|> breQuotedChar <|> breAny <|> bracketExpression
 breDuplSym :: Parser (Regex -> Regex)
 breDuplSym = choice [star, breBracedCount, escaped plus, escaped question]
 
@@ -82,7 +80,7 @@ ereAny = breAny
 anchorStart = AnchorStart <$ char '^'
 anchorEnd = AnchorEnd <$ char '$'
 
-counts = rep <$> int <*> maybeP (char ',' *> maybeP int)
+counts = rep <$> int <*> optional (char ',' *> optional int)
 breBraces = between (escapedChar '{') (escapedChar '}')
 ereBraces = between (char '{') (char '}')
 
@@ -110,12 +108,66 @@ ereNondupl = choice [ereOneChar, anchorStart, anchorEnd, backRef, ereGroup]
 ereDuplSym = star <|> plus <|> question <|> ereBracedCount
 ereGroup = char '(' *> (Group <$> pERE) <* char ')'
 
-ereOneChar = ereOrdChar <|> ereQuotedChar <|> ereAny -- <|> bracketExpression
+ereOneChar = ereOrdChar <|> ereQuotedChar <|> ereAny <|> bracketExpression
 ereSpecialChars = "$()*+.?[\\^{|"
 ereQuotedChar = Char <$> escaped (oneOf ereSpecialChars)
 ereOrdChar = Char <$> noneOf ereSpecialChars
 
--- TODO backrefs in EREs too
+-- Allegedly shared between BRE and ERE syntax.
+bracketExpression = brackets (nonMatchingList <|> matchingList)
+matchingList = CClass <$> bracketList
+nonMatchingList = char '^' *> (CNotClass <$> bracketList)
+bracketList = (++) <$> followList <*> option [] (string "-")
+-- TODO Handle ']' first in the list specially
+followList = concat <$> some expressionTerm
+expressionTerm :: Parser [Char]
+expressionTerm = try rangeExpression <|> singleExpression
+singleExpression = (:[]) <$> endRange -- <|> characterClass <|> equivalenceClass
+rangeExpression = try (charRange <$> startRange <*> endRange) <|>
+                  -- e.g. [x--], a range ending at '-'
+                  (charRange <$> startRange <*> char '-')
+startRange = endRange <* char '-'
+-- any char except ^, - or ], but only when they have special meaning?
+endRange = noneOf "-]" -- <|> collatingSymbol
+{-
+dotBracket = between (string "[.") (string ".]")
+eqBracket = between (string "[=") (string "=]")
+colonBracket = between (string "[:") (string ":]")
+collatingSymbol = dotBracket anyChar
+equivalenceClass = eqBracket anyChar -- not meta char?
+characterClass = charClass <$> colonBracket (many alphaNum)
+-}
+
+-- Always outputs an ERE. Our regexps include some ERE features, and also the
+-- syntax is nicer.
+reString Any                = "."
+reString (Char c)
+    | c `elem` ereSpecialChars = ['\\', c]
+    | otherwise             = [c]
+-- TODO ] must come first, - must be last, ^ can be anywhere except first.
+reString (CClass cs)        = "[" ++ cs ++ "]"
+reString (CNotClass cs)     = "[^" ++ cs ++ "]"
+reString (Repeat 0 Nothing  r) = reString r ++ "*"
+reString (Repeat 0 (Just 1) r) = reString r ++ "?"
+reString (Repeat 1 Nothing  r) = reString r ++ "+"
+reString (Repeat m Nothing  r) = reString r ++ "{" ++ show m ++ ",}"
+reString (Repeat m (Just n) r)
+    | n == m                = reString r ++ "{" ++ show m ++ "}"
+    | True                  = reString r ++ "{" ++ show m ++ "," ++ show n ++ "}"
+reString AnchorStart        = "^"
+reString AnchorEnd          = "$"
+reString (Group r)          = "(" ++ reString r ++ ")"
+reString (Concat rs)        = concatMap reString rs
+reString Empty              = ""
+reString (Or rs)            = intercalate "|" (map reString rs)
+reString (BackRef i)        = "\\" ++ show i
+
+hasBackrefs (Repeat _ _ r)  = hasBackrefs r
+hasBackrefs (Group r)       = hasBackrefs r
+hasBackrefs (Concat rs)     = or (map hasBackrefs rs)
+hasBackrefs (Or rs)         = or (map hasBackrefs rs)
+hasBackrefs (BackRef _)     = True
+hasBackrefs _               = False
 
 parseString :: Bool -> ByteString -> Regex
 parseString ere input = case parseOnly (pRegex ere) input of
