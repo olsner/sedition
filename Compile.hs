@@ -13,11 +13,14 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Word
 
+import Debug.Trace
+
 import System.Exit
 
 import AST
 import qualified IR
 import IR (Program)
+import qualified Regex
 
 seditionRuntime = $(embedStringFile "sedition.h")
 
@@ -26,15 +29,16 @@ programHeader program =
     \/* v compiled program */\n\
     \static bool hasPendingIPC = false;\n\
     \static int exit_status = EXIT_SUCCESS;\n\
-    \static re_t* lastRegex = NULL;\n" <>
+    \static void (*lastRegex)(match_t*, string*, size_t) = NULL;\n" <>
     foldMap (declare "bool" pred) preds <>
     foldMap (declare "string" stringvar) strings <>
     foldMap (declare "FILE*" infd) files <>
     foldMap (declare "FILE*" outfd) files <>
     foldMap (declare "match_t" match) matches <>
     foldMap (declare "re_t" regexvar) regexpvars <>
-    "int main(int argc, const char *argv[]) {\n" <>
     foldMap compileRE (M.assocs regexps) <>
+    "int main(int argc, const char *argv[]) {\n" <>
+    foldMap initRegexp (M.assocs regexps) <>
     infd 0 <> " = next_input(argc, argv);\n" <>
     outfd 0 <> " = stdout;\n"
   where
@@ -46,7 +50,8 @@ programHeader program =
     regexps :: Map IR.RE (S, Bool)
     regexps = IR.allRegexps program
     regexpvars = M.keys regexps
-    compileRE (re, (s, ere)) = sfun "compile_regexp" [regex re, cstring s, bool ere]
+    -- TODO Skip regexps where we can use re2c
+    initRegexp (re, (s, ere)) = sfun "compile_regexp" [regex re, cstring s, bool ere]
 
 programFooter program = "exit:\n" <>
     foldMap closeFile files <>
@@ -96,6 +101,7 @@ infd i = "inF" <> idIntDec i
 outfd i = "outF" <> idIntDec i
 
 regexvar (IR.RE i) = "RE" <> intDec i
+regexfun (IR.RE i) = "match_RE" <> intDec i
 regex r = "&" <> regexvar r
 
 lineNumber = "lineNumber"
@@ -142,8 +148,8 @@ cIf cond t f = fun "if" [cond] <> "{\n  " <> t <> "} else {\n  " <> f <> "}\n"
 --cWhen cond t = fun "if" [cond] <> "{\n  " <> t <> "}\n"
 cWhile cond t = fun "while" [cond] <> "{\n  " <> t <> "}\n"
 
-compileMatch m (IR.Match svar re) = fun "match_regexp" [matchref m, string svar, regex re, "0"]
-compileMatch m (IR.MatchLastRE svar) = fun "match_regexp" [matchref m, string svar, lastRegex, "0"]
+compileMatch m (IR.Match svar re) = fun (regexfun re) [matchref m, string svar, "0"]
+compileMatch m (IR.MatchLastRE svar) = fun lastRegex [matchref m, string svar, "0"]
 compileMatch m (IR.NextMatch m2 s) = fun "next_match" [matchref m, matchref m2, string s]
 compileMatch m (IR.MVarRef m2) = fun "copy_match" [matchref m, matchref m2]
 
@@ -205,7 +211,7 @@ compileInsn (IR.ShellExec svar) = sfun "shell_exec" [string svar]
 
 --compileInsn cmd = fatal ("compileInsn: Unhandled instruction " ++ show cmd)
 
-setLastRegex re = stmt (lastRegex <> " = " <> regex re)
+setLastRegex re = stmt (lastRegex <> " = &" <> regexfun re)
 
 setString :: IR.SVar -> IR.StringExpr -> Builder
 setString t (IR.SConst s) = fun "set_str_const" [string t, cstring s, intDec (C.length s)]
@@ -237,3 +243,45 @@ resolveStringIndex s ix = case ix of
   where
     groupStart m i = match m <> ".matches[" <> intDec i <> "].rm_so"
     groupEnd m i = match m <> ".matches[" <> intDec i <> "].rm_eo"
+
+compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else re2c re
+  where
+    re = Regex.parseString ere s
+    needRegexec = not (Regex.re2cCompatible re)
+    res = C.pack $ Regex.reString re
+    wrapper b = "static void " <> regexfun r <> "(match_t* m, string* s, size_t offset) {\n" <> b <> "}\n"
+    -- regcomp is run at start of main so we just need to forward the arguments.
+    regexec = comment ("regex with back references: " <> cstring res) <> sfun "match_regexp" ["m", "s", regex r, "offset"]
+
+-- TODO re2c doesn't have anchors in its regexp syntax, we should add the
+-- necessary support ourselves. Add code to take a parsed regexp and strip the
+-- included anchors and adjust as appropriate here.
+-- For an initial anchor, do we need to add a non-capturing .* prefix here?
+re2c re =
+    comment ("regex without back references: " <> cstring res') <>
+    comment ("reanchored version of: " <> cstring res) <>
+    re2c_header <> string7 (Regex.re2c re') <> " {\n" <>
+    -- Skip the zeroeth group since that's added in the re2c conversion.
+    "set_match(m, s, yypmatch + 2, yynmatch - 2); return; }\n" <>
+    -- re2c requires a $ rule. What is this supposed to do?
+    "$ { m->result = false; return; }\n" <>
+    "* { m->result = false; return; }\n" <>
+    "*/\n"
+  where
+    re' = Regex.reanchor re
+    res' = C.pack $ Regex.reString re'
+    res = C.pack $ Regex.reString re
+    -- TODO Fix bounds checks - this follows the "sentinel with bounds checks"
+    -- instructions, but that requires at least a padding with a NUL to ensure
+    -- we get to the bounds check before reading out of bounds.
+    re2c_header = "\
+      \const char *YYCURSOR = s->buf, *YYLIMIT = s->buf + s->len, *YYMARKER;\n\
+      \const char *yypmatch[YYMAXNMATCH * 2];\n\
+      \size_t yynmatch;\n\
+      \/*!stags:re2c format = 'const char *@@;\\n'; */\n\
+      \/*!re2c\n\
+      \    re2c:define:YYCTYPE = char;\n\
+      \    re2c:yyfill:enable = 0;\n\
+      \    re2c:eof = 0;\n\
+      \    re2c:posix-captures = 1;\n\n\
+      \    "

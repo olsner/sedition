@@ -3,11 +3,11 @@
 module RegexParserTest (main) where
 
 import qualified Data.ByteString.Char8 as C
-import Data.List (nub)
+import Data.List (nub, sort)
 
 import System.Exit
 
-import Text.Trifecta hiding (parseString)
+import Text.Trifecta (Result(..))
 
 import Regex
 
@@ -21,6 +21,7 @@ rep min max = Repeat min (Just max)
 
 spaceToZ = enumFromTo ' ' 'Z'
 tabAndSpaceToZ = '\t' : spaceToZ
+spaces = sort " \r\n\t\v\f"
 
 tests =
   -- Simple
@@ -111,6 +112,10 @@ tests =
   -- A dash first is also a literal '-' rather than a range...
   , (BRE, "|?!*[-+*/%^<>=]", Concat [Char '|', Char '?', star (Char '!'),
             CClass "%*+-/<=>^"])
+
+  -- Not actually in BRE or ERE
+  , (Both, "\\s", CClass spaces)
+  , (Both, "\\S", CNotClass spaces)
   ]
 
 -- Test code

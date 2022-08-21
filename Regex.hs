@@ -1,6 +1,12 @@
 {-# LANGUAGE OverloadedStrings, ApplicativeDo #-}
 
-module Regex (parseString, parseOnly, pRegex, Regex(..), reString, hasBackrefs) where
+module Regex (
+    parseString, parseOnly,
+    pRegex,
+    Regex(..),
+    reString, re2c,
+    hasAnchors, hasBackrefs, reanchor, re2cCompatible
+    ) where
 
 import Control.Applicative
 
@@ -47,6 +53,8 @@ charRange min max = enumFromTo min max
 uniq = S.toList . S.fromList
 cClass cs = CClass (uniq cs)
 cNotClass cs = CNotClass (uniq cs)
+spaceClass = cClass " \r\n\t\v\f"
+notSpaceClass = cNotClass " \r\n\t\v\f"
 
 -- {m} = exactly m copies
 rep 1   Nothing         = id
@@ -73,7 +81,13 @@ breBranch = rconcat <$> some breSimple
 breSimple = flip id <$> breNondupl <*> option id breDuplSym
 breNondupl = choice [breGroup, backRef, anchorStart, anchorEnd, breOneChar]
 
-breOneChar = breOrdChar <|> breQuotedChar <|> breAny <|> bracketExpression
+breOneChar = choice $
+  [ breOrdChar
+  , breQuotedChar
+  , breAny
+  , bracketExpression
+  , spaceClass <$ escapedChar 's'
+  , notSpaceClass <$ escapedChar 'S']
 breDuplSym :: Parser (Regex -> Regex)
 breDuplSym = choice [star, breBracedCount, escaped plus, escaped question]
 
@@ -114,7 +128,13 @@ ereNondupl = choice [ereOneChar, anchorStart, anchorEnd, backRef, ereGroup]
 ereDuplSym = star <|> plus <|> question <|> ereBracedCount
 ereGroup = between (char '(') (char ')') (Group <$> pERE)
 
-ereOneChar = ereOrdChar <|> ereQuotedChar <|> ereAny <|> bracketExpression
+ereOneChar = choice $
+  [ ereOrdChar
+  , ereQuotedChar
+  , ereAny
+  , bracketExpression
+  , spaceClass <$ escapedChar 's'
+  , notSpaceClass <$ escapedChar 'S' ]
 ereSpecialChars = "$()*+.?[\\^{|"
 ereQuotedChar = Char <$> escaped (oneOf ereSpecialChars)
 ereOrdChar = Char <$> noneOf ereSpecialChars
@@ -186,6 +206,67 @@ hasBackrefs (Concat rs)     = or (map hasBackrefs rs)
 hasBackrefs (Or rs)         = or (map hasBackrefs rs)
 hasBackrefs (BackRef _)     = True
 hasBackrefs _               = False
+
+hasAnchors (Repeat _ _ r)  = hasAnchors r
+hasAnchors (Group r)       = hasAnchors r
+hasAnchors (Concat rs)     = or (map hasAnchors rs)
+hasAnchors (Or rs)         = or (map hasAnchors rs)
+hasAnchors AnchorStart     = True
+hasAnchors AnchorEnd       = True
+hasAnchors _               = False
+
+escapeNL = concatMap (\c -> case c of '\n' -> "\\n"; _ -> [c])
+
+re2c Any                    = "."
+re2c (Char c)               = show [c]
+re2c (CClass cs)            = "[" ++ escapeNL (shuffleClass cs) ++ "]"
+re2c (CNotClass cs)         = "[^" ++ escapeNL (shuffleClass cs) ++ "]"
+re2c (Repeat m Nothing  r)  = re2c r ++ "{" ++ show m ++ ",}"
+re2c (Repeat m (Just n) r)  = re2c r ++ "{" ++ show m ++ "," ++ show n ++ "}"
+-- re2c anchors all regular expressions at the start implicitly. Not sure how
+-- to deal with end-of-string anchor yet. Probably by matching and checking,
+-- but this also has trouble when some branches match on $ and some don't.
+re2c AnchorStart        = error "Attempted to re2c a ^-anchored expression"
+re2c AnchorEnd          = error "Attempted to re2c a $-anchored expression"
+-- NB: if we don't use POSIX mode, groups need additional tags
+re2c (Group r)          = "( " ++ re2c r ++ " )"
+re2c (Concat rs)        = unwords (map re2c rs)
+re2c Empty              = ""
+re2c (Or rs)            = intercalate " | " (map re2c rs)
+re2c (BackRef _)        = error "back references are not supported by re2c"
+
+-- Adjust the regexp to work with re2c's implicit anchoring.
+-- ^re -> (re) and
+-- re without ^ -> ^.*(re)
+-- The matching code is similarly adjusted to offset the group indexing and
+-- treat group 1 as the "whole match" group.
+-- If the start anchor appears anywhere except first, error out.
+reanchor :: Regex -> Regex
+reanchor re
+    | hasAnchorStart re = Group (removeAnchorStart re)
+    | otherwise         = Concat [Repeat 0 Nothing Any, Group re]
+
+-- A bit weird to have an anchor repeating thing. (^foo)? could make sense, but
+-- it can't match more than once.
+hasAnchorStart (Repeat _ _ r) = hasAnchorStart r
+hasAnchorStart (Group r)      = hasAnchorStart r
+hasAnchorStart (Concat (r:_)) = hasAnchorStart r
+-- (foo|^bar) is useful, but not possible for reanchor to handle yet. As long
+-- as all branches match, we can factor out the ^ to the start.
+hasAnchorStart (Or rs)        = and (map hasAnchorStart rs)
+hasAnchorStart AnchorStart    = True
+hasAnchorStart _              = False
+
+removeAnchorStart (Repeat min max r) = Repeat min max (removeAnchorStart r)
+removeAnchorStart (Group r)          = Group (removeAnchorStart r)
+removeAnchorStart (Concat (r:rs))    = Concat (removeAnchorStart r:rs)
+removeAnchorStart (Or rs)            = Or (map removeAnchorStart rs)
+removeAnchorStart AnchorStart        = Empty -- TODO Arrange to remove it instead of replacing with Empty?
+removeAnchorStart other              = error ("Tried to remove ^ anchor from unanchored expression " ++ show other)
+
+re2cCompatible Empty = False
+re2cCompatible AnchorStart = False -- This is so trivial to do without a regexp engine at all :)
+re2cCompatible re = not (hasBackrefs re || hasAnchors (reanchor re))
 
 parseString :: Bool -> ByteString -> Regex
 parseString ere input = case parseOnly (pRegex ere) input of

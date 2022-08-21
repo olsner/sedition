@@ -15,6 +15,9 @@
 #include <string.h>
 #include <sys/random.h>
 
+/*!maxnmatch:re2c*/
+/*!conditions:re2c*/
+
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
 
@@ -272,6 +275,17 @@ static void copy_match(match_t* dst, match_t* src)
 static void next_match(match_t* dst, match_t* src, string* s)
 {
     match_regexp(dst, s, src->regex, src->matches[0].rm_eo);
+}
+
+static void set_match(match_t* m, string* s, const char** pmatch, size_t nmatch)
+{
+    assert(nmatch <= MAXGROUP);
+    m->result = true; // Only called for a successful match
+    const char* base = s->buf;
+    for (int i = 0; i < nmatch; i++) {
+        m->matches[i].rm_so = pmatch[2 * i + 0] - base;
+        m->matches[i].rm_eo = pmatch[2 * i + 1] - base;
+    }
 }
 
 //
