@@ -1,16 +1,19 @@
 {-# LANGUAGE OverloadedStrings, ApplicativeDo #-}
 
-module Regex (parseString, parseOnly, pRegex, Regex(..), reString) where
+module Regex (parseString, parseOnly, pRegex, Regex(..), reString, hasBackrefs) where
 
 import Control.Applicative
 
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as C
 import Data.Char (digitToInt)
-import Data.List (intercalate)
+import Data.List (intercalate, (\\))
 import Data.Set (Set)
+import qualified Data.Set as S
 
-import Text.Trifecta hiding (parseString)
+-- 'brackets' and a few similar combinators are "smart" and ignore whitespace
+-- and such. Don't get confused :)
+import Text.Trifecta hiding (parseString, brackets)
 import Text.Trifecta.Delta
 
 data Regex
@@ -41,6 +44,9 @@ ror [a] = a
 ror xs = Or xs
 
 charRange min max = enumFromTo min max
+uniq = S.toList . S.fromList
+cClass cs = CClass (uniq cs)
+cNotClass cs = CNotClass (uniq cs)
 
 -- {m} = exactly m copies
 rep 1   Nothing         = id
@@ -106,7 +112,7 @@ ereBranch = rconcat <$> some ereExpr
 ereExpr = flip id <$> ereNondupl <*> option id ereDuplSym
 ereNondupl = choice [ereOneChar, anchorStart, anchorEnd, backRef, ereGroup]
 ereDuplSym = star <|> plus <|> question <|> ereBracedCount
-ereGroup = char '(' *> (Group <$> pERE) <* char ')'
+ereGroup = between (char '(') (char ')') (Group <$> pERE)
 
 ereOneChar = ereOrdChar <|> ereQuotedChar <|> ereAny <|> bracketExpression
 ereSpecialChars = "$()*+.?[\\^{|"
@@ -114,12 +120,15 @@ ereQuotedChar = Char <$> escaped (oneOf ereSpecialChars)
 ereOrdChar = Char <$> noneOf ereSpecialChars
 
 -- Allegedly shared between BRE and ERE syntax.
+brackets = between (char '[') (char ']')
 bracketExpression = brackets (nonMatchingList <|> matchingList)
-matchingList = CClass <$> bracketList
-nonMatchingList = char '^' *> (CNotClass <$> bracketList)
+matchingList = cClass <$> bracketList
+nonMatchingList = char '^' *> (cNotClass <$> bracketList)
 bracketList = (++) <$> followList <*> option [] (string "-")
 -- TODO Handle ']' first in the list specially
 followList = concat <$> some expressionTerm
+
+-- left-factor and remove tries?
 expressionTerm :: Parser [Char]
 expressionTerm = try rangeExpression <|> singleExpression
 singleExpression = (:[]) <$> endRange -- <|> characterClass <|> equivalenceClass
@@ -128,7 +137,7 @@ rangeExpression = try (charRange <$> startRange <*> endRange) <|>
                   (charRange <$> startRange <*> char '-')
 startRange = endRange <* char '-'
 -- any char except ^, - or ], but only when they have special meaning?
-endRange = noneOf "-]" -- <|> collatingSymbol
+endRange = noneOf "-]" <?> "end of range" -- <|> collatingSymbol
 {-
 dotBracket = between (string "[.") (string ".]")
 eqBracket = between (string "[=") (string "=]")
@@ -145,8 +154,8 @@ reString (Char c)
     | c `elem` ereSpecialChars = ['\\', c]
     | otherwise             = [c]
 -- TODO ] must come first, - must be last, ^ can be anywhere except first.
-reString (CClass cs)        = "[" ++ cs ++ "]"
-reString (CNotClass cs)     = "[^" ++ cs ++ "]"
+reString (CClass cs)        = "[" ++ shuffleClass cs ++ "]"
+reString (CNotClass cs)     = "[^" ++ shuffleClass cs ++ "]"
 reString (Repeat 0 Nothing  r) = reString r ++ "*"
 reString (Repeat 0 (Just 1) r) = reString r ++ "?"
 reString (Repeat 1 Nothing  r) = reString r ++ "+"
@@ -161,6 +170,15 @@ reString (Concat rs)        = concatMap reString rs
 reString Empty              = ""
 reString (Or rs)            = intercalate "|" (map reString rs)
 reString (BackRef i)        = "\\" ++ show i
+
+shuffleClass cs
+    | ']' `elem` cs = putFirst ']'
+    | '-' `elem` cs = putLast '-'
+    | '^' `elem` cs = putLast '^'
+    | otherwise = cs
+  where
+    putFirst c = [c] ++ shuffleClass (cs \\ [c])
+    putLast  c = shuffleClass (cs \\ [c]) ++ [c]
 
 hasBackrefs (Repeat _ _ r)  = hasBackrefs r
 hasBackrefs (Group r)       = hasBackrefs r

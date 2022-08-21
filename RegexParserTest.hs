@@ -19,6 +19,9 @@ star = Repeat 0 Nothing
 plus = Repeat 1 Nothing
 rep min max = Repeat min (Just max)
 
+spaceToZ = enumFromTo ' ' 'Z'
+tabAndSpaceToZ = '\t' : spaceToZ
+
 tests =
   -- Simple
   [ (Both, "a", Char 'a')
@@ -37,7 +40,7 @@ tests =
   , (Both, "[|]", CClass "|")
   , (Both, "[^/]", CNotClass "/")
   -- ^ is only special when first
-  , (Both, "[a^]", CClass "a^")
+  , (Both, "[a^]", CClass "^a")
   , (Both, "[^^]", CNotClass "^")
   -- Escaped bracket in bracket should end it, backslash is not special
   , (Both, "[\\]/]f", Concat (CClass "\\" : map Char "/]f"))
@@ -48,8 +51,8 @@ tests =
   -- Ranges, and non-ranges with - at the end
   , (Both, "[a-cx-z]", CClass "abcxyz")
   , (Both, "[+--]", CClass "+,-")
-  , (Both, "[a-]", CClass "a-")
-  , (Both, "[^a-]", CNotClass "a-")
+  , (Both, "[a-]", CClass "-a")
+  , (Both, "[^a-]", CNotClass "-a")
   -- ']' first should be itself (otherwise it should terminate the bracket)
   -- (not implemented)
   -- , (Both, "[]]", CClass "]")
@@ -86,6 +89,17 @@ tests =
   , (ERE, "a{1,7}", rep 1 7 (Char 'a'))
   , (ERE, "a{1,}", plus (Char 'a'))
   , (ERE, "a{1}", Char 'a')
+
+  -- Something from dc.sed (it uses '}' instead of 'Z' as the end of range, but
+  -- we don't yet have complete parsing of brackets that contain ']', which is
+  -- in that range...)
+  , (BRE, "|?#[\t -Z]*", Concat (map Char "|?#" ++ [star (CClass tabAndSpaceToZ)]))
+  , (BRE, "[ -Z]", (CClass spaceToZ))
+  , (BRE, "[\t -Z]", (CClass tabAndSpaceToZ))
+  , (BRE, "[\t }]", (CClass "\t }"))
+  , (BRE, "[}]", (CClass "}"))
+  , (BRE, "[ ]", (CClass " "))
+  , (BRE, "[\t]", (CClass "\t"))
   ]
 
 -- Test code
