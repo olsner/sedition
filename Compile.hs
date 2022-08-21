@@ -262,7 +262,7 @@ re2c re =
     comment ("reanchored version of: " <> cstring res) <>
     re2c_header <> string7 (Regex.re2c re') <> " {\n" <>
     -- Skip the zeroeth group since that's added in the re2c conversion.
-    "set_match(m, s, yypmatch + 2, yynmatch - 2); return; }\n" <>
+    "set_match(m, s, yypmatch + 2, yynmatch - 1); return; }\n" <>
     -- re2c requires a $ rule. What is this supposed to do?
     "$ { m->result = false; return; }\n" <>
     "* { m->result = false; return; }\n" <>
