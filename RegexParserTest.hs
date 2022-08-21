@@ -55,10 +55,17 @@ tests =
   , (Both, "[^a-]", CNotClass "-a")
   -- ']' first should be itself (otherwise it should terminate the bracket)
   -- (not implemented)
-  -- , (Both, "[]]", CClass "]")
-  -- , (Both, "[^]]", CNotClass "]")
-  -- , (Both, "[^]-]", CNotClass "]-")
-  -- , (Both, "[]-]", CClass "]-")
+  , (Both, "[]]", CClass "]")
+  , (Both, "[^]]", CNotClass "]")
+  -- Initial - is also a special case
+  , (Both, "[-a]", CClass "-a")
+  , (Both, "[^-a]", CNotClass "-a")
+  -- Both an initial ] and a trailing -
+  , (Both, "[^]-]", CNotClass "-]")
+  , (Both, "[]-]", CClass "-]")
+  -- And a singleton - which isn't a range but either a trailing or leading -
+  , (Both, "[^-]", CNotClass "-")
+  , (Both, "[-]", CClass "-")
 
   -- back refs
   , (BRE, "\\(a\\)\\1", Concat [Group (Char 'a'), BackRef 1])
@@ -100,6 +107,10 @@ tests =
   , (BRE, "[}]", (CClass "}"))
   , (BRE, "[ ]", (CClass " "))
   , (BRE, "[\t]", (CClass "\t"))
+
+  -- A dash first is also a literal '-' rather than a range...
+  , (BRE, "|?!*[-+*/%^<>=]", Concat [Char '|', Char '?', star (Char '!'),
+            CClass "%*+-/<=>^"])
   ]
 
 -- Test code

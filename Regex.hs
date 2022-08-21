@@ -124,9 +124,9 @@ brackets = between (char '[') (char ']')
 bracketExpression = brackets (nonMatchingList <|> matchingList)
 matchingList = cClass <$> bracketList
 nonMatchingList = char '^' *> (cNotClass <$> bracketList)
-bracketList = (++) <$> followList <*> option [] (string "-")
--- TODO Handle ']' first in the list specially
-followList = concat <$> some expressionTerm
+bracketList = (++) <$> initList <*> option [] (string "-")
+initList = (++) <$> option [] (string "-" <|> string "]") <*> followList
+followList = concat <$> many expressionTerm
 
 -- left-factor and remove tries?
 expressionTerm :: Parser [Char]
