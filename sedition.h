@@ -21,16 +21,19 @@
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
 
+struct match_t;
+typedef struct match_t match_t;
+
+typedef void regex_match_fun_t(match_t*, string*, size_t);
 typedef regex_t re_t;
 
 #define MAXGROUP 9
 struct match_t {
-    re_t *regex;
+    regex_match_fun_t *fun;
 
     bool result;
     regmatch_t matches[MAXGROUP + 1];
 };
-typedef struct match_t match_t;
 
 static int lineNumber;
 static int inputFileIndex;
@@ -244,7 +247,8 @@ static void free_regexp(regex_t* re)
     regfree(re);
 }
 
-static void match_regexp(match_t* m, string* s, re_t* regex, size_t offset)
+static void match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
+                         regex_match_fun_t* fun)
 {
     memset(m, 0, sizeof(*m));
 
@@ -254,7 +258,7 @@ static void match_regexp(match_t* m, string* s, re_t* regex, size_t offset)
         return;
     }
 
-    m->regex = regex;
+    m->fun = fun;
     m->matches[0].rm_so = offset;
     m->matches[0].rm_eo = s->len;
     // REG_STARTEND with non-zero offset seems to imply REG_NOTBOL in glibc.
@@ -274,12 +278,15 @@ static void copy_match(match_t* dst, match_t* src)
 
 static void next_match(match_t* dst, match_t* src, string* s)
 {
-    match_regexp(dst, s, src->regex, src->matches[0].rm_eo);
+    src->fun(dst, s, src->matches[0].rm_eo);
 }
 
-static void set_match(match_t* m, string* s, const char** pmatch, size_t nmatch)
+static void set_match(match_t* m, string* s, const char** pmatch, size_t nmatch,
+                      regex_match_fun_t* fun)
 {
+    memset(m, 0, sizeof(*m));
     assert(nmatch <= MAXGROUP);
+    m->fun = fun;
     m->result = true; // Only called for a successful match
     const char* base = s->buf;
     for (int i = 0; i < nmatch; i++) {

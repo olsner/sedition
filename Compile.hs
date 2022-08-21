@@ -29,7 +29,7 @@ programHeader program =
     \/* v compiled program */\n\
     \static bool hasPendingIPC = false;\n\
     \static int exit_status = EXIT_SUCCESS;\n\
-    \static void (*lastRegex)(match_t*, string*, size_t) = NULL;\n" <>
+    \static regex_match_fun_t* lastRegex = NULL;\n" <>
     foldMap (declare "bool" pred) preds <>
     foldMap (declare "string" stringvar) strings <>
     foldMap (declare "FILE*" infd) files <>
@@ -244,25 +244,27 @@ resolveStringIndex s ix = case ix of
     groupStart m i = match m <> ".matches[" <> intDec i <> "].rm_so"
     groupEnd m i = match m <> ".matches[" <> intDec i <> "].rm_eo"
 
-compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else re2c re
+compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else re2c r re
   where
     re = Regex.parseString ere s
     needRegexec = not (Regex.re2cCompatible re)
     res = C.pack $ Regex.reString re
     wrapper b = "static void " <> regexfun r <> "(match_t* m, string* s, size_t offset) {\n" <> b <> "}\n"
     -- regcomp is run at start of main so we just need to forward the arguments.
-    regexec = comment ("regex with back references: " <> cstring res) <> sfun "match_regexp" ["m", "s", regex r, "offset"]
+    regexec = comment ("regex with back references: " <> cstring res) <>
+              sfun "match_regexp" ["m", "s", "offset", regex r, regexfun r]
 
 -- TODO re2c doesn't have anchors in its regexp syntax, we should add the
 -- necessary support ourselves. Add code to take a parsed regexp and strip the
 -- included anchors and adjust as appropriate here.
 -- For an initial anchor, do we need to add a non-capturing .* prefix here?
-re2c re =
+re2c r re =
     comment ("regex without back references: " <> cstring res') <>
     comment ("reanchored version of: " <> cstring res) <>
     re2c_header <> string7 (Regex.re2c re') <> " {\n" <>
     -- Skip the zeroeth group since that's added in the re2c conversion.
-    "set_match(m, s, yypmatch + 2, yynmatch - 1); return; }\n" <>
+    "set_match(m, s, yypmatch + 2, yynmatch - 1, " <> regexfun r <> ");\n" <>
+    "return; }\n" <>
     -- re2c requires a $ rule. What is this supposed to do?
     "$ { m->result = false; return; }\n" <>
     "* { m->result = false; return; }\n" <>
@@ -275,7 +277,9 @@ re2c re =
     -- instructions, but that requires at least a padding with a NUL to ensure
     -- we get to the bounds check before reading out of bounds.
     re2c_header = "\
-      \const char *YYCURSOR = s->buf, *YYLIMIT = s->buf + s->len, *YYMARKER;\n\
+      \const char *YYCURSOR = s->buf + offset;\n\
+      \const char *YYLIMIT = s->buf + s->len;\n\
+      \const char *YYMARKER = NULL;\n\
       \const char *yypmatch[YYMAXNMATCH * 2];\n\
       \size_t yynmatch;\n\
       \/*!stags:re2c format = 'const char *@@;\\n'; */\n\

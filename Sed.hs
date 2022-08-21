@@ -85,7 +85,7 @@ sedOptions =
   , Option ['t'] ["time"] (NoArg $ \o -> o { timeIt = True }) "Time optimization and execution of the program"
   , Option ['c'] ["compile"] (NoArg $ \o -> o { runIt = False, compileIt = True }) "Don't run the program, compile it to re2c instead."
   , Option [] ["run"] (NoArg $ \o -> o { runIt = True }) "Compile, compile and then run."
-  , Option [] ["re-output"] (ReqArg setReOutputFile "RE2C_FILE") "Path to compiled RE2C output file."
+  , Option ['o'] ["re-output"] (ReqArg setReOutputFile "RE2C_FILE") "Path to compiled RE2C output file."
   , Option [] ["c-output"] (ReqArg setCOutputFile "C_FILE") "Path to compiled C output file."
   , Option [] ["exe"] (ReqArg setExeOutputFile "EXEC_FILE") "Path to compiled executable."
   ]
