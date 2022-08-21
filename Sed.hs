@@ -36,6 +36,7 @@ data Options = Options
   , autoprint :: Bool
   , enableIPC :: Bool
   , scripts :: [Either S FilePath]
+  , reOutputFile :: FilePath
   , cOutputFile :: FilePath
   , exeOutputFile :: FilePath
   , dumpParse :: Bool
@@ -51,6 +52,7 @@ defaultOptions = Options
     , autoprint = True
     , enableIPC = True
     , scripts = []
+    , reOutputFile = "out.re"
     , cOutputFile = "out.c"
     , exeOutputFile = "a.out"
     , dumpParse = False
@@ -62,7 +64,8 @@ defaultOptions = Options
     , fuel = 1000000 }
 addScript s o = o { scripts = Left (C.pack s) : scripts o }
 addScriptFile f o = o { scripts = Right f : scripts o }
-setOutputFile f o = o { cOutputFile = f }
+setCOutputFile f o = o { cOutputFile = f }
+setReOutputFile f o = o { reOutputFile = f }
 setExeOutputFile f o = o { exeOutputFile = f }
 setFuel f o = o { fuel = f }
 
@@ -80,9 +83,10 @@ sedOptions =
   -- Not implemented!
   -- , Option [] ["sandbox"] (NoArg Sandbox) "operate in sandbox mode (unimplemented GNU sed feature)"
   , Option ['t'] ["time"] (NoArg $ \o -> o { timeIt = True }) "Time optimization and execution of the program"
-  , Option ['c'] ["compile"] (NoArg $ \o -> o { runIt = False, compileIt = True }) "Don't run the program, compile it to C instead."
+  , Option ['c'] ["compile"] (NoArg $ \o -> o { runIt = False, compileIt = True }) "Don't run the program, compile it to re2c instead."
   , Option [] ["run"] (NoArg $ \o -> o { runIt = True }) "Compile, compile and then run."
-  , Option ['o'] [] (ReqArg setOutputFile "OUTPUT_FILE") "Path to compiled output file."
+  , Option [] ["re-output"] (ReqArg setReOutputFile "RE2C_FILE") "Path to compiled RE2C output file."
+  , Option [] ["c-output"] (ReqArg setCOutputFile "C_FILE") "Path to compiled C output file."
   , Option [] ["exe"] (ReqArg setExeOutputFile "EXEC_FILE") "Path to compiled executable."
   ]
 
@@ -104,6 +108,8 @@ compileProgram :: Bool -> (H.Label, Program) -> FilePath -> IO ()
 compileProgram ipc (label, program) ofile = do
     let compiled = compileIR ipc label program
     C.writeFile ofile compiled
+
+compileRE2C reFile cFile = rawSystem "re2c" [reFile, "-o", cFile]
 
 compileC cFile exeFile = rawSystem "cc" ["-g", "-Og", cFile, "-o", exeFile]
 
@@ -163,7 +169,7 @@ do_main args = do
   flip catch exitWith $ do
     when compileIt $ do
       tCompileStart <- timestamp
-      compileProgram enableIPC (entryLabel, program') cOutputFile
+      compileProgram enableIPC (entryLabel, program') reOutputFile
       tCompileEnd <- timestamp
 
       when timeIt $ do
@@ -173,6 +179,16 @@ do_main args = do
     -- TODO or pipe the compiled C code directly into gcc so we can do it in
     -- one pass without an extra file inbetween.
     when (compileIt && runIt) $ do
+      tCompileStart <- timestamp
+      status <- compileRE2C reOutputFile cOutputFile
+      tCompileEnd <- timestamp
+
+      when timeIt $ do
+        reportTime "Compile (re2c)" tCompileStart tCompileEnd
+
+      when (status /= ExitSuccess) $ exitWith status
+
+       -- Now moving into triple compilation :)
       tCompileStart <- timestamp
       status <- compileC cOutputFile exeOutputFile
       tCompileEnd <- timestamp
