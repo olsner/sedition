@@ -6,7 +6,7 @@ GHCPACKAGES = random regex-base regex-posix trifecta network file-embed
 GHCFLAGS = -j$(N) -odir $(OUTDIR) -hidir $(OUTDIR) -O2 -threaded -rtsopts $(WARNINGS) -dynamic $(addprefix -package , $(GHCPACKAGES))
 GHC ?= ghc
 
-all: sed run-parsertest README.html
+all: sed run-parsertests README.html
 
 %.html: %.md
 	markdown $< >$@
@@ -27,7 +27,7 @@ RegexParserTest: force sed
 	@mkdir -p $(OUTDIR)
 	$(GHC) $(GHCFLAGS) --make -main-is RegexParserTest $@
 
-check: run-parsertest run-bsdtests run-gnused-tests compiler-tests
+check: run-parsertests run-bsdtests run-gnused-tests compiler-tests
 test: check
 compiler-tests: run-bsdtests-compiled run-gnused-tests-compiled
 
@@ -36,6 +36,8 @@ run-parsertest: ParserTest
 
 run-regexparsertest: RegexParserTest
 	./RegexParserTest
+
+run-parsertests: run-parsertest run-regexparsertest
 
 # There are a handful of failing BSD tests still, so ignore failures so we get
 # to the other test suites.
