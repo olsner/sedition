@@ -16,7 +16,6 @@
 #include <sys/random.h>
 
 /*!maxnmatch:re2c*/
-/*!conditions:re2c*/
 
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
