@@ -270,6 +270,9 @@ re2c r re =
     "* { return; }\n" <>
     "*/\n"
   where
+    -- This should be optimized out earlier - NextMatch on a start-anchored
+    -- regexp will always fail.
+    startAnchored = Regex.hasAnchorStart re
     re' = Regex.reanchor re
     res' = C.pack $ Regex.reString re'
     res = C.pack $ Regex.reString re
@@ -283,7 +286,9 @@ re2c r re =
       \const char *yypmatch[YYMAXNMATCH * 2];\n\
       \size_t yynmatch;\n\
       \m->result = false;\n\
-      \if (offset && offset >= s->len) { return; }\n\
+      \if (offset" <>
+      (if startAnchored then "" else " && offset >= s->len") <>
+      ") { return; }\n\
       \/*!stags:re2c format = 'const char *@@;\\n'; */\n\
       \/*!re2c\n\
       \    re2c:define:YYCTYPE = char;\n\

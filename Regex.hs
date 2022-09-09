@@ -5,6 +5,7 @@ module Regex (
     pRegex,
     Regex(..),
     reString, re2c,
+    hasAnchorStart,
     hasAnchors, hasBackrefs, reanchor, re2cCompatible
     ) where
 
