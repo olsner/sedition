@@ -220,12 +220,15 @@ re2cEsc = concatMap f
   where
     f '\n' = "\\n"
     f ']'  = "\\]"
+    f '\\'  = "\\\\"
     f c    = [c]
 
 re2c Any                    = "."
 re2c (Char c)               = show [c]
 re2c (CClass cs)            = "[" ++ re2cEsc (shuffleClass cs) ++ "]"
 re2c (CNotClass cs)         = "[^" ++ re2cEsc (shuffleClass cs) ++ "]"
+re2c (Repeat 0 Nothing  r)  = re2c r ++ "*"
+re2c (Repeat 1 Nothing  r)  = re2c r ++ "+"
 re2c (Repeat m Nothing  r)  = re2c r ++ "{" ++ show m ++ ",}"
 re2c (Repeat m (Just n) r)  = re2c r ++ "{" ++ show m ++ "," ++ show n ++ "}"
 -- re2c anchors all regular expressions at the start implicitly. Not sure how
