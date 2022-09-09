@@ -285,7 +285,7 @@ static void set_match(match_t* m, string* s, const char** pmatch, size_t nmatch,
                       regex_match_fun_t* fun)
 {
     memset(m, 0, sizeof(*m));
-    assert(nmatch <= MAXGROUP);
+    assert(nmatch <= MAXGROUP + 1);
     m->fun = fun;
     m->result = true; // Only called for a successful match
     const char* base = s->buf;
