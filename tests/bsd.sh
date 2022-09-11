@@ -563,6 +563,9 @@ u2/g' lines1
 	# Actually works fine without setting REG_NOTBOL properly. Seems to be
 	# implied when REG_STARTEND is used with a positive offset.
 	mark '8.18' ; echo 'aaa' | $SED -e 's/^a/b/g'
+	mark '8.19' ; echo | $SED -e 's/a?/b/g'
+	mark '8.20' ; echo foo | $SED -e 's/a?/b/g'
+	mark '8.21' ; echo foo foo | $SED -e 's/foo$/bar/'
 }
 
 test_sedition()
