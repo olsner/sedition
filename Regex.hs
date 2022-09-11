@@ -5,7 +5,8 @@ module Regex (
     pRegex,
     Regex(..),
     reString, re2c,
-    hasAnchorStart,
+    hasAnchorStart, hasAnchorEnd,
+    unanchor,
     hasAnchors, hasBackrefs, reanchor, re2cCompatible
     ) where
 
@@ -254,6 +255,8 @@ reanchor re
     | hasAnchorStart re = Group (removeAnchorStart re)
     | otherwise         = Concat [Repeat 0 Nothing Any, Group re]
 
+unanchor = removeAnchorStart . removeAnchorEnd
+
 -- A bit weird to have an anchor repeating thing. (^foo)? could make sense, but
 -- it can't match more than once.
 hasAnchorStart (Repeat _ _ r) = hasAnchorStart r
@@ -265,16 +268,41 @@ hasAnchorStart (Or rs)        = and (map hasAnchorStart rs)
 hasAnchorStart AnchorStart    = True
 hasAnchorStart _              = False
 
+hasAnchorEnd (Repeat _ _ r) = hasAnchorEnd r
+hasAnchorEnd (Group r)      = hasAnchorEnd r
+hasAnchorEnd (Concat rs)    = hasAnchorEnd (last rs)
+-- (foo|bar$) can't be handled yet, but if every alternative ends in $ we can.
+hasAnchorEnd (Or rs)        = and (map hasAnchorEnd rs)
+hasAnchorEnd AnchorEnd      = True
+hasAnchorEnd _              = False
+
+
 removeAnchorStart (Repeat min max r) = Repeat min max (removeAnchorStart r)
 removeAnchorStart (Group r)          = Group (removeAnchorStart r)
 removeAnchorStart (Concat (r:rs))    = Concat (removeAnchorStart r:rs)
 removeAnchorStart (Or rs)            = Or (map removeAnchorStart rs)
 removeAnchorStart AnchorStart        = Empty -- TODO Arrange to remove it instead of replacing with Empty?
-removeAnchorStart other              = error ("Tried to remove ^ anchor from unanchored expression " ++ show other)
+removeAnchorStart other              = other -- error ("Tried to remove ^ anchor from unanchored expression " ++ show other)
+
+removeAnchorEnd (Repeat min max r) = Repeat min max (removeAnchorEnd r)
+removeAnchorEnd (Group r)          = Group (removeAnchorEnd r)
+removeAnchorEnd (Concat rs)        = Concat (mapLast removeAnchorEnd rs)
+removeAnchorEnd (Or rs)            = Or (map removeAnchorEnd rs)
+removeAnchorEnd AnchorEnd          = Empty -- TODO Arrange to remove it instead of replacing with Empty?
+removeAnchorEnd other              = other -- error ("Tried to remove $ anchor from unanchored expression " ++ show other)
+
+mapLast _ [] = []
+mapLast f [x] = [f x]
+mapLast f (x:xs) = x : mapLast f xs
 
 re2cCompatible Empty = False
-re2cCompatible AnchorStart = False -- This is so trivial to do without a regexp engine at all :)
-re2cCompatible re = not (hasBackrefs re || hasAnchors (reanchor re))
+-- These could (should?) just be handled by special code... Or even be
+-- optimized away before we even get to consider trying to match against them.
+-- e.g: always successful once, NextMatch always fails, resulting start/end
+-- match offsets are constant 0 or length-of-string.
+re2cCompatible AnchorStart = False
+re2cCompatible AnchorEnd = False
+re2cCompatible re = not (hasBackrefs re || hasAnchors (unanchor re))
 
 parseString :: Bool -> ByteString -> Regex
 parseString ere input = case parseOnly (pRegex ere) input of

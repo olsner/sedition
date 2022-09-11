@@ -251,7 +251,7 @@ compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else re2c r re
     res = C.pack $ Regex.reString re
     wrapper b = "static void " <> regexfun r <> "(match_t* m, string* s, size_t offset) {\n" <> b <> "}\n"
     -- regcomp is run at start of main so we just need to forward the arguments.
-    regexec = comment ("regex with back references: " <> cstring res) <>
+    regexec = comment ("unsupported regex: " <> cstring res) <>
               sfun "match_regexp" ["m", "s", "offset", regex r, regexfun r]
 
 -- TODO re2c doesn't have anchors in its regexp syntax, we should add the
@@ -259,21 +259,31 @@ compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else re2c r re
 -- included anchors and adjust as appropriate here.
 -- For an initial anchor, do we need to add a non-capturing .* prefix here?
 re2c r re =
-    comment ("regex without back references: " <> cstring res') <>
-    comment ("reanchored version of: " <> cstring res) <>
-    re2c_header <> string7 (Regex.re2c re') <> " {\n" <>
-    -- Skip the zeroeth group since that's added in the re2c conversion.
-    "set_match(m, s, yypmatch + 2, yynmatch - 1, " <> regexfun r <> ");\n" <>
-    "return; }\n" <>
+    comment ("re2c-compatible regex: " <> cstring res') <>
+    comment ("unanchored version of: " <> cstring res) <>
+    re2c_header <> string7 (Regex.re2c re') <> " {" <>
+    -- If the regexp is anchored at the end, require that the end is at the end.
+    (if endAnchored then endAnchorCheck else " {\n") <>
+    -- Skip the zeroeth group since that's added by reanchor.
+    -- "set_match(m, s, yypmatch + 2, yynmatch - 1, " <> regexfun r <> ");\n" <>
+    -- But it's not added by unanchor...
+    "set_match(m, s, yypmatch, yynmatch, " <> regexfun r <> ");\n" <>
+    "return;\n} }\n" <>
+    -- Skip over unmatched characters to find where the real match starts.
+    (if startAnchored then mempty else ". { continue; }\n") <>
     -- re2c requires a $ rule. What is this supposed to do?
-    "$ { return; }\n" <>
-    "* { return; }\n" <>
-    "*/\n"
+    -- TODO Needs to be removed since it matches '\n'?
+    "$ { return; }\n\
+    \* { return; }\n\
+    \*/\n\
+    \}\n"
   where
-    -- This should be optimized out earlier - NextMatch on a start-anchored
-    -- regexp will always fail.
+    -- TODO Add an earlier optimization for this since NextMatch on a
+    -- start-anchored regexp will always fail.
     startAnchored = Regex.hasAnchorStart re
-    re' = Regex.reanchor re
+    endAnchored = Regex.hasAnchorEnd re
+    endAnchorCheck = "\nif (yypmatch[1] == YYLIMIT) {\n"
+    re' = Regex.unanchor re
     res' = C.pack $ Regex.reString re'
     res = C.pack $ Regex.reString re
     -- TODO Fix bounds checks - this follows the "sentinel with bounds checks"
@@ -289,6 +299,7 @@ re2c r re =
       \if (offset" <>
       (if startAnchored then "" else " && offset >= s->len") <>
       ") { return; }\n\
+      \while (YYCURSOR < YYLIMIT) {\n\
       \/*!stags:re2c format = 'const char *@@;\\n'; */\n\
       \/*!re2c\n\
       \    re2c:define:YYCTYPE = char;\n\
