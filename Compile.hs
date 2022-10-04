@@ -261,22 +261,20 @@ compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else re2c r re
 re2c r re =
     comment ("re2c-compatible regex: " <> cstring res') <>
     comment ("unanchored version of: " <> cstring res) <>
-    re2c_header <> string7 (Regex.re2c re') <> " {" <>
+    re2c_header <> string7 (Regex.re2c re') <> " {\n" <>
     -- If the regexp is anchored at the end, require that the end is at the end.
-    (if endAnchored then endAnchorCheck else " {\n") <>
+    (if endAnchored then endAnchorCheck else "\nif (true) {\n") <>
     -- Skip the zeroeth group since that's added by reanchor.
     -- "set_match(m, s, yypmatch + 2, yynmatch - 1, " <> regexfun r <> ");\n" <>
     -- But it's not added by unanchor...
-    "set_match(m, s, yypmatch, yynmatch, " <> regexfun r <> ");\n" <>
-    "return;\n} }\n" <>
+    "  set_match(m, s, yypmatch, yynmatch, " <> regexfun r <> ");\n" <>
+    "  return;\n\
+    \}\n\
+    \}\n" <>
     -- Skip over unmatched characters to find where the real match starts.
-    (if startAnchored then mempty else ". { continue; }\n") <>
-    -- re2c requires a $ rule. What is this supposed to do?
-    -- TODO Needs to be removed since it matches '\n'?
-    "$ { return; }\n\
-    \* { return; }\n\
-    \*/\n\
-    \}\n"
+    (if startAnchored then mempty else "[\\001-\\377] { continue; }\n") <>
+    "*/\n\
+    \} while (YYCURSOR < YYLIMIT);\n"
   where
     -- TODO Add an earlier optimization for this since NextMatch on a
     -- start-anchored regexp will always fail.
@@ -286,10 +284,12 @@ re2c r re =
     re' = Regex.unanchor re
     res' = C.pack $ Regex.reString re'
     res = C.pack $ Regex.reString re
-    -- TODO Fix bounds checks - this follows the "sentinel with bounds checks"
-    -- instructions, but that requires at least a padding with a NUL to ensure
-    -- we get to the bounds check before reading out of bounds.
+    -- TODO Fix bounds checks - this follows the bounds check with padding
+    -- instructions (default), but that fails if a regexp can match NULs.
+    -- We may need to determine if a regexp can match NULs and then enable more
+    -- pessimistic bounds checking in re2c...
     re2c_header = "\
+      \clear_maxfill(s);\n\
       \const char *YYCURSOR = s->buf + offset;\n\
       \const char *YYLIMIT = s->buf + s->len;\n\
       \const char *YYMARKER = NULL;\n\
@@ -299,11 +299,9 @@ re2c r re =
       \if (offset" <>
       (if startAnchored then "" else " && offset >= s->len") <>
       ") { return; }\n\
-      \while (YYCURSOR < YYLIMIT) {\n\
+      \do {\n\
       \/*!stags:re2c format = 'const char *@@;\\n'; */\n\
       \/*!re2c\n\
-      \    re2c:define:YYCTYPE = char;\n\
-      \    re2c:yyfill:enable = 0;\n\
-      \    re2c:eof = 0;\n\
+      \    re2c:define:YYCTYPE = uint8_t;\n\
       \    re2c:posix-captures = 1;\n\n\
       \    "

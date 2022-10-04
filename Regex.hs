@@ -224,7 +224,10 @@ re2cEsc = concatMap f
     f '\\'  = "\\\\"
     f c    = [c]
 
-re2c Any                    = "."
+-- re2c '.' doesn't match newline, and having anything matching NUL removes
+-- bounds checks, so implement '.' by matching any byte except 0.
+-- (TODO: Figure out what the correct . behavior is wrt NULs and newlines.
+re2c Any                    = "[\\001-\\377]"
 re2c (Char c)               = show [c]
 re2c (CClass cs)            = "[" ++ re2cEsc (shuffleClass cs) ++ "]"
 re2c (CNotClass cs)         = "[^" ++ re2cEsc (shuffleClass cs) ++ "]"
@@ -255,7 +258,12 @@ reanchor re
     | hasAnchorStart re = Group (removeAnchorStart re)
     | otherwise         = Concat [Repeat 0 Nothing Any, Group re]
 
-unanchor = removeAnchorStart . removeAnchorEnd
+unanchor re = re''
+  where
+    re'' | hasAnchorStart re' = removeAnchorStart re'
+         | otherwise          = re'
+    re'  | hasAnchorEnd re    = removeAnchorEnd re
+         | otherwise          = re
 
 -- A bit weird to have an anchor repeating thing. (^foo)? could make sense, but
 -- it can't match more than once.
@@ -282,14 +290,14 @@ removeAnchorStart (Group r)          = Group (removeAnchorStart r)
 removeAnchorStart (Concat (r:rs))    = Concat (removeAnchorStart r:rs)
 removeAnchorStart (Or rs)            = Or (map removeAnchorStart rs)
 removeAnchorStart AnchorStart        = Empty -- TODO Arrange to remove it instead of replacing with Empty?
-removeAnchorStart other              = other -- error ("Tried to remove ^ anchor from unanchored expression " ++ show other)
+removeAnchorStart other              = error ("Tried to remove ^ anchor from unanchored expression " ++ show other)
 
 removeAnchorEnd (Repeat min max r) = Repeat min max (removeAnchorEnd r)
 removeAnchorEnd (Group r)          = Group (removeAnchorEnd r)
 removeAnchorEnd (Concat rs)        = Concat (mapLast removeAnchorEnd rs)
 removeAnchorEnd (Or rs)            = Or (map removeAnchorEnd rs)
 removeAnchorEnd AnchorEnd          = Empty -- TODO Arrange to remove it instead of replacing with Empty?
-removeAnchorEnd other              = other -- error ("Tried to remove $ anchor from unanchored expression " ++ show other)
+removeAnchorEnd other              = error ("Tried to remove $ anchor from unanchored expression " ++ show other)
 
 mapLast _ [] = []
 mapLast f [x] = [f x]

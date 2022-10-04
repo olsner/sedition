@@ -16,6 +16,8 @@
 #include <sys/random.h>
 
 /*!maxnmatch:re2c*/
+/*!max:re2c*/
+#define YYFILL(len) return;
 
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
@@ -55,9 +57,9 @@ static void ensure_len_discard(string* s, size_t n)
         if (s->alloc) {
             free(s->buf);
         }
-        s->buf = malloc(n);
+        s->buf = malloc(n + YYMAXFILL);
         if (!s->buf) abort();
-        s->alloc = malloc_usable_size(s->buf);
+        s->alloc = malloc_usable_size(s->buf) - YYMAXFILL;
         s->len = 0;
     }
 }
@@ -68,14 +70,14 @@ static void ensure_len(string* s, size_t n)
         n = grow(s->alloc, n);
         if (s->alloc == 0) {
             // Copy static string to new heap buffer.
-            char *new_buf = malloc(n);
+            char *new_buf = malloc(n + YYMAXFILL);
             memcpy(new_buf, s->buf, s->len);
             s->buf = new_buf;
         } else {
-            s->buf = realloc(s->buf, n);
+            s->buf = realloc(s->buf, n + YYMAXFILL);
         }
         if (!s->buf) abort();
-        s->alloc = malloc_usable_size(s->buf);
+        s->alloc = malloc_usable_size(s->buf) - YYMAXFILL;
     }
 }
 
@@ -91,6 +93,15 @@ static void free_string(string* s)
     }
     s->alloc = s->len = 0;
     s->buf = 0;
+}
+
+static void clear_maxfill(string* s)
+{
+    const size_t n = s->len;
+    // Ensure it's allocated so we can pad it...
+    ensure_len(s, 1);
+    memset(s->buf + n, 0, YYMAXFILL);
+    s->len = n; // Restore original length if 0
 }
 
 static void set_str_const(string* dst, const char* src, size_t n)
@@ -277,7 +288,13 @@ static void copy_match(match_t* dst, match_t* src)
 
 static void next_match(match_t* dst, match_t* src, string* s)
 {
-    src->fun(dst, s, src->matches[0].rm_eo);
+    size_t offset = src->matches[0].rm_eo;
+    // Try to handle regexpes that match the empty string. We should try every
+    // position and also try at the end of the string.
+    if (src->matches[0].rm_so == offset && offset < s->len) {
+        offset++;
+    }
+    src->fun(dst, s, offset);
 }
 
 static void set_match(match_t* m, string* s, const char** pmatch, size_t nmatch,
