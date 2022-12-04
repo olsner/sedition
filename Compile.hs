@@ -21,6 +21,7 @@ import AST
 import qualified IR
 import IR (Program)
 import qualified Regex
+import qualified TDFA2C
 
 seditionRuntime = $(embedStringFile "sedition.h")
 
@@ -249,10 +250,16 @@ compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else re2c r re
     re = Regex.parseString ere s
     needRegexec = not (Regex.re2cCompatible re)
     res = C.pack $ Regex.reString re
-    wrapper b = "static void " <> regexfun r <> "(match_t* m, string* s, size_t offset) {\n" <> b <> "}\n"
+    wrapper b = "static void " <> regexfun r <> "(match_t* m, string* s, size_t offset) {\n" <> b <> comment (tdfa2c r re) <> "}\n"
     -- regcomp is run at start of main so we just need to forward the arguments.
     regexec = comment ("unsupported regex: " <> cstring res) <>
               sfun "match_regexp" ["m", "s", "offset", regex r, regexfun r]
+
+tdfa2c r re =
+    comment ("tdfa2c regex: " <> cstring res) <>
+    (trace ("TNFA: " ++ show res ++ " => " ++ TDFA2C.tdfa2c re) $ comment (string7 (TDFA2C.tdfa2c re)))
+  where
+    res = C.pack $ Regex.reString re
 
 -- TODO re2c doesn't have anchors in its regexp syntax, we should add the
 -- necessary support ourselves. Add code to take a parsed regexp and strip the
