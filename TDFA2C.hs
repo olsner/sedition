@@ -1,5 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 
+-- Based on https://arxiv.org/pdf/2206.01398.pdf, "A Closer Look at TDFA"
+
 module TDFA2C where
 
 import Control.Monad.Trans.State.Strict
@@ -84,39 +86,56 @@ orTNFA finalState x y = do
   q1' <- ntags (tnfaStartState q2) q1
   let qN = q1 <> q2 <> q1' <> q2'
   s0 <- newState
-  return (qN { tnfaStartState = s0 } <>
-          eps s0 (tnfaStartState q1) 1 <>
-          eps s0 (tnfaStartState q1') 2)
+  return (eps s0 (tnfaStartState q1) 1 <>
+          eps s0 (tnfaStartState q1') 2 <>
+          qN)
 
 tnfa :: StateId -> TaggedRegex -> GenTNFA TNFA
 tnfa finalState re =
   case re of
     Empty -> return (TNFA finalState finalState [])
     Term term -> trans term finalState
+    TagTerm t -> tag finalState 1 t
     Cat x y -> do
       q2 <- tnfa finalState y
       q1 <- tnfa (tnfaStartState q2) x
       return (q1 <> q2)
-    -- Number groups outside of the TNFA generation machine so that they are
-    -- consistently numbered from where their left-hand parenthesis is.
-    (Group t1 x t2) -> do
-        q3 <- tag finalState 1 t2
-        q2 <- tnfa (tnfaStartState q3) x
-        q1 <- tag (tnfaStartState q2) 1 t1
-        return (q1 <> q2 <> q3)
     (Or x y) -> orTNFA finalState x y
+    (Repeat 0 m x) -> do
+        m1 <- tnfa finalState (Repeat 1 m x)
+        let q1 = tnfaStartState m1
+        m1' <- ntags finalState m1
+        let q1' = tnfaStartState m1'
+        q0 <- newState
+        return (eps q0 q1 1 <> eps q0 q1' 2 <> m1' <> m1)
+    (Repeat 1 Nothing x) -> do
+        q1 <- newState
+        m1 <- tnfa q1 x
+        let q0 = tnfaStartState m1
+        return (m1 <> eps q1 q0 1 <> eps q1 finalState 2)
+    (Repeat 1 (Just 1) x) -> tnfa finalState x
+    (Repeat 1 (Just m) x) -> do
+        m2@(TNFA q1 _ _) <- tnfa finalState (Repeat 1 (Just (pred m)) x)
+        m1@(TNFA _ q2 _) <- tnfa q1 x
+        return (m1 <> m2 <>
+                eps q1 q2 2 <>
+                eps q1 finalState 1)
+    (Repeat n m x) -> do
+        q2 <- tnfa finalState (Repeat (pred n) (pred <$> m) x)
+        q1 <- tnfa (tnfaFinalState q2) x
+        return (q1 <> q2)
 
 data TaggedRegex
   = Empty
   | Term TNFATrans
-  | Group TagId TaggedRegex TagId
+  | TagTerm TagId
   | Cat TaggedRegex TaggedRegex
   | Or TaggedRegex TaggedRegex
   | Repeat Int (Maybe Int) TaggedRegex
   deriving (Show, Ord, Eq)
 
 tagRegex :: Regex -> TaggedRegex
-tagRegex re = Group 0 (evalState (go re) 2) 1
+tagRegex re = evalState (go (Regex.Group re)) 0
   where
     go Regex.Empty = return Empty
     go Regex.Any = return (Term Any)
@@ -127,11 +146,16 @@ tagRegex re = Group 0 (evalState (go re) 2) 1
     go Regex.AnchorEnd = return (Term EOL)
     go (Regex.Concat xs) = foldr1 Cat <$> mapM go xs
     go (Regex.Or xs) = foldr1 Or <$> mapM go xs
-    go (Regex.Group x) = Group <$> tag <*> go x <*> tag
+    go (Regex.Group x) = do
+      tStart <- tag
+      tEnd <- tag
+      tre <- go x
+      return (cat3 tStart tre tEnd)
     go (Regex.Repeat n m x) = Repeat n m <$> go x
     go (Regex.BackRef i) = error "Back-references not supported in TDFA"
 
-    tag = get <* modify succ
+    tag = gets TagTerm <* modify succ
+    cat3 x y z = Cat x (Cat y z)
 
 -- tdfa re = determinize (tnfa re)
   -- | CClass [Char]
