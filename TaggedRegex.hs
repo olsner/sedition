@@ -68,3 +68,5 @@ tagRegex re = evalState (go (Regex.Group re)) 0
     tag = gets TagTerm <* modify succ
     cat3 x y z = Cat x (Cat y z)
 
+testTagRegex :: String -> TaggedRegex
+testTagRegex = tagRegex . Regex.parseString True . C.pack
