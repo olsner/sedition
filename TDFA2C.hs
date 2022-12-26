@@ -19,21 +19,9 @@ import Debug.Trace
 import Regex (Regex)
 import qualified Regex
 
+import TaggedRegex
+
 type StateId = Int
-type TagId = Int
-type Prio = Int
-
-data Tag = NoTag | UnTag TagId | Tag TagId deriving (Show, Ord, Eq)
-
-data TNFATrans
-  = BOL
-  | Any
-  | EOL
-  | Symbol Char
-  | CClass [Char]
-  | CNotClass [Char]
-  | Eps Prio Tag
-  deriving (Show, Ord, Eq)
 
 data TNFA = TNFA {
     tnfaStartState :: StateId,
@@ -127,38 +115,6 @@ tnfa finalState re =
         q2 <- tnfa finalState (Repeat (pred n) (pred <$> m) x)
         q1 <- tnfa (tnfaFinalState q2) x
         return (q1 <> q2)
-
-data TaggedRegex
-  = Empty
-  | Term TNFATrans
-  | TagTerm TagId
-  | Cat TaggedRegex TaggedRegex
-  | Or TaggedRegex TaggedRegex
-  | Repeat Int (Maybe Int) TaggedRegex
-  deriving (Show, Ord, Eq)
-
-tagRegex :: Regex -> TaggedRegex
-tagRegex re = evalState (go (Regex.Group re)) 0
-  where
-    go Regex.Empty = return Empty
-    go Regex.Any = return (Term Any)
-    go (Regex.Char c) = return (Term (Symbol c))
-    go (Regex.CClass cs) = return (Term (CClass cs))
-    go (Regex.CNotClass cs) = return (Term (CNotClass cs))
-    go Regex.AnchorStart = return (Term BOL)
-    go Regex.AnchorEnd = return (Term EOL)
-    go (Regex.Concat xs) = foldr1 Cat <$> mapM go xs
-    go (Regex.Or xs) = foldr1 Or <$> mapM go xs
-    go (Regex.Group x) = do
-      tStart <- tag
-      tEnd <- tag
-      tre <- go x
-      return (cat3 tStart tre tEnd)
-    go (Regex.Repeat n m x) = Repeat n m <$> go x
-    go (Regex.BackRef i) = error "Back-references not supported in TDFA"
-
-    tag = gets TagTerm <* modify succ
-    cat3 x y z = Cat x (Cat y z)
 
 -- tdfa re = determinize (tnfa re)
   -- | CClass [Char]
@@ -272,3 +228,25 @@ epsilonClosure tnfa c k eol = M.fromList $ go (M.toList c) M.empty
                   [p | bol, (s,BOL,p) <- ts, s == q]
     possibleStates c' = [y | y@(q,_) <- M.toList c', q == fin || possibleState q]
     possibleState q = or [symbolTrans t | (s,t,_) <- ts, s == q]
+
+type RegId = Int
+data RegVal = Nil | Pos deriving (Show, Ord, Eq)
+data RegOp
+  = SetReg RegId RegVal -- ^ Set register to nil or current position
+  | CopyReg RegId RegId -- ^ CopyReg i j => i <- j
+  | CopyAppend RegId [RegVal] -- ^ i <- j <> h
+  deriving (Show, Ord, Eq)
+
+type RegOps = [RegOp]
+
+data TDFA = TDFA {
+    tdfaStartState :: StateId,
+    tdfaFinalStates :: Set StateId,
+    tdfaFinalRegisters :: Map TagId RegId,
+    tdfaFinalFunction :: Map StateId RegOps
+  }
+  deriving (Show, Ord, Eq)
+
+type GenTDFA a = State Int a
+
+
