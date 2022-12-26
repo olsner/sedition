@@ -82,8 +82,8 @@ tagRegex re = evalState (go (Regex.Group re)) 0
 
     tag = gets TagTerm <* modify succ
 
-testTagRegex :: String -> TaggedRegex
-testTagRegex = fst . fixTags . tagRegex . Regex.parseString True . C.pack
+testTagRegex :: String -> (TaggedRegex, FixedTagMap)
+testTagRegex = fixTags . tagRegex . Regex.parseString True . C.pack
 
 -- Based on usgae information, eliminate some of the tags in a regex.
 selectTags :: (TagId -> Bool) -> TaggedRegex -> TaggedRegex

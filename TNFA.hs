@@ -27,14 +27,18 @@ type StateId = Int
 data TNFA = TNFA {
     tnfaStartState :: StateId,
     tnfaFinalState :: StateId,
-    tnfaTrans :: [(StateId, TNFATrans, StateId)]
+    tnfaTrans :: [(StateId, TNFATrans, StateId)],
+    -- TODO This is just attached after construction. We want to bundle it for
+    -- following steps, but maybe that means the construction should stop using
+    -- the same data type?
+    tnfaTagMap :: FixedTagMap
   }
   deriving (Show, Ord, Eq)
 
 instance Semigroup TNFA where
   -- Doesn't add a transition from final a -> start b, assume that's already
   -- done?
-  a <> b = TNFA (tnfaStartState a) (tnfaFinalState b) (tnfaTrans a ++ tnfaTrans b)
+  a <> b = TNFA (tnfaStartState a) (tnfaFinalState b) (tnfaTrans a ++ tnfaTrans b) M.empty
 
 type GenTNFA a = State Int a
 
@@ -45,7 +49,7 @@ type GenTNFA a = State Int a
 ntags :: StateId -> TNFA -> GenTNFA TNFA
 ntags finalState tnfa = go (tnfaTrans tnfa)
   where
-    go []     = return (TNFA finalState finalState [])
+    go []     = return (TNFA finalState finalState [] M.empty)
     go ((_,Eps p (Tag tag),_):xs) = do
         q2 <- go xs
         q1 <- trans (Eps p (UnTag tag)) (tnfaStartState q2)
@@ -58,7 +62,7 @@ tag s p n = trans (Eps p (Tag n)) s
 trans :: TNFATrans -> StateId -> GenTNFA TNFA
 trans t p = newState >>= \q -> return (trans' q t p)
 
-trans' q t p = TNFA q p [(q, t, p)]
+trans' q t p = TNFA q p [(q, t, p)] M.empty
 eps q s p = trans' q (Eps p NoTag) s
 
 newState = get <* modify succ
@@ -88,7 +92,7 @@ orTNFA finalState x y = do
 tnfa :: StateId -> TaggedRegex -> GenTNFA TNFA
 tnfa finalState re =
   case re of
-    Empty -> return (TNFA finalState finalState [])
+    Empty -> return (TNFA finalState finalState [] M.empty)
     Term term -> trans term finalState
     TagTerm t -> tag finalState 1 t
     Cat x y -> do
@@ -97,18 +101,18 @@ tnfa finalState re =
       return (q1 <> q2)
     (Or x y) -> orTNFA finalState x y
     (Repeat 0 m x) -> do
-        m1@(TNFA q1 _ _) <- tnfa finalState (Repeat 1 m x)
-        m1'@(TNFA q1' _ _) <- ntags finalState m1
+        m1@(TNFA q1 _ _ _) <- tnfa finalState (Repeat 1 m x)
+        m1'@(TNFA q1' _ _ _) <- ntags finalState m1
         q0 <- newState
         return (eps q0 q1 1 <> eps q0 q1' 2 <> m1' <> m1)
     (Repeat 1 Nothing x) -> do
         q1 <- newState
-        m1@(TNFA q0 _ _) <- tnfa q1 x
+        m1@(TNFA q0 _ _ _) <- tnfa q1 x
         return (m1 <> eps q1 q0 1 <> eps q1 finalState 2)
     (Repeat 1 (Just 1) x) -> tnfa finalState x
     (Repeat 1 (Just m) x) -> do
-        m2@(TNFA q1 _ _) <- tnfa finalState (Repeat 1 (Just (pred m)) x)
-        m1@(TNFA _ q2 _) <- tnfa q1 x
+        m2@(TNFA q1 _ _ _) <- tnfa finalState (Repeat 1 (Just (pred m)) x)
+        m1@(TNFA _ q2 _ _) <- tnfa q1 x
         return (m1 <> m2 <>
                 eps q1 q2 2 <>
                 eps q1 finalState 1)
@@ -119,13 +123,13 @@ tnfa finalState re =
 
 -- API?
 
-genTNFA :: TaggedRegex -> TNFA
-genTNFA re = evalState (tnfa 0 re) 1
+genTNFA :: (TaggedRegex, FixedTagMap) -> TNFA
+genTNFA (re, m) = (evalState (tnfa 0 re) 1) { tnfaTagMap = m }
 
 -- Test functions
 
 prettyStates :: TNFA -> String
-prettyStates TNFA{..} = go S.empty [tnfaStartState]
+prettyStates TNFA{..} = go S.empty [tnfaStartState] <> fixedTags <> "\n"
   where
     go seen (s:ss)
         | not (S.member s seen) =
@@ -139,6 +143,10 @@ prettyStates TNFA{..} = go S.empty [tnfaStartState]
     showState s = "State " ++ show s ++ ":\n"
     showTrans s = concat ["  " ++ show t ++ " => " ++ show p ++ "\n"
                             | (q,t,p) <- tnfaTrans, q == s]
+    fixedTags | M.null tnfaTagMap = "(No fixed tags)"
+              | otherwise = "Fixed tags:\n" ++
+        concat [ "  t" ++ show t ++ " <- t" ++ show b ++ " - " ++ show d ++ "\n"
+                 | (t,(FixedTag b d)) <- M.toList tnfaTagMap ]
 
 testTNFA :: String -> IO ()
 testTNFA = putStr . prettyStates . genTNFA . testTagRegex

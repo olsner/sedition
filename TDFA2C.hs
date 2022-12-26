@@ -24,7 +24,7 @@ import TNFA
 import SimulateTNFA
 
 tdfa2c :: Regex -> String
-tdfa2c re = show (genTNFA (tagRegex re))
+tdfa2c = show . genTNFA . fixTags . tagRegex
 
 type RegId = Int
 data RegVal = Nil | Pos deriving (Show, Ord, Eq)
