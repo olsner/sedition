@@ -12,6 +12,7 @@ import qualified Data.ByteString.Char8 as C
 import Data.List
 import Data.Map (Map)
 import qualified Data.Map as M
+import Data.Maybe
 import Data.Set (Set)
 import qualified Data.Set as S
 
@@ -34,6 +35,12 @@ data TNFA = TNFA {
     tnfaTagMap :: FixedTagMap
   }
   deriving (Show, Ord, Eq)
+
+maxTag TNFA{..} = maximum (mapMaybe tag tnfaTrans)
+  where
+    tag (_,Eps _ (Tag t),_) = Just t
+    tag (_,Eps _ (UnTag t),_) = Just t
+    tag _ = Nothing
 
 instance Semigroup TNFA where
   -- Doesn't add a transition from final a -> start b, assume that's already
