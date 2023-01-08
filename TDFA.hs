@@ -113,8 +113,8 @@ prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
                            | (t,s',o) <- getTrans s ]
     fixedTags | M.null tdfaTagMap = "(No fixed tags)"
               | otherwise = "Fixed tags:\n" ++
-        concat [ "  t" ++ show t ++ " <- t" ++ show b ++ " - " ++ show d ++ "\n"
-                 | (t,(FixedTag b d)) <- M.toList tdfaTagMap ]
+        concat [ "  t" ++ show t ++ " <- " ++ show ft ++ "\n"
+                 | (t,ft) <- M.toList tdfaTagMap ]
 
     regOps ops = intercalate "; " (map show ops)
 

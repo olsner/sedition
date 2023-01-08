@@ -152,8 +152,8 @@ prettyStates TNFA{..} = go S.empty [tnfaStartState] <> fixedTags <> "\n"
                             | (q,t,p) <- tnfaTrans, q == s]
     fixedTags | M.null tnfaTagMap = "(No fixed tags)"
               | otherwise = "Fixed tags:\n" ++
-        concat [ "  t" ++ show t ++ " <- t" ++ show b ++ " - " ++ show d ++ "\n"
-                 | (t,(FixedTag b d)) <- M.toList tnfaTagMap ]
+        concat [ "  t" ++ show t ++ " <- " ++ show ft ++ "\n"
+                 | (t,ft) <- M.toList tnfaTagMap ]
 
 testTNFA :: String -> IO ()
 testTNFA = putStr . prettyStates . genTNFA . testTagRegex
