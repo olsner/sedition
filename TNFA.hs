@@ -23,7 +23,9 @@ import qualified Regex
 
 import TaggedRegex
 
-newtype StateId = S Int deriving (Show, Ord, Eq)
+newtype StateId = S Int deriving (Ord, Eq)
+instance Show StateId where
+  show (S x) = 'q' : show x
 
 data TNFA = TNFA {
     tnfaStartState :: StateId,
@@ -97,8 +99,8 @@ orTNFA finalState x y = do
   q1' <- ntags (tnfaStartState q2) q1
   let qN = q1 <> q2 <> q1' <> q2'
   s0 <- newState
-  return (eps s0 (tnfaStartState q1) 1 <>
-          eps s0 (tnfaStartState q1') 2 <>
+  return (eps s0 (tnfaStartState q1) (P 1) <>
+          eps s0 (tnfaStartState q1') (P 2) <>
           qN)
 
 tnfa :: StateId -> TaggedRegex -> GenTNFA TNFA
@@ -106,7 +108,7 @@ tnfa finalState re =
   case re of
     Empty -> return (TNFA finalState finalState [] M.empty)
     Term term -> trans term finalState
-    TagTerm t -> tag finalState 1 t
+    TagTerm t -> tag finalState (P 1) t
     Cat x y -> do
       q2 <- tnfa finalState y
       q1 <- tnfa (tnfaStartState q2) x
@@ -116,18 +118,18 @@ tnfa finalState re =
         m1@(TNFA q1 _ _ _) <- tnfa finalState (Repeat 1 m x)
         m1'@(TNFA q1' _ _ _) <- ntags finalState m1
         q0 <- newState
-        return (eps q0 q1 1 <> eps q0 q1' 2 <> m1' <> m1)
+        return (eps q0 q1 (P 1) <> eps q0 q1' (P 2) <> m1' <> m1)
     (Repeat 1 Nothing x) -> do
         q1 <- newState
         m1@(TNFA q0 _ _ _) <- tnfa q1 x
-        return (m1 <> eps q1 q0 1 <> eps q1 finalState 2)
+        return (m1 <> eps q1 q0 (P 1) <> eps q1 finalState (P 2))
     (Repeat 1 (Just 1) x) -> tnfa finalState x
     (Repeat 1 (Just m) x) -> do
         m2@(TNFA q1 _ _ _) <- tnfa finalState (Repeat 1 (Just (pred m)) x)
         m1@(TNFA _ q2 _ _) <- tnfa q1 x
         return (m1 <> m2 <>
-                eps q1 q2 2 <>
-                eps q1 finalState 1)
+                eps q1 q2 (P 2) <>
+                eps q1 finalState (P 1))
     (Repeat n m x) -> do
         q2 <- tnfa finalState (Repeat (pred n) (pred <$> m) x)
         q1 <- tnfa (tnfaFinalState q2) x

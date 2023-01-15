@@ -20,10 +20,16 @@ import qualified Data.Map as M
 import Regex (Regex)
 import qualified Regex
 
-type TagId = Int
-type Prio = Int
+newtype Prio = P Int deriving (Show, Ord, Eq)
 
-data Tag = NoTag | UnTag TagId | Tag TagId deriving (Show, Ord, Eq)
+newtype TagId = T Int deriving (Ord, Eq)
+instance Show TagId where
+  show (T x) = 't' : show x
+data Tag = NoTag | UnTag TagId | Tag TagId deriving (Ord, Eq)
+instance Show Tag where
+  show NoTag = "e"
+  show (Tag (T x)) = 't' : show x
+  show (UnTag (T x)) = '-' : 't' : show x
 
 -- Convenient for the TNFA conversion, but the Eps transition is not used here.
 -- Wouldn't be too much work to translate in TNFA and have distinct types...
@@ -115,7 +121,7 @@ tagRegex re = evalState (go (Regex.Group re)) 0
     -- Could still be supported in TaggedRegex though!
     go (Regex.BackRef _) = error "Back-references not supported in TDFA"
 
-    tag = gets TagTerm <* modify succ
+    tag = gets (TagTerm . T) <* modify succ
 
 testParseTagRegex :: String -> TaggedRegex
 testParseTagRegex = tagRegex . Regex.parseString True . C.pack
