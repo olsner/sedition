@@ -26,12 +26,12 @@ import TNFA (genTNFA, TNFA(..))
 import qualified TNFA
 
 newtype StateId = S Int deriving (Ord, Eq)
-newtype RegId = R Int deriving (Show, Ord, Eq)
+newtype RegId = R Int deriving (Ord, Eq)
 
 instance Show StateId where
   show (S x) = 's' : show x
--- instance Show RegId where
---   show (R x) = 'r' : show x
+instance Show RegId where
+  show (R x) = 'r' : show x
 
 data RegVal = Nil | Pos deriving (Show, Ord, Eq)
 data RegRHS
@@ -39,7 +39,13 @@ data RegRHS
   | CopyReg RegId -- ^ i <- j
   -- Assuming for now that this is re2c-specific, we only use single-value tags.
   | CopyAppend RegId [RegVal] -- ^ i <- j <>
-  deriving (Show, Ord, Eq)
+  deriving (Ord, Eq)
+instance Show RegRHS where
+  show (SetReg rv) = show rv
+  show (CopyReg r) = show r
+  show (CopyAppend r vals) = show r ++ showVals vals
+    where showVals [] = ""
+          showVals (v:vs) = "<>" ++ show v ++ showVals vs
 type RegOp = (RegId, RegRHS)
 
 type RegOps = [RegOp]
@@ -132,7 +138,7 @@ tagsInHistory = S.toList . S.fromList . mapMaybe tag
   where
     tag (Tag t) = Just t
     tag (UnTag t) = Just t
-    tag _ = Nothing
+    tag NoTag = Nothing
 
 precedence :: Closure -> Prec
 precedence = map (\(q,_,_,_) -> q)
@@ -150,13 +156,12 @@ tdfaState clos = (stateClosure clos, precedence clos)
 
 regop_rhs :: Map TagId RegId -> [RegVal] -> TagId -> RegRHS
 regop_rhs r ht t | isMultiValueTag t = CopyAppend (fromJust $ M.lookup t r) ht
-regop_rhs _ ht t = trace (show ht ++ " " ++ show t ++ " <- " ++ show (last ht)) $
-    SetReg (last ht)
+regop_rhs _ ht t = SetReg (last ht)
 
 isMultiValueTag :: TagId -> Bool
 isMultiValueTag _ = False
 
-findState :: (StateClosure, Prec) -> GenTDFA (Maybe StateId)
+findState :: TDFAState -> GenTDFA (Maybe StateId)
 findState statePrec = gets (M.lookup statePrec . revStateMap)
 
 mapState :: TDFAState -> TDFAState -> Maybe RegOps
@@ -192,15 +197,14 @@ symbolTrans BOL = False
 -- TODO Handle end-of-line. Something like a final state that is only accepting
 -- at the end of the line. (This would also not need fallbacks, since it
 -- should have no outgoing edges. Except we do need to handle register setting.)
-symbolTrans EOL = False
+-- Treating EOL as a character will probably lead to loops when actually
+-- matching on them using a TDFA? This is rather just to see how things work.
+-- Probably need to understand the stuff like fallback transitions first. The
+-- "normal" way is rather for every final state to implicitly only be accepting
+-- when having reached the end of the string.
+symbolTrans EOL = True
 symbolTrans _ = True
 
--- TODO Accept starting-state flag (beginning of line), only include BOL
--- transitions if that is set.
--- BUT: This also requires that we include the states for an unmatched prefix
--- of an unanchored regular expression. A sed-specific trait is that we only
--- ever use "find", not "match" (which would have different behavior here).
--- EOL is different.
 epsilonClosure :: Bool -> TNFA -> Closure -> Closure
 epsilonClosure bol TNFA{..} = possibleStates . go S.empty
   where
@@ -252,7 +256,7 @@ updateTagMap :: Closure -> GenTDFA Closure
 updateTagMap = mapM $ \(q,r,h,l) -> do
     let o = map (\t -> (t, regop_rhs r (history h t) t)) (tagsInHistory h)
     r' <- forM o $ \(t,rhs) -> gets ((t,) <$> fromJust . M.lookup (t,rhs) . tagRHSMap)
-    return (q,M.fromList r',h,l)
+    return (q,M.union (M.fromList r') r,h,l)
 
 assignReg :: (TagId, RegRHS) -> GenTDFA (Maybe RegOp)
 assignReg (tag, rhs) = do
@@ -275,7 +279,7 @@ visitState tnfa s = do
         let rhses = transitionRegRHSes c
         o <- catMaybes <$> mapM assignReg rhses
         c' <- updateTagMap c
-        (s',o) <- addState c o
+        (s',o) <- addState c' o
         emitTransition s a s' o
         return s'
     clearTagRHSMap
@@ -295,27 +299,33 @@ stepOnSymbol TNFA{..} prec t clos = go (sortByPrec prec clos)
         | otherwise = Nothing
     isTransition q t (q', t', p) = q == q' && t == t'
 
+finalRegOps TNFA{..} regs s = do
+  (state,_) <- getState s
+  let Just (_,r,l) = find (\(q,r,l) -> q == tnfaFinalState) state
+  let ts = tagsInHistory l
+  let trhs = [(t,regop_rhs r (history l t) t) | t <- ts]
+  let o = [(r,rhs) | (t,rhs) <- trhs, let Just r = M.lookup t regs]
+  return (s,o)
+
 determinize :: TNFA -> GenTDFA TDFA
 determinize tnfa@TNFA{..} = do
   state0 <- generateInitialState tnfaStartState
-  finRegs <- newRegForEachTag
-  trace ("Initial state: " ++ show state0) $ return ()
   let c0 = epsilonClosure True tnfa state0
-  trace ("Initial closure: " ++ show c0) $ return ()
   (s0, _) <- addState c0 []
   visitStates tnfa [s0]
   ts <- gets transitions
   tagRegMap <- gets (M.map stateRegMap . stateMap)
   stateIdMap <- gets (M.map stateStateIds . stateMap)
+  let hasFinalState (s,m) | S.member tnfaFinalState m = Just s
+                          | otherwise                 = Nothing
+      finalStates = mapMaybe hasFinalState (M.toList stateIdMap)
+  finRegs <- newRegForEachTag
+  finRegOps <- M.fromList <$> forM finalStates (finalRegOps tnfa finRegs)
   return (TDFA {
     tdfaStartState = s0,
-    -- TODO All TDFA states where the contained TNFA states include the
-    -- tnfa final state.
-    tdfaFinalStates = S.empty,
+    tdfaFinalStates = S.fromList finalStates,
     tdfaFinalRegisters = finRegs,
-    -- Related to final state calculation, collect the finalRegOps for each
-    -- final state.
-    tdfaFinalFunction = M.empty,
+    tdfaFinalFunction = finRegOps,
     tdfaTrans = multiMapFromList ts,
     tdfaTagMap = tnfaTagMap,
     -- Debugging stuff:
@@ -338,6 +348,7 @@ prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
     go seen (s:ss)
         | not (S.member s seen) =
             showState s <> showTrans s <> -- showTagMap s <>
+            showFinalRegOps s <>
             go (S.insert s seen) (ss ++ nextStates s)
         | otherwise = go seen ss
     go seen [] = []
@@ -347,18 +358,26 @@ prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
     showState s = "State " ++ showState' s
     showState' s = show s ++ ": " ++ showStateIds s ++ "\n"
     showTrans s = concat [ "  " ++ show t ++ " => " ++ show s' ++
-                            " | " ++ regOps o ++ "\n"
+                           regOps o (getTagRegMap s') ++ "\n"
                            | (t,s',o) <- getTrans s ]
     fixedTags | M.null tdfaTagMap = "(No fixed tags)"
               | otherwise = "Fixed tags:\n" ++
-        concat [ "  t" ++ show t ++ " <- " ++ show ft ++ "\n"
+        concat [ "  " ++ show t ++ " <- " ++ show ft ++ "\n"
                  | (t,ft) <- M.toList tdfaTagMap ]
 
-    regOps ops = intercalate "; " (map show ops)
+    regOps [] _ = ""
+    regOps ops regMap = prefix "\n    " (map regOp ops)
+      where
+        getTags reg = [show s ++ ":" ++ show t |
+                         (s,ts) <- regMap,
+                         (t,r) <- M.toList ts,
+                         r == reg ]
+        regOp (r,val) = intercalate "," (getTags r) ++ " " ++ show r ++ " <- " ++ show val
 
     getTagRegMap s = M.toList $ fromJust $ M.lookup s tdfaTagRegMap
     showTagMap s = "  Regs:" <> showPrefix "\n   " (getTagRegMap s) <> "\n"
     showPrefix prefix xs = concat [ prefix ++ show x | x <- xs ]
+    prefix p xs = concat [p ++ x | x <- xs ]
 
     showStateIds s = intercalate ", " . map show . S.toList . fromJust $ M.lookup s tdfaStateMap
 
@@ -366,6 +385,15 @@ prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
     getTrans s = fromMaybe [] (M.lookup s tdfaTrans)
 
     isFinalState s = s `S.member` tdfaFinalStates
+    finalRegOps s | null ops  = ""
+                  | otherwise = "  Final reg ops:" ++
+        concat [ "\n    " ++ show t ++ " " ++ show r ++ " <- " ++ show val |
+                 (t,r) <- M.toList tdfaFinalRegisters,
+                 (r',val) <- ops,
+                 r == r' ] ++ "\n"
+      where ops = fromJust $ M.lookup s tdfaFinalFunction
+    showFinalRegOps s | isFinalState s = finalRegOps s
+                      | otherwise = ""
 
 testTDFA :: String -> IO ()
 testTDFA = putStr . prettyStates . genTDFA . genTNFA . testTagRegex
