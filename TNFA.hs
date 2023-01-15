@@ -42,6 +42,12 @@ maxTag TNFA{..} = maximum (mapMaybe tag tnfaTrans)
     tag (_,Eps _ (UnTag t),_) = Just t
     tag _ = Nothing
 
+allTags TNFA{..} = S.fromList (mapMaybe tag tnfaTrans)
+  where
+    tag (_,Eps _ (Tag t),_) = Just t
+    tag (_,Eps _ (UnTag t),_) = Just t
+    tag _ = Nothing
+
 instance Semigroup TNFA where
   -- Doesn't add a transition from final a -> start b, assume that's already
   -- done?
