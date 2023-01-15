@@ -23,7 +23,7 @@ import qualified Regex
 
 import TaggedRegex
 
-type StateId = Int
+newtype StateId = S Int deriving (Show, Ord, Eq)
 
 data TNFA = TNFA {
     tnfaStartState :: StateId,
@@ -36,12 +36,7 @@ data TNFA = TNFA {
   }
   deriving (Show, Ord, Eq)
 
-maxTag TNFA{..} = maximum (mapMaybe tag tnfaTrans)
-  where
-    tag (_,Eps _ (Tag t),_) = Just t
-    tag (_,Eps _ (UnTag t),_) = Just t
-    tag _ = Nothing
-
+allTags :: TNFA -> Set TagId
 allTags TNFA{..} = S.fromList (mapMaybe tag tnfaTrans)
   where
     tag (_,Eps _ (Tag t),_) = Just t
@@ -75,14 +70,18 @@ tag s p n = trans (Eps p (Tag n)) s
 trans :: TNFATrans -> StateId -> GenTNFA TNFA
 trans t p = newState >>= \q -> return (trans' q t p)
 
+trans' :: StateId -> TNFATrans -> StateId -> TNFA
 trans' q t p = TNFA q p [(q, t, p)] M.empty
+eps :: StateId -> StateId -> Prio -> TNFA
 eps q s p = trans' q (Eps p NoTag) s
 
-newState = get <* modify succ
+newState :: GenTNFA StateId
+newState = gets S <* modify succ
 
 concatTNFA :: StateId -> [TaggedRegex] -> GenTNFA TNFA
 concatTNFA finalState xs =
   case xs of
+    [] -> error "concatTNFA requires at least one item in list"
     [x] -> tnfa finalState x
     (x:xs) -> do
       q2 <- concatTNFA finalState xs
@@ -137,7 +136,7 @@ tnfa finalState re =
 -- API?
 
 genTNFA :: (TaggedRegex, FixedTagMap) -> TNFA
-genTNFA (re, m) = (evalState (tnfa 0 re) 1) { tnfaTagMap = m }
+genTNFA (re, m) = (evalState (tnfa (S 0) re) 1) { tnfaTagMap = m }
 
 -- Test functions
 

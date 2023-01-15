@@ -66,7 +66,6 @@ type TDFAState = (StateClosure, Prec)
 
 -- State for determinization process
 data DetState = DetState {
-  maxTag :: Int,
   tags :: Set TagId,
   revStateMap :: Map TDFAState StateId,
   stateMap :: Map StateId TDFAState,
@@ -79,7 +78,6 @@ data DetState = DetState {
 
 initState :: TNFA -> DetState
 initState tnfa = DetState {
-    maxTag = TNFA.maxTag tnfa,
     tags = TNFA.allTags tnfa,
     revStateMap = M.empty,
     stateMap = M.empty,

@@ -33,6 +33,7 @@ tnfaSimulation :: String -> TNFA -> Maybe Matches
 tnfaSimulation as tnfa =
     initSimulation tnfa (M.singleton (tnfaStartState tnfa) M.empty) as
 
+finalSimulatedState :: StateId -> ConfigMap -> Maybe Matches
 finalSimulatedState fin c = go (M.toList c)
   where
       go [] = Nothing
@@ -55,6 +56,7 @@ simulation tnfa c k (x:xs) | M.null c'' = trace "Out of states: No match" $ Noth
         c'' = stepOnSymbol tnfa c' x
         simTrace = "Continuing at " ++ show k ++ " (" ++ show x ++ "): " ++ show c ++ " -> " ++ show c' ++ " -> " ++ show c''
 
+matchTerm :: TNFATrans -> Char -> Bool
 matchTerm Any _ = True
 matchTerm (Eps _ _) _ = False
 matchTerm (Symbol x) y = x == y
@@ -63,6 +65,7 @@ matchTerm (CNotClass xs) y = not (y `elem` xs)
 matchTerm BOL _ = False
 matchTerm EOL _ = False
 
+symbolTrans :: TNFATrans -> Bool
 symbolTrans (Eps _ _) = False
 symbolTrans BOL = False
 symbolTrans EOL = False
