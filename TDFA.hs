@@ -57,7 +57,7 @@ data TDFA = TDFA {
     tdfaFinalRegisters :: Map TagId RegId,
     tdfaFinalFunction :: Map StateId RegOps,
     tdfaTrans :: Map StateId [TDFATrans],
-    tdfaTagMap :: FixedTagMap,
+    tdfaFixedTags :: FixedTagMap,
     tdfaTagRegMap :: Map StateId (Map TNFA.StateId (Map TagId RegId)),
     tdfaStateMap :: Map StateId (Set TNFA.StateId)
   }
@@ -327,7 +327,7 @@ determinize tnfa@TNFA{..} = do
     tdfaFinalRegisters = finRegs,
     tdfaFinalFunction = finRegOps,
     tdfaTrans = multiMapFromList ts,
-    tdfaTagMap = tnfaTagMap,
+    tdfaFixedTags = tnfaTagMap,
     -- Debugging stuff:
     tdfaTagRegMap = tagRegMap,
     tdfaStateMap = stateIdMap
@@ -341,6 +341,26 @@ multiMapFromList ts = foldr prepend M.empty ts
 
 genTDFA :: TNFA -> TDFA
 genTDFA tnfa = evalState (determinize tnfa) (initState tnfa)
+
+tdfaStates :: TDFA -> [StateId]
+tdfaStates TDFA{..} = go S.empty [tdfaStartState]
+  where
+    go seen (s:ss)
+      | not (S.member s seen) = s : go (S.insert s seen) (ss ++ nextStates s)
+      | otherwise = go seen ss
+    go _ [] = []
+    nextStates s =  [t | (_,t,_) <- getTrans s]
+    getTrans :: StateId -> [TDFATrans]
+    getTrans s = fromMaybe [] (M.lookup s tdfaTrans)
+
+tdfaRegisters :: TDFA -> [RegId]
+tdfaRegisters TDFA{..} = nub (M.elems tdfaFinalRegisters ++ usedRegs)
+  where
+    usedRegs :: [RegId]
+    usedRegs = concatMap (\(_,_,ops) -> regs ops) (concat $ M.elems tdfaTrans)
+    regs :: RegOps -> [RegId]
+    regs = map (\(r,rhs) -> r)
+    nub = S.toList . S.fromList
 
 prettyStates :: TDFA -> String
 prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
@@ -360,10 +380,10 @@ prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
     showTrans s = concat [ "  " ++ show t ++ " => " ++ show s' ++
                            regOps o (getTagRegMap s') ++ "\n"
                            | (t,s',o) <- getTrans s ]
-    fixedTags | M.null tdfaTagMap = "(No fixed tags)"
+    fixedTags | M.null tdfaFixedTags = "(No fixed tags)"
               | otherwise = "Fixed tags:\n" ++
         concat [ "  " ++ show t ++ " <- " ++ show ft ++ "\n"
-                 | (t,ft) <- M.toList tdfaTagMap ]
+                 | (t,ft) <- M.toList tdfaFixedTags ]
 
     regOps [] _ = ""
     regOps ops regMap = prefix "\n    " (map regOp ops)
