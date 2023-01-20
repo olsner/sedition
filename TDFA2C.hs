@@ -74,7 +74,7 @@ matchFromTag t | possibleTag t =
 setTagFromReg (t, r) = stmt (showB t <> " = " <> showB r <> " - s->buf")
 
 declareTagVar t = stmt ("regoff_t " <> showB t <> " = -1")
-declareReg r = stmt ("const char* " <> showB r <> " = nullptr")
+declareReg r = stmt ("const char* " <> showB r <> " = NULL")
 
 {-
     finalRegOps s | null ops  = ""
@@ -89,18 +89,20 @@ declareReg r = stmt ("const char* " <> showB r <> " = nullptr")
 -}
 
 cases (Symbol c) = " case " <> cchar c <> ":"
+-- cases s = comment ("Unhandled case for " <> showB s)
+cases s = error ("Unhandled case for " <> show s)
 
 emitRegOp (r,SetReg val) = stmt ("  " <> showB r <> " = " <> g val)
   where
     g Pos = "YYCURSOR"
-    g Nil = "nullptr"
+    g Nil = "NULL"
 emitRegOp (r,CopyReg r2) = stmt ("  " <> showB r <> " = " <> showB r2)
 
 emitTrans (sym, s', regops) =
     cases sym <> "{\n" <>
     foldMap emitRegOp regops <>
     "  " <> gostate s' <>
-    "\n"
+    "}\n"
 
 emitState TDFA{..} s =
     decstate s <>
@@ -133,10 +135,11 @@ genC tdfa@TDFA{..} =
     stmt ("const char *const YYBEGIN = s->buf + offset") <>
     stmt ("const char *const YYLIMIT = s->buf + s->len") <>
     stmt ("const char *YYCURSOR = YYBEGIN") <>
+    stmt ("char YYCHAR = 0") <>
     "#define YYPOS (YYCURSOR - YYBEGIN)\n" <>
-    "#define YYNEXT(label) do { \\\n" <>
+    "#define YYNEXT(endlabel) do { \\\n" <>
     "   if (YYCURSOR >= YYLIMIT) goto endlabel; \\\n" <>
-    "   else YYCHAR = *++YYCURSOR; \\\n" <>
+    "   else YYCHAR = *YYCURSOR++; \\\n" <>
     "  } while (0)\n" <>
     foldMap declareTagVar (S.toList allTags) <>
     foldMap declareReg allRegs <>
@@ -158,8 +161,13 @@ genC tdfa@TDFA{..} =
     allTags = S.union (M.keysSet tdfaFixedTags) (M.keysSet tdfaFinalRegisters)
     allRegs = tdfaRegisters tdfa
 
-tdfa2c :: Regex -> String
-tdfa2c = show . genTDFA . genTNFA . fixTags . tagRegex
+toStrictByteString = L.toStrict . toLazyByteString
+
+tdfa2c :: Regex -> ByteString
+tdfa2c = toStrictByteString . genC . genTDFA . genTNFA . fixTags . tagRegex
+
+isCompatible :: Regex -> Bool
+isCompatible = Regex.tdfa2cCompatible
 
 testTDFA2C :: String -> IO ()
 testTDFA2C = L.putStrLn . toLazyByteString . genC . genTDFA . genTNFA . testTagRegex

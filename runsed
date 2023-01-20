@@ -2,4 +2,4 @@
 
 # IPC is broken with compiled output so far (also missing e.g. threading and
 # networking), so disable it for now.
-$(dirname "$0")/sed "$@" -I --run --compile --c-output temp.c --re-output temp.re --exe a.out
+$(dirname "$0")/sed "$@" -I --run --compile --c-output temp.c --exe a.out

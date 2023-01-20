@@ -51,7 +51,7 @@ programHeader program =
     regexps :: Map IR.RE (S, Bool)
     regexps = IR.allRegexps program
     regexpvars = M.keys regexps
-    -- TODO Skip regexps where we can use re2c
+    -- TODO Skip regexps where we can use tdfa2c
     initRegexp (re, (s, ere)) = sfun "compile_regexp" [regex re, cstring s, bool ere]
 
 programFooter program = "exit:\n" <>
@@ -245,70 +245,18 @@ resolveStringIndex s ix = case ix of
     groupStart m i = match m <> ".matches[" <> intDec i <> "].rm_so"
     groupEnd m i = match m <> ".matches[" <> intDec i <> "].rm_eo"
 
-compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else re2c r re
+compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else tdfa2c r re
   where
     re = Regex.parseString ere s
-    needRegexec = not (Regex.re2cCompatible re)
+    needRegexec = not (TDFA2C.isCompatible re)
     res = C.pack $ Regex.reString re
-    wrapper b = "static void " <> regexfun r <> "(match_t* m, string* s, size_t offset) {\n" <> b <> comment (tdfa2c r re) <> "}\n"
+    wrapper b = "static void " <> regexfun r <> "(match_t* m, string* s, size_t offset) {\n" <> b <> "}\n"
     -- regcomp is run at start of main so we just need to forward the arguments.
     regexec = comment ("unsupported regex: " <> cstring res) <>
               sfun "match_regexp" ["m", "s", "offset", regex r, regexfun r]
 
 tdfa2c r re =
     comment ("tdfa2c regex: " <> cstring res) <>
-    (trace ("TNFA: " ++ show res ++ " => " ++ TDFA2C.tdfa2c re) $ comment (string7 (TDFA2C.tdfa2c re)))
+    byteString (TDFA2C.tdfa2c re)
   where
     res = C.pack $ Regex.reString re
-
--- TODO re2c doesn't have anchors in its regexp syntax, we should add the
--- necessary support ourselves. Add code to take a parsed regexp and strip the
--- included anchors and adjust as appropriate here.
--- For an initial anchor, do we need to add a non-capturing .* prefix here?
-re2c r re =
-    comment ("re2c-compatible regex: " <> cstring res') <>
-    comment ("unanchored version of: " <> cstring res) <>
-    re2c_header <> string7 (Regex.re2c re') <> " {\n" <>
-    -- If the regexp is anchored at the end, require that the end is at the end.
-    (if endAnchored then endAnchorCheck else "\nif (true) {\n") <>
-    -- Skip the zeroeth group since that's added by reanchor.
-    -- "set_match(m, s, yypmatch + 2, yynmatch - 1, " <> regexfun r <> ");\n" <>
-    -- But it's not added by unanchor...
-    "  set_match(m, s, yypmatch, yynmatch, " <> regexfun r <> ");\n" <>
-    "  return;\n\
-    \}\n\
-    \}\n" <>
-    -- Skip over unmatched characters to find where the real match starts.
-    (if startAnchored then mempty else "[\\001-\\377] { continue; }\n") <>
-    "*/\n\
-    \} while (YYCURSOR < YYLIMIT);\n"
-  where
-    -- TODO Add an earlier optimization for this since NextMatch on a
-    -- start-anchored regexp will always fail.
-    startAnchored = Regex.hasAnchorStart re
-    endAnchored = Regex.hasAnchorEnd re
-    endAnchorCheck = "\nif (yypmatch[1] == YYLIMIT) {\n"
-    re' = Regex.unanchor re
-    res' = C.pack $ Regex.reString re'
-    res = C.pack $ Regex.reString re
-    -- TODO Fix bounds checks - this follows the bounds check with padding
-    -- instructions (default), but that fails if a regexp can match NULs.
-    -- We may need to determine if a regexp can match NULs and then enable more
-    -- pessimistic bounds checking in re2c...
-    re2c_header = "\
-      \clear_maxfill(s);\n\
-      \const char *YYCURSOR = s->buf + offset;\n\
-      \const char *YYLIMIT = s->buf + s->len;\n\
-      \const char *YYMARKER = NULL;\n\
-      \const char *yypmatch[YYMAXNMATCH * 2];\n\
-      \size_t yynmatch;\n\
-      \m->result = false;\n\
-      \if (offset" <>
-      (if startAnchored then "" else " && offset >= s->len") <>
-      ") { return; }\n\
-      \do {\n\
-      \/*!stags:re2c format = 'const char *@@;\\n'; */\n\
-      \/*!re2c\n\
-      \    re2c:define:YYCTYPE = uint8_t;\n\
-      \    re2c:posix-captures = 1;\n\n\
-      \    "

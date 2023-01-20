@@ -205,6 +205,8 @@ symbolTrans BOL = False
 symbolTrans EOL = True
 symbolTrans _ = True
 
+-- TODO Need the bol case to be dynamically decided, e.g. for finding multiple
+-- matches when we're no longer at the beginning of the line.
 epsilonClosure :: Bool -> TNFA -> Closure -> Closure
 epsilonClosure bol TNFA{..} = possibleStates . go S.empty
   where
