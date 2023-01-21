@@ -128,6 +128,12 @@ testParseTagRegex = tagRegex . Regex.parseString True . C.pack
 testTagRegex :: String -> (TaggedRegex, FixedTagMap)
 testTagRegex = fixTags . testParseTagRegex
 
+testTagRegexFind :: String -> (TaggedRegex, FixedTagMap)
+testTagRegexFind = fixTags . adjustForFind . testParseTagRegex
+
+adjustForFind re = cat3 anyStar re anyStar
+  where anyStar = Repeat 0 Nothing (Term Any)
+
 -- Based on usgae information, eliminate some of the tags in a regex.
 selectTags :: (TagId -> Bool) -> TaggedRegex -> TaggedRegex
 selectTags used = go

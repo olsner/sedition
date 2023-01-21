@@ -447,3 +447,4 @@ prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
 
 testTDFA :: String -> IO ()
 testTDFA = putStr . prettyStates . genTDFA . genTNFA . testTagRegex
+testTDFAFind = putStr . prettyStates . genTDFA . genTNFA . testTagRegexFind

@@ -23,7 +23,10 @@ import SimulateTNFA (testTNFASimulation, tnfaSimulation)
 import TDFA
 
 regexFind :: String -> String -> Maybe TagMap
-regexFind = runTDFA . genTDFA . genTNFA . testTagRegex
+regexFind = runTDFA . genTDFA . genTNFA . testTagRegexFind
+
+regexMatch :: String -> String -> Maybe TagMap
+regexMatch = runTDFA . genTDFA . genTNFA . testTagRegex
 
 {-data TDFA = TDFA {
     tdfaStartState :: StateId,
