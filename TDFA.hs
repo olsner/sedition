@@ -49,6 +49,10 @@ instance Show RegRHS where
 type RegOp = (RegId, RegRHS)
 
 type RegOps = [RegOp]
+-- TODO Don't reuse TNFATrans here, we should have e.g. a special byte->value
+-- mapping that has an efficient accessor for groups of keys with the same
+-- values, with e.g. Any = 0-255 having the same value. Before then we should
+-- also get rid of EOL transitions.
 type TDFATrans = (TNFATrans, StateId, RegOps)
 
 data TDFA = TDFA {
@@ -166,9 +170,15 @@ isMultiValueTag _ = False
 findState :: TDFAState -> GenTDFA (Maybe StateId)
 findState statePrec = gets (M.lookup statePrec . revStateMap)
 
-mapState :: TDFAState -> TDFAState -> Maybe RegOps
-mapState (s,_) (s',_) | s == s'   = Just []
-                       | otherwise = Nothing
+-- First check if the states are compatible:
+-- 1. same subset of TNFA states
+-- 2. same precedence
+-- 3. no "different lookahead tags for some TNFA state"? whatever that means,
+--    perhaps that destination states for all outgoing transitions are the same
+--
+-- Then try to map registers and return new register operations.
+mapState :: TDFAState -> TDFAState -> RegOps -> Maybe RegOps
+mapState (s,p) (s',p') ops = Nothing
 
 -- 1. Find exact match and return existing state id
 -- 2. Look through all states to find mappable state
@@ -183,6 +193,8 @@ addState closure ops = do
          -- I think this is "optional", rather just results in adding more
          -- states than necessary. (Perhaps *many* more than necessary for
          -- complicated regexps...)
+         -- Actually does not seem to be optional after all, the example tagged
+         -- regexp from the TDFA paper generates infinite states.
          -- states <- gets (M.toList . stateMap)
          addNewState state ops
   where
@@ -191,6 +203,7 @@ addState closure ops = do
 addNewState :: TDFAState -> RegOps -> GenTDFA (StateId, RegOps)
 addNewState state ops = do
     s <- newState state
+    -- trace ("new state " ++ show s ++ ": " ++ show state ++ " " ++ show ops) $ return ()
     return (s, ops)
 
 symbolTrans :: TNFATrans -> Bool
@@ -229,15 +242,18 @@ epsilonClosure bol TNFA{..} = possibleStates . go S.empty
     possibleState q = or [symbolTrans t | (s,t,_) <- tnfaTrans, s == q]
 
 
-newRegForEachTag :: GenTDFA (Map TagId RegId)
-newRegForEachTag = do
+forEachTag :: (TagId -> GenTDFA a) -> GenTDFA [a]
+forEachTag f = do
     ts <- gets (S.toList . tags)
-    M.fromList <$> mapM (\t -> (t,) <$> newReg) ts
+    mapM f ts
+
+newRegForEachTag :: GenTDFA (Map TagId RegId)
+newRegForEachTag = M.fromList <$> forEachTag (\t -> (t,) <$> newReg)
 
 generateInitialState :: TNFA.StateId -> GenTDFA Closure
 generateInitialState q0 = do
-  regs <- newRegForEachTag
-  return [(q0, regs, [], [])]
+  --regs <- newRegForEachTag
+  return [(q0, M.empty, [], [])]
 
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = concat <$> mapM f xs
@@ -274,9 +290,10 @@ assignReg (tag, rhs) = do
 
 visitState :: TNFA -> StateId -> GenTDFA [StateId]
 visitState tnfa s = do
+    -- trace ("visitState " ++ show s) $ return ()
     (clos, prec) <- getState s
     prevStates <- gets (M.keysSet . stateMap)
-    let as = nextSymbols tnfa (S.fromList [s | (s,_,_) <- clos])
+    let as = nextSymbols tnfa (S.fromList [q | (q,_,_) <- clos])
     ss <- forM as $ \a -> do
         let b = stepOnSymbol tnfa prec a clos
         let c = epsilonClosure False tnfa b
@@ -284,6 +301,8 @@ visitState tnfa s = do
         o <- catMaybes <$> mapM assignReg rhses
         c' <- updateTagMap c
         (s',o) <- addState c' o
+        --trace (show s ++ " -> " ++ show s' ++ ": " ++ show c' ++ " | " ++
+        --       show o) $ return ()
         emitTransition s a s' o
         return s'
     clearTagRHSMap
@@ -305,10 +324,14 @@ stepOnSymbol TNFA{..} prec t clos = go (sortByPrec prec clos)
 
 finalRegOps TNFA{..} outRegs s = do
   (state,_) <- getState s
-  let Just (_,r,l) = find (\(q,r,l) -> q == tnfaFinalState) state
+  let Just (_,r,l) = find (\(q,_,_) -> q == tnfaFinalState) state
+  --trace (show r ++ " " ++ show l) $ return ()
   let ts = tagsInHistory l
-  let trhs = [(t,regop_rhs r (history l t) t) | t <- ts]
-  let o = [(r,rhs) | (t,rhs) <- trhs, let Just r = M.lookup t outRegs]
+  o <- forEachTag $ \t -> do
+    let rhs | t `elem` ts              = regop_rhs r (history l t) t
+            | Just src <- M.lookup t r = CopyReg src
+    let Just dst = M.lookup t outRegs
+    return (dst,rhs)
   return (s,o)
 
 determinize :: TNFA -> GenTDFA TDFA

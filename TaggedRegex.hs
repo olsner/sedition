@@ -215,3 +215,10 @@ resolveFixedTags fts pos ts = foldr f ts (M.toList fts)
     f (t, FixedTag b d) ts = M.alter (\_ -> (subtract d) <$> M.lookup b ts) t ts
     f (t, EndOfMatch d) ts = M.insert t (pos - d) ts
 
+--  An example from the TDFA paper: (1a2)∗3(a|4b)5b∗
+exampleTaggedRegex = foldr cat Empty [
+    Repeat 0 Nothing (foldr cat Empty [TagTerm (T 0), Term (Symbol 'a'), TagTerm (T 1)]),
+    TagTerm (T 2),
+    or_ (Term (Symbol 'a')) (cat (TagTerm (T 3)) (Term (Symbol 'b'))),
+    TagTerm (T 4),
+    Repeat 0 Nothing (Term (Symbol 'b'))]

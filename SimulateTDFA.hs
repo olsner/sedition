@@ -19,7 +19,7 @@ import Debug.Trace
 
 import TaggedRegex
 import TNFA (genTNFA, testTNFA)
-import SimulateTNFA (testTNFASimulation)
+import SimulateTNFA (testTNFASimulation, tnfaSimulation)
 import TDFA
 
 regexFind :: String -> String -> Maybe TagMap
@@ -80,7 +80,7 @@ runTDFA tdfa@TDFA{..} = go' tdfaStartState M.empty 0
     fixedTags :: Int -> TagMap -> TagMap
     fixedTags = resolveFixedTags tdfaFixedTags
 
-    applyRegOps' xs rs pos | debug = trace (unwords ["applyRegOps{", show xs, show rs, show pos, "}"]) $ applyRegOps xs rs pos
+    applyRegOps' xs rs pos | False = trace (unwords ["applyRegOps{", show xs, show rs, show pos, "}"]) $ applyRegOps xs rs pos
                            | otherwise = applyRegOps xs rs pos
 
     applyRegOps :: RegOps -> RegMap -> Int -> RegMap
