@@ -11,6 +11,7 @@ import Data.ByteString.Builder as B
 import Data.FileEmbed (embedStringFile)
 import Data.Map (Map)
 import qualified Data.Map as M
+import Data.String
 import Data.Word
 
 import Debug.Trace
@@ -23,9 +24,13 @@ import IR (Program)
 import qualified Regex
 import qualified TDFA2C
 
+seditionRuntime :: IsString a => a
 seditionRuntime = $(embedStringFile "sedition.h")
+startingLine = length (lines seditionRuntime) + 2
 
 programHeader program =
+    -- TODO Could include the output file name too
+    "#line " <> intDec startingLine <> " \"<generated>\"\n" <>
     "/* ^ runtime system */\n\
     \/* v compiled program */\n\
     \static bool hasPendingIPC = false;\n\

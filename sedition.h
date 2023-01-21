@@ -192,7 +192,6 @@ static void format_literal(string* dst, int width, string* s)
     dst->len = 0;
     for (size_t i = 0; i < s->len; i++) {
         uint8_t c = s->buf[i];
-        size_t prev = dst->len;
         if (c == '\n') {
             append_str(dst, "$\n", 2);
             col = 0;
@@ -206,7 +205,7 @@ static void format_literal(string* dst, int width, string* s)
             snprintf(dst->buf + dst->len - 3, 4, "%03o", c);
             col += 4;
         } else {
-            append_str(dst, &c, 1);
+            append_str(dst, (const char *)&c, 1);
             col++;
         }
         // TODO Should be breaking before output? I think the haskell also gets
