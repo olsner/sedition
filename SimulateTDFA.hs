@@ -17,6 +17,8 @@ import qualified Data.Set as S
 
 import Debug.Trace
 
+import qualified CharMap as CM
+import CharMap (CharMap)
 import TaggedRegex
 import TNFA (genTNFA, testTNFA)
 import SimulateTNFA (testTNFASimulation, tnfaSimulation)
@@ -58,12 +60,8 @@ runTDFA tdfa@TDFA{..} = go' tdfaStartState M.empty 0
         | debug     = trace (unwords ["go", show pos, show xs, show s, show (M.toList regs)]) (go s regs pos xs)
         | otherwise = go s regs pos xs
 
-    matchTrans x (t,_,_) = x == t
-
     next :: StateId -> Char -> Maybe (StateId, RegOps)
-    next s x | Just ts <- M.lookup s tdfaTrans,
-               Just (t,s',r) <- find (matchTrans x) ts = Just (s', r)
-             | otherwise = Nothing
+    next s x = CM.lookup x (M.findWithDefault CM.empty s tdfaTrans)
 
     applyFinalState s regs pos
       | S.member s tdfaFinalStates = Just (fixedTags pos $ tagsFromRegs regs')

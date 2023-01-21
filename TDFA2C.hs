@@ -10,6 +10,8 @@ import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy.Char8 as L
 
+import qualified CharMap as CM
+import CharMap (CharMap)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set (Set)
@@ -40,18 +42,7 @@ goto name = stmt ("goto " <> string8 name)
 decstate s = label (show s)
 gostate s = goto (show s)
 
-cchar c = "'" <> quoteC c <> "'"
-  where
-    quoteC '\n' = "\\n"
-    quoteC '\"' = "\\\""
-    quoteC '\\' = "\\\\"
-    -- If show c is 3 chars long, c didn't need escaping
-    quoteC c | length (show c) /= 3 = "\\x" <> word8HexFixed (toWord8 c)
-    quoteC c = char8 c
-    toWord8 :: Char -> Word8
-    toWord8 = fromIntegral . fromEnum
-quoteC c = char8 c
-
+cchar = showB . fromEnum
 
 -- Since back references are single-digit, only the first 20 tags can be
 -- output.
@@ -71,7 +62,8 @@ matchfld (T t) | even t = "rm_so"
 matchFromTag t | possibleTag t =
   stmt ("m->matches[" <> matchix t <> "]." <> matchfld t <> " = " <> showB t)
 
-setTagFromReg (t, r) = stmt (showB t <> " = " <> showB r <> " - s->buf")
+setTagFromReg (t, r) = stmt (showB t <> " = " <>
+    showB r <> " ? " <> showB r <> " - s->buf : -1")
 
 declareTagVar t = stmt ("regoff_t " <> showB t <> " = -1")
 declareReg r = stmt ("const char* " <> showB r <> " = NULL")
@@ -88,9 +80,8 @@ declareReg r = stmt ("const char* " <> showB r <> " = NULL")
                       | otherwise = ""
 -}
 
-cases (Symbol c) = " case " <> cchar c <> ":"
--- cases s = comment ("Unhandled case for " <> showB s)
-cases s = error ("Unhandled case for " <> show s)
+emitCase c | c <= '\xff' = " case " <> cchar c <> ":\n"
+           | otherwise = error ("Character out of range: " ++ show c)
 
 emitRegOp (r,SetReg val) = stmt ("  " <> showB r <> " = " <> g val)
   where
@@ -98,8 +89,8 @@ emitRegOp (r,SetReg val) = stmt ("  " <> showB r <> " = " <> g val)
     g Nil = "NULL"
 emitRegOp (r,CopyReg r2) = stmt ("  " <> showB r <> " = " <> showB r2)
 
-emitTrans (sym, s', regops) =
-    cases sym <> "{\n" <>
+emitTrans (cs, (s', regops)) =
+    foldMap emitCase cs <> "{\n" <>
     foldMap emitRegOp regops <>
     "  " <> gostate s' <>
     "}\n"
@@ -113,7 +104,7 @@ emitState TDFA{..} s =
     "}\n"
     -- This area is unreachable, so could put state-specific accept code here.
   where
-    trans = fromMaybe [] (M.lookup s tdfaTrans)
+    trans = CM.toList $ M.findWithDefault CM.empty s tdfaTrans
     isFinalState = S.member s tdfaFinalStates
     -- TODO Matches also need to track which state we accepted from so that we
     -- can apply the appropriate register operations.
@@ -135,7 +126,7 @@ genC tdfa@TDFA{..} =
     stmt ("const char *const YYBEGIN = s->buf + offset") <>
     stmt ("const char *const YYLIMIT = s->buf + s->len") <>
     stmt ("const char *YYCURSOR = YYBEGIN") <>
-    stmt ("char YYCHAR = 0") <>
+    stmt ("unsigned char YYCHAR = 0") <>
     "#define YYPOS (YYCURSOR - YYBEGIN)\n" <>
     "#define YYNEXT(endlabel) do { \\\n" <>
     "   if (YYCURSOR >= YYLIMIT) goto endlabel; \\\n" <>

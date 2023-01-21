@@ -53,15 +53,15 @@ instance Show RegRHS where
 type RegOp = (RegId, RegRHS)
 
 type RegOps = [RegOp]
-type TDFATrans = (Char, StateId, RegOps)
--- type TDFATrans = CharMap (StateId, RegOps)
+type TDFATrans = (StateId, RegOps)
+type TDFATransTable = CharMap TDFATrans
 
 data TDFA = TDFA {
     tdfaStartState :: StateId,
     tdfaFinalStates :: Set StateId,
     tdfaFinalRegisters :: Map TagId RegId,
     tdfaFinalFunction :: Map StateId RegOps,
-    tdfaTrans :: Map StateId [TDFATrans],
+    tdfaTrans :: Map StateId TDFATransTable,
     tdfaFixedTags :: FixedTagMap,
     -- For debugging (mostly)
     tdfaTagRegMap :: Map StateId (Map TNFA.StateId (Map TagId RegId)),
@@ -83,7 +83,7 @@ data DetState = DetState {
   tags :: Set TagId,
   revStateMap :: Map TDFAState StateId,
   stateMap :: Map StateId TDFAState,
-  transitions :: [(StateId, TDFATrans)],
+  transitions :: [(StateId, (Char, (StateId, RegOps)))],
   tagRHSMap :: Map (TagId,RegRHS) RegId,
   nextState :: Int,
   nextReg :: Int
@@ -131,8 +131,8 @@ clearTagRHSMap :: GenTDFA ()
 clearTagRHSMap = modify (\s -> s { tagRHSMap = M.empty })
 
 emitTransition :: StateId -> Char -> StateId -> RegOps -> GenTDFA ()
-emitTransition q t p o = do
-    modify (\state@DetState{..} -> state{ transitions = (q, (t,p,o)) : transitions })
+emitTransition q c p o = do
+    modify (\state@DetState{..} -> state{ transitions = (q, (c, (p,o))) : transitions })
 
 history :: [Tag] -> TagId -> [RegVal]
 history []            _           = []
@@ -271,12 +271,15 @@ nextSymbols TNFA{..} s = collectSymbols [t | (q,t,p) <- tnfaTrans, S.member q s]
 collectSymbols :: [TNFATrans] -> [Char]
 collectSymbols ts = S.toList . S.unions $ map chars ts
   where
-    allChars = S.fromList ['\000'..'\377']
+    allChars = S.fromList ['\0'..'\255']
     chars :: TNFATrans -> Set Char
     chars Any = S.delete '\n' allChars
     chars (Symbol c) = S.singleton c
     chars (CClass cs) = S.fromList cs
     chars (CNotClass cs) = allChars S.\\ S.fromList cs
+    chars EOL = S.empty
+    chars BOL = S.empty
+    chars x = error ("Unhandled case " ++ show x)
 
 transitionRegRHSes :: Closure -> [(TagId, RegRHS)]
 transitionRegRHSes = S.toList . S.fromList . concatMap stateRegOps
@@ -361,7 +364,7 @@ determinize tnfa@TNFA{..} = do
     tdfaFinalStates = S.fromList finalStates,
     tdfaFinalRegisters = finRegs,
     tdfaFinalFunction = finRegOps,
-    tdfaTrans = multiMapFromList ts,
+    tdfaTrans = M.map CM.fromList (multiMapFromList ts),
     tdfaFixedTags = tnfaTagMap,
     -- Debugging stuff:
     tdfaTagRegMap = tagRegMap,
@@ -385,15 +388,15 @@ tdfaStates TDFA{..} = go S.empty [tdfaStartState]
       | not (S.member s seen) = s : go (S.insert s seen) (ss ++ nextStates s)
       | otherwise = go seen ss
     go _ [] = []
-    nextStates s =  [t | (_,t,_) <- getTrans s]
-    getTrans :: StateId -> [TDFATrans]
-    getTrans s = fromMaybe [] (M.lookup s tdfaTrans)
+    nextStates s = map fst (CM.elems (getTrans s))
+    getTrans :: StateId -> TDFATransTable
+    getTrans s = M.findWithDefault CM.empty s tdfaTrans
 
 tdfaRegisters :: TDFA -> [RegId]
 tdfaRegisters TDFA{..} = nub (M.elems tdfaFinalRegisters ++ usedRegs)
   where
     usedRegs :: [RegId]
-    usedRegs = concatMap (\(_,_,ops) -> regs ops) (concat $ M.elems tdfaTrans)
+    usedRegs = concatMap (\(_,ops) -> regs ops) (concatMap CM.elems $ M.elems tdfaTrans)
     regs :: RegOps -> [RegId]
     regs = map (\(r,rhs) -> r)
     nub = S.toList . S.fromList
@@ -408,14 +411,14 @@ prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
             go (S.insert s seen) (ss ++ nextStates s)
         | otherwise = go seen ss
     go seen [] = []
-    nextStates s =  [t | (_,t,_) <- getTrans s]
+    nextStates s = [t | (_,(t,_)) <- getTrans s]
     showState s | s == tdfaStartState = "START " ++ showState' s
     showState s | isFinalState s = "FINAL " ++ showState' s
     showState s = "State " ++ showState' s
     showState' s = show s ++ ": " ++ showStateIds s ++ "\n"
     showTrans s = concat [ "  " ++ show t ++ " => " ++ show s' ++
                            regOps o (getTagRegMap s') ++ "\n"
-                           | (t,s',o) <- getTrans s ]
+                           | (t,(s',o)) <- getTrans s ]
     fixedTags | M.null tdfaFixedTags = "(No fixed tags)"
               | otherwise = "Fixed tags:\n" ++
         concat [ "  " ++ show t ++ " <- " ++ show ft ++ "\n"
@@ -440,8 +443,8 @@ prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
         showStateId s | s == tdfaOriginalFinalState = "[" ++ show s ++ "]"
                       | otherwise               = show s
 
-    getTrans :: StateId -> [TDFATrans]
-    getTrans s = fromMaybe [] (M.lookup s tdfaTrans)
+    getTrans :: StateId -> [([Char],TDFATrans)]
+    getTrans s = CM.toList (M.findWithDefault CM.empty s tdfaTrans)
 
     isFinalState s = s `S.member` tdfaFinalStates
     finalRegOps s = "  Final reg ops:" ++
