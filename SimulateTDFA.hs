@@ -58,13 +58,7 @@ runTDFA tdfa@TDFA{..} = go' tdfaStartState M.empty 0
         | debug     = trace (unwords ["go", show pos, show xs, show s, show (M.toList regs)]) (go s regs pos xs)
         | otherwise = go s regs pos xs
 
-    matchTrans x (t,_,_) = case t of
-        Symbol y -> x == y
-        Any -> True
-        CClass ys -> x `elem` ys
-        CNotClass ys -> not (x `elem` ys)
-        EOL -> trace "EOL in transition..." False
-        _ -> False
+    matchTrans x (t,_,_) = x == t
 
     next :: StateId -> Char -> Maybe (StateId, RegOps)
     next s x | Just ts <- M.lookup s tdfaTrans,

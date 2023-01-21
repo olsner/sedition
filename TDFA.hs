@@ -18,12 +18,16 @@ import Data.Maybe
 import Data.Ord
 import Data.Set (Set)
 import qualified Data.Set as S
+import Data.Word
 
 import Debug.Trace
 
+import qualified CharMap as CM
+import CharMap (CharMap)
 import TaggedRegex hiding (Prio)
 import TNFA (genTNFA, TNFA(..))
 import qualified TNFA
+import SimulateTNFA (matchTerm)
 
 newtype StateId = S Int deriving (Ord, Eq)
 newtype RegId = R Int deriving (Ord, Eq)
@@ -49,11 +53,8 @@ instance Show RegRHS where
 type RegOp = (RegId, RegRHS)
 
 type RegOps = [RegOp]
--- TODO Don't reuse TNFATrans here, we should have e.g. a special byte->value
--- mapping that has an efficient accessor for groups of keys with the same
--- values, with e.g. Any = 0-255 having the same value. Before then we should
--- also get rid of EOL transitions.
-type TDFATrans = (TNFATrans, StateId, RegOps)
+type TDFATrans = (Char, StateId, RegOps)
+-- type TDFATrans = CharMap (StateId, RegOps)
 
 data TDFA = TDFA {
     tdfaStartState :: StateId,
@@ -129,7 +130,7 @@ addTagRHS tag rhs reg =
 clearTagRHSMap :: GenTDFA ()
 clearTagRHSMap = modify (\s -> s { tagRHSMap = M.empty })
 
-emitTransition :: StateId -> TNFATrans -> StateId -> RegOps -> GenTDFA ()
+emitTransition :: StateId -> Char -> StateId -> RegOps -> GenTDFA ()
 emitTransition q t p o = do
     modify (\state@DetState{..} -> state{ transitions = (q, (t,p,o)) : transitions })
 
@@ -264,8 +265,18 @@ visitStates tnfa ss = do
   newStates <- concatMapM (visitState tnfa) ss
   visitStates tnfa newStates
 
-nextSymbols :: TNFA -> Set TNFA.StateId -> [TNFATrans]
-nextSymbols TNFA{..} s = [t | (q,t,p) <- tnfaTrans, S.member q s]
+nextSymbols :: TNFA -> Set TNFA.StateId -> [Char]
+nextSymbols TNFA{..} s = collectSymbols [t | (q,t,p) <- tnfaTrans, S.member q s]
+
+collectSymbols :: [TNFATrans] -> [Char]
+collectSymbols ts = S.toList . S.unions $ map chars ts
+  where
+    allChars = S.fromList ['\000'..'\377']
+    chars :: TNFATrans -> Set Char
+    chars Any = S.delete '\n' allChars
+    chars (Symbol c) = S.singleton c
+    chars (CClass cs) = S.fromList cs
+    chars (CNotClass cs) = allChars S.\\ S.fromList cs
 
 transitionRegRHSes :: Closure -> [(TagId, RegRHS)]
 transitionRegRHSes = S.toList . S.fromList . concatMap stateRegOps
@@ -301,26 +312,23 @@ visitState tnfa s = do
         o <- catMaybes <$> mapM assignReg rhses
         c' <- updateTagMap c
         (s',o) <- addState c' o
-        --trace (show s ++ " -> " ++ show s' ++ ": " ++ show c' ++ " | " ++
+        --trace (show s ++ "[" ++ show a ++ "] -> " ++ show s' ++ ": " ++ show c' ++ " | " ++
         --       show o) $ return ()
         emitTransition s a s' o
         return s'
     clearTagRHSMap
-    return [s | s <- ss, not (S.member s prevStates)]
+    return (S.toList (S.fromList ss S.\\ prevStates))
 
 sortByPrec :: Prec -> StateClosure -> StateClosure
 sortByPrec prec = sortOn (\(x,_,_) -> x `elemIndex` prec)
 
-stepOnSymbol :: TNFA -> Prec -> TNFATrans -> StateClosure -> Closure
-stepOnSymbol TNFA{..} prec t clos = go (sortByPrec prec clos)
+stepOnSymbol :: TNFA -> Prec -> Char -> StateClosure -> Closure
+stepOnSymbol TNFA{..} prec c clos = go (sortByPrec prec clos)
   where
     go [] = []
-    go ((q,r,l):xs) | Just p <- getTransition q t = (p,r,l,[]) : go xs
-                    | otherwise = go xs
-    getTransition q t
-        | Just (_,_,p) <- find (isTransition q t) tnfaTrans = Just p
-        | otherwise = Nothing
-    isTransition q t (q', t', p) = q == q' && t == t'
+    go ((q,r,l):xs) = [(p,r,l,[]) | (_,_,p) <- transitions q] ++ go xs
+    transitions q = filter (isTransition q) tnfaTrans
+    isTransition q (q', t, p) = q == q' && matchTerm t c
 
 finalRegOps TNFA{..} outRegs s = do
   (state,_) <- getState s
