@@ -23,31 +23,30 @@ import qualified Regex
 import TaggedRegex
 import TNFA
 
-testTNFASimulation :: String -> String -> Maybe Matches
-testTNFASimulation s = tnfaSimulation s . genTNFA . testTagRegex
+testTNFASimulation :: String -> String -> Maybe TagMap
+testTNFASimulation = tnfaSimulation . genTNFA . testTagRegex
 
-type Matches = Map TagId Int
-type ConfigMap = Map StateId Matches
+type ConfigMap = Map StateId TagMap
 
-tnfaSimulation :: String -> TNFA -> Maybe Matches
-tnfaSimulation as tnfa =
-    initSimulation tnfa (M.singleton (tnfaStartState tnfa) M.empty) as
+tnfaSimulation :: TNFA -> String -> Maybe TagMap
+tnfaSimulation tnfa as =     initSimulation tnfa (M.singleton (tnfaStartState tnfa) M.empty) as
 
-finalSimulatedState :: StateId -> ConfigMap -> Maybe Matches
-finalSimulatedState fin c = go (M.toList c)
+finalSimulatedState :: TNFA -> Int -> ConfigMap -> Maybe TagMap
+finalSimulatedState TNFA{..} k c = go (M.toList c)
   where
-      go [] = Nothing
-      go ((q, m):xs) | q == fin = Just m
-                     | otherwise = go xs
+    go [] = Nothing
+    go ((q, m):xs)
+      | q == tnfaFinalState = Just (resolveFixedTags tnfaTagMap k m)
+      | otherwise = go xs
 
-initSimulation :: TNFA -> ConfigMap -> String -> Maybe Matches
+initSimulation :: TNFA -> ConfigMap -> String -> Maybe TagMap
 initSimulation tnfa c xs = trace simTrace $ simulation tnfa c' 0 xs
   where c' = epsilonClosure tnfa c 0 (null xs)
         simTrace = "Init: " ++ show c ++ " -> " ++ show c'
 
-simulation :: TNFA -> ConfigMap -> Int -> String -> Maybe Matches
+simulation :: TNFA -> ConfigMap -> Int -> String -> Maybe TagMap
 simulation tnfa c k [] =
-    trace simTrace $ finalSimulatedState (tnfaFinalState tnfa) c'
+    trace simTrace $ finalSimulatedState tnfa k c'
   where c' = epsilonClosure tnfa c k True
         simTrace = "Ending at " ++ show k ++ ": " ++ show c ++ " -> " ++ show c'
 simulation tnfa c k (x:xs) | M.null c'' = trace "Out of states: No match" $ Nothing
@@ -82,7 +81,7 @@ epsilonClosure tnfa c k eol = M.fromList $ go (M.toList c) M.empty
     bol = k == 0
     fin = tnfaFinalState tnfa
     ts = tnfaTrans tnfa
-    go :: [(StateId, Matches)] -> ConfigMap -> [(StateId, Matches)]
+    go :: [(StateId, TagMap)] -> ConfigMap -> [(StateId, TagMap)]
     go [] c' = possibleStates c'
     go ((q,m):xs) c' = go (ys ++ xs) c''
       where

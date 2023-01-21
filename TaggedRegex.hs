@@ -206,3 +206,12 @@ fixTags re = (removeFixedTags m re, m)
 -- rest of the engine doesn't need to consider them.
 removeFixedTags :: FixedTagMap -> TaggedRegex -> TaggedRegex
 removeFixedTags m = selectTags (\t -> not (M.member t m))
+
+type TagMap = Map TagId Int
+
+resolveFixedTags :: FixedTagMap -> Int -> TagMap -> TagMap
+resolveFixedTags fts pos ts = foldr f ts (M.toList fts)
+  where
+    f (t, FixedTag b d) ts = M.alter (\_ -> (subtract d) <$> M.lookup b ts) t ts
+    f (t, EndOfMatch d) ts = M.insert t (pos - d) ts
+

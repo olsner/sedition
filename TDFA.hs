@@ -58,8 +58,10 @@ data TDFA = TDFA {
     tdfaFinalFunction :: Map StateId RegOps,
     tdfaTrans :: Map StateId [TDFATrans],
     tdfaFixedTags :: FixedTagMap,
+    -- For debugging (mostly)
     tdfaTagRegMap :: Map StateId (Map TNFA.StateId (Map TagId RegId)),
-    tdfaStateMap :: Map StateId (Set TNFA.StateId)
+    tdfaStateMap :: Map StateId (Set TNFA.StateId),
+    tdfaOriginalFinalState :: TNFA.StateId
   }
   deriving (Show, Ord, Eq)
 
@@ -301,12 +303,12 @@ stepOnSymbol TNFA{..} prec t clos = go (sortByPrec prec clos)
         | otherwise = Nothing
     isTransition q t (q', t', p) = q == q' && t == t'
 
-finalRegOps TNFA{..} regs s = do
+finalRegOps TNFA{..} outRegs s = do
   (state,_) <- getState s
   let Just (_,r,l) = find (\(q,r,l) -> q == tnfaFinalState) state
   let ts = tagsInHistory l
   let trhs = [(t,regop_rhs r (history l t) t) | t <- ts]
-  let o = [(r,rhs) | (t,rhs) <- trhs, let Just r = M.lookup t regs]
+  let o = [(r,rhs) | (t,rhs) <- trhs, let Just r = M.lookup t outRegs]
   return (s,o)
 
 determinize :: TNFA -> GenTDFA TDFA
@@ -332,7 +334,8 @@ determinize tnfa@TNFA{..} = do
     tdfaFixedTags = tnfaTagMap,
     -- Debugging stuff:
     tdfaTagRegMap = tagRegMap,
-    tdfaStateMap = stateIdMap
+    tdfaStateMap = stateIdMap,
+    tdfaOriginalFinalState = tnfaFinalState
     })
 
 multiMapFromList :: Ord a => [(a,b)] -> Map a [b]
@@ -369,7 +372,7 @@ prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
   where
     go seen (s:ss)
         | not (S.member s seen) =
-            showState s <> showTrans s <> -- showTagMap s <>
+            showState s <> showTrans s <> showTagMap s <>
             showFinalRegOps s <>
             go (S.insert s seen) (ss ++ nextStates s)
         | otherwise = go seen ss
@@ -401,19 +404,21 @@ prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
     showPrefix prefix xs = concat [ prefix ++ show x | x <- xs ]
     prefix p xs = concat [p ++ x | x <- xs ]
 
-    showStateIds s = intercalate ", " . map show . S.toList . fromJust $ M.lookup s tdfaStateMap
+    showStateIds s = intercalate ", " . map showStateId . S.toList . fromJust $ M.lookup s tdfaStateMap
+      where 
+        showStateId s | s == tdfaOriginalFinalState = "[" ++ show s ++ "]"
+                      | otherwise               = show s
 
     getTrans :: StateId -> [TDFATrans]
     getTrans s = fromMaybe [] (M.lookup s tdfaTrans)
 
     isFinalState s = s `S.member` tdfaFinalStates
-    finalRegOps s | null ops  = ""
-                  | otherwise = "  Final reg ops:" ++
-        concat [ "\n    " ++ show t ++ " " ++ show r ++ " <- " ++ show val |
-                 (t,r) <- M.toList tdfaFinalRegisters,
-                 (r',val) <- ops,
-                 r == r' ] ++ "\n"
+    finalRegOps s = "  Final reg ops:" ++
+        concat ["\n    " ++ show r ++ " <- " ++ show val | (r,val) <- ops] ++
+        concat ["\n    " ++ show t ++ " <- " ++ show r  |
+                 (t,r) <- M.toList tdfaFinalRegisters ] ++ "\n"
       where ops = fromJust $ M.lookup s tdfaFinalFunction
+
     showFinalRegOps s | isFinalState s = finalRegOps s
                       | otherwise = ""
 
