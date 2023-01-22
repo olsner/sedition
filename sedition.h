@@ -15,6 +15,12 @@
 #include <string.h>
 #include <sys/random.h>
 
+#if 0
+#define YYDEBUG(fmt,...) printf("%s: " fmt, __PRETTY_FUNCTION__, ## __VA_ARGS__)
+#else
+#define YYDEBUG(...) (void)0
+#endif
+
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
 

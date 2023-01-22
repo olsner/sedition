@@ -63,6 +63,8 @@ matchFromTag t | possibleTag t =
   stmt ("m->matches[" <> matchix t <> "]." <> matchfld t <> " = " <> showB t)
                | otherwise = trace "found an unoptimized tag that can't be used by match" mempty -- skip all impossible tags
 
+debugTag t = stmt ("YYDEBUG(\"match[" <> matchix t <> "]." <> matchfld t <> " = %d\\n\", "  <> showB t <> ")")
+
 setTagFromReg (t, r) = stmt (showB t <> " = " <>
     showB r <> " ? " <> showB r <> " - s->buf : -1")
 
@@ -88,6 +90,7 @@ emitTrans (cs, (s', regops)) =
 emitState TDFA{..} s =
     decstate s <>
     stmt ("YYNEXT(" <> string8 endLabel <> ")") <>
+    stmt ("YYDEBUG(\"" <> showB s <> ": YYCHAR=%d (%c)\\n\", YYCHAR, YYCHAR)") <>
     "switch (YYCHAR) {\n" <>
     foldMap emitTrans trans <>
     -- TODO Don't emit "default" label if cases cover all possible values.
@@ -101,6 +104,9 @@ emitState TDFA{..} s =
     matchLabelName = "matched_" <> show s
     finalRegOps =
         label matchLabelName <>
+        -- Use the one-past index for positions set in final regops
+        stmt ("YYCURSOR++") <>
+        stmt ("YYDEBUG(\"Matched EOF in " <> showB s <> " at %zu\\n\", YYPOS)") <>
         foldMap emitRegOp (M.findWithDefault [] s tdfaFinalFunction) <>
         goto "match"
 
@@ -133,13 +139,16 @@ genC tdfa@TDFA{..} =
     foldMap (emitState tdfa) (tdfaStates tdfa) <>
     -- finish successfully
     label "match" <>
+    stmt "YYDEBUG(\"match found\\n\")" <>
     stmt "m->result = true" <>
     foldMap setTagFromReg (M.toList tdfaFinalRegisters) <>
     foldMap fixedTag (M.toList tdfaFixedTags) <>
     foldMap matchFromTag (S.toList allTags) <>
+    foldMap debugTag (S.toList allTags) <>
     stmt "return" <>
     -- no match
     label "fail" <>
+    stmt "YYDEBUG(\"match failed\\n\")" <>
     stmt "return"
   where
     allTags = S.union (M.keysSet tdfaFixedTags) (M.keysSet tdfaFinalRegisters)
