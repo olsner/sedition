@@ -131,9 +131,8 @@ testTagRegex = fixTags . testParseTagRegex
 testTagRegexFind :: String -> (TaggedRegex, FixedTagMap)
 testTagRegexFind = fixTags . adjustForFind . testParseTagRegex
 
--- Note that this should/must be run before fixing tags, otherwise you'll have
--- tags incorrectly fixed to end-of-match that should go before the tail. The
--- tail is "wrong" too, it should be handled in the TDFA stage.
+-- Note that this should/must be run before fixing tags, probably.
+-- Once we implement fallback, we can remove the trailing anyStar?
 adjustForFind re = cat3 anyStar re anyStar
   where anyStar = Repeat 0 Nothing (Term Any)
 

@@ -109,25 +109,36 @@ emitTrans (cs, (s', regops)) =
 emitState :: TDFA -> StateId -> Builder
 emitState TDFA{..} s =
     decstate s <>
-    stmt ("YYNEXT(" <> string8 endLabel <> ")") <>
+    stmt ("YYNEXT(" <> string8 eolLabel <> ")") <>
+    -- TODO if this is an accepting state we should generate code to set a flag
+    -- that a match was found and back up the tags before continuing if we're
+    -- *not* at EOF. (which we know now that we've passed YYNEXT)
     stmt ("YYDEBUG(\"" <> showB s <> ": YYCHAR=%d (%c)\\n\", YYCHAR, YYCHAR)") <>
     "switch (YYCHAR) {\n" <>
     foldMap emitTrans trans <>
     -- TODO Don't emit "default" label if cases cover all possible values.
     " default: goto fail;\n" <>
     "}\n" <>
-    (if isFinalState then finalRegOps else mempty)
+    -- TODO See above
+    -- (if isFinalState then finalRegOps else mempty) <>
+    (if isEOLState then eolRegOps else mempty)
   where
     trans = CM.toRanges $ M.findWithDefault CM.empty s tdfaTrans
-    isFinalState = S.member s tdfaFinalStates
-    endLabel = if isFinalState then matchLabelName else "fail"
-    matchLabelName = "matched_" <> show s
-    finalRegOps =
-        label matchLabelName <>
+    --isFinalState = S.member s tdfaFinalStates
+    isEOLState = M.member s tdfaEOL
+    eolLabel = if isEOLState then eolLabelName else "fail"
+    --matchLabelName = "matched_" <> show s
+    eolLabelName = "eol_" <> show s
+    -- finalRegOps =
+    --     emitEndRegOps matchLabelName (M.findWithDefault [] s tdfaFinalFunction)
+    eolRegOps =
+        emitEndRegOps eolLabelName (M.findWithDefault [] s tdfaEOL)
+    emitEndRegOps l ops =
+        label l <>
         -- Use the one-past index for positions set in final regops
         stmt ("YYCURSOR++") <>
         stmt ("YYDEBUG(\"Matched EOF in " <> showB s <> " at %zu\\n\", YYPOS)") <>
-        foldMap emitRegOp (M.findWithDefault [] s tdfaFinalFunction) <>
+        foldMap emitRegOp ops <>
         goto "match"
 
 -- Calling convention for matcher functions:
