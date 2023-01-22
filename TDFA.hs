@@ -201,8 +201,13 @@ addState closure ops = do
   where
     state = tdfaState closure
 
+-- Mainly to prevent runaway
+maxStates = 10000
+
 addNewState :: TDFAState -> RegOps -> GenTDFA (StateId, RegOps)
 addNewState state ops = do
+    ns <- gets (M.size . stateMap)
+    when (ns > maxStates) $ error "Too many states, giving up"
     s <- newState state
     -- trace ("new state " ++ show s ++ ": " ++ show state ++ " " ++ show ops) $ return ()
     return (s, ops)
@@ -266,7 +271,7 @@ visitStates tnfa ss = do
   visitStates tnfa newStates
 
 nextSymbols :: TNFA -> Set TNFA.StateId -> [Char]
-nextSymbols TNFA{..} s = collectSymbols [t | (q,t,p) <- tnfaTrans, S.member q s]
+nextSymbols TNFA{..} s = collectSymbols [t | (q,t,_) <- tnfaTrans, S.member q s]
 
 collectSymbols :: [TNFATrans] -> [Char]
 collectSymbols ts = S.toList . S.unions $ map chars ts
@@ -296,7 +301,7 @@ assignReg :: (TagId, RegRHS) -> GenTDFA (Maybe RegOp)
 assignReg (tag, rhs) = do
   existingReg <- gets (M.lookup (tag, rhs) . tagRHSMap)
   case existingReg of
-    Just r -> return Nothing
+    Just r -> return (Just (r, rhs))
     Nothing -> do
       r <- newReg
       addTagRHS tag rhs r
@@ -331,7 +336,7 @@ stepOnSymbol TNFA{..} prec c clos = go (sortByPrec prec clos)
     go [] = []
     go ((q,r,l):xs) = [(p,r,l,[]) | (_,_,p) <- transitions q] ++ go xs
     transitions q = filter (isTransition q) tnfaTrans
-    isTransition q (q', t, p) = q == q' && matchTerm t c
+    isTransition q (q', t, _) = q == q' && matchTerm t c
 
 finalRegOps TNFA{..} outRegs s = do
   (state,_) <- getState s
@@ -412,9 +417,11 @@ prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
         | otherwise = go seen ss
     go seen [] = []
     nextStates s = [t | (_,(t,_)) <- getTrans s]
-    showState s | s == tdfaStartState = "START " ++ showState' s
-    showState s | isFinalState s = "FINAL " ++ showState' s
-    showState s = "State " ++ showState' s
+    showState s | s == tdfaStartState && isFinalState s
+                                      = "START FINAL " ++ showState' s
+                | s == tdfaStartState = "START " ++ showState' s
+                | isFinalState s      = "FINAL " ++ showState' s
+                | otherwise           = "State " ++ showState' s
     showState' s = show s ++ ": " ++ showStateIds s ++ "\n"
     showTrans s = concat [ "  " ++ show t ++ " => " ++ show s' ++
                            regOps o (getTagRegMap s') ++ "\n"
