@@ -10,11 +10,9 @@ module Regex (
 
 import Control.Applicative
 
-import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as C
 import Data.Char (digitToInt)
 import Data.List (intercalate, (\\))
-import Data.Set (Set)
 import qualified Data.Set as S
 
 -- 'brackets' and a few similar combinators are "smart" and ignore whitespace
@@ -209,7 +207,7 @@ hasBackrefs _               = False
 
 tdfa2cCompatible re = not (hasBackrefs re)
 
-parseString :: Bool -> ByteString -> Regex
+parseString :: Bool -> C.ByteString -> Regex
 parseString ere input = case parseOnly (pRegex ere) input of
     Success p -> p
     Failure e -> error (show e)

@@ -11,8 +11,6 @@ import Data.List (sort)
 
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Set (Set)
-import qualified Data.Set as S
 
 newtype CharMap a = CharMap (Map Char a) deriving (Show, Ord, Eq)
 

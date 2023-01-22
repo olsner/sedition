@@ -5,20 +5,11 @@
 
 module SimulateTNFA where
 
-import Control.Monad.Trans.State.Strict
-
-import Data.ByteString.Char8 (ByteString)
-import qualified Data.ByteString.Char8 as C
-import Data.List
+import Data.List (sort)
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Set (Set)
-import qualified Data.Set as S
 
 import Debug.Trace
-
-import Regex (Regex)
-import qualified Regex
 
 import TaggedRegex
 import TNFA

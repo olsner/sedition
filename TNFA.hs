@@ -7,19 +7,12 @@ module TNFA where
 
 import Control.Monad.Trans.State.Strict
 
-import Data.ByteString.Char8 (ByteString)
-import qualified Data.ByteString.Char8 as C
-import Data.List
-import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Set (Set)
 import qualified Data.Set as S
 
-import Debug.Trace
-
-import Regex (Regex)
-import qualified Regex
+-- import Debug.Trace
 
 import TaggedRegex
 
@@ -140,21 +133,24 @@ tnfa finalState re =
 genTNFA :: (TaggedRegex, FixedTagMap) -> TNFA
 genTNFA (re, m) = (evalState (tnfa (S 0) re) 1) { tnfaTagMap = m }
 
+tnfaStates TNFA{..} = go S.empty [tnfaStartState]
+  where
+    go seen (s:ss)
+        | not (S.member s seen) = s : go (S.insert s seen) (ss ++ nextStates s)
+        | otherwise = go seen ss
+    go _ [] = []
+    nextStates s = [p | (q,_,p) <- tnfaTrans, q == s]
+
 -- Test functions
 
 prettyStates :: TNFA -> String
-prettyStates TNFA{..} = go S.empty [tnfaStartState] <> fixedTags <> "\n"
+prettyStates tnfa@TNFA{..} = foldMap showState ss <> fixedTags <> "\n"
   where
-    go seen (s:ss)
-        | not (S.member s seen) =
-            showState s <> showTrans s <>
-            go (S.insert s seen) (ss ++ nextStates s)
-        | otherwise = go seen ss
-    go seen [] = []
-    nextStates s = [p | (q,_,p) <- tnfaTrans, q == s]
-    showState s | s == tnfaStartState = "START " ++ show s ++ ":\n"
-    showState s | s == tnfaFinalState = "FINAL " ++ show s ++ ":\n"
-    showState s = "State " ++ show s ++ ":\n"
+    ss = tnfaStates tnfa
+    showState s = showHeader s <> showTrans s
+    showHeader s | s == tnfaStartState = "START " ++ show s ++ ":\n"
+    showHeader s | s == tnfaFinalState = "FINAL " ++ show s ++ ":\n"
+    showHeader s = "State " ++ show s ++ ":\n"
     showTrans s = concat ["  " ++ show t ++ " => " ++ show p ++ "\n"
                             | (q,t,p) <- tnfaTrans, q == s]
     fixedTags | M.null tnfaTagMap = "(No fixed tags)"

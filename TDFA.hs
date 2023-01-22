@@ -11,14 +11,14 @@ import Control.Monad
 
 -- import Data.ByteString.Char8 (ByteString)
 -- import qualified Data.ByteString.Char8 as C
-import Data.List
+import Data.List (elemIndex, find, intercalate, nub, sort, sortOn)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Set (Set)
 import qualified Data.Set as S
 
-import Debug.Trace
+-- import Debug.Trace
 
 import qualified CharMap as CM
 import CharMap (CharMap)
@@ -158,8 +158,8 @@ stateStateIds = S.fromList . map (\(q,_,_) -> q) . fst
 tdfaState :: Closure -> TDFAState
 tdfaState clos = (stateClosure clos, precedence clos)
 
-regop_rhs :: Map TagId RegId -> [RegVal] -> TagId -> RegRHS
-regop_rhs _ ht t = SetReg (last ht)
+regop_rhs :: Map TagId RegId -> History -> TagId -> RegRHS
+regop_rhs _ h t = SetReg (last (history h t))
 
 findState :: TDFAState -> GenTDFA (Maybe StateId)
 findState statePrec = gets (M.lookup statePrec . revStateMap)
@@ -172,7 +172,8 @@ findState statePrec = gets (M.lookup statePrec . revStateMap)
 --
 -- Then try to map registers and return new register operations.
 mapState :: TDFAState -> TDFAState -> RegOps -> Maybe RegOps
-mapState (s,p) (s',p') ops = Nothing
+mapState _ _ _ = Nothing
+-- mapState (s,p) (s',p') ops = Nothing
 
 -- 1. Find exact match and return existing state id
 -- 2. Look through all states to find mappable state
@@ -259,7 +260,7 @@ concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = concat <$> mapM f xs
 
 visitStates :: TNFA -> [StateId] -> GenTDFA ()
-visitStates tnfa [] = return ()
+visitStates _    [] = return ()
 visitStates tnfa ss = do
   newStates <- concatMapM (visitState tnfa) ss
   visitStates tnfa newStates
@@ -282,12 +283,12 @@ collectSymbols ts = S.toList . S.unions $ map chars ts
 
 transitionRegRHSes :: Closure -> [(TagId, RegRHS)]
 transitionRegRHSes = S.toList . S.fromList . concatMap stateRegOps
-  where stateRegOps (q,r,h,l) =
-          map (\t -> (t, regop_rhs r (history h t) t)) (tagsInHistory h)
+  where stateRegOps (_,r,h,_) =
+          map (\t -> (t, regop_rhs r h t)) (tagsInHistory h)
 
 updateTagMap :: Closure -> GenTDFA Closure
 updateTagMap = mapM $ \(q,r,h,l) -> do
-    let o = map (\t -> (t, regop_rhs r (history h t) t)) (tagsInHistory h)
+    let o = map (\t -> (t, regop_rhs r h t)) (tagsInHistory h)
     r' <- forM o $ \(t,rhs) -> gets ((t,) <$> fromJust . M.lookup (t,rhs) . tagRHSMap)
     return (q,M.union (M.fromList r') r,h,l)
 
@@ -339,8 +340,9 @@ finalRegOps TNFA{..} outRegs s = do
   --trace (show r ++ " " ++ show l) $ return ()
   let ts = tagsInHistory l
   o <- forEachTag $ \t -> do
-    let rhs | t `elem` ts              = regop_rhs r (history l t) t
+    let rhs | t `elem` ts              = regop_rhs r l t
             | Just src <- M.lookup t r = CopyReg src
+            | otherwise                = error "Missing either register or RHS for tag in finalRegOps"
     let Just dst = M.lookup t outRegs
     return (dst,rhs)
   return (s,o)
@@ -401,7 +403,7 @@ tdfaRegisters TDFA{..} = nub (M.elems tdfaFinalRegisters ++ usedRegs)
     usedRegs :: [RegId]
     usedRegs = concatMap (\(_,ops) -> regs ops) (concatMap CM.elems $ M.elems tdfaTrans)
     regs :: RegOps -> [RegId]
-    regs = map (\(r,rhs) -> r)
+    regs = map fst
     nub = S.toList . S.fromList
 
 prettyStates :: TDFA -> String
