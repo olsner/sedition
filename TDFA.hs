@@ -56,6 +56,8 @@ data TDFA = TDFA {
     tdfaFinalRegisters :: Map TagId RegId,
     tdfaFinalFunction :: Map StateId RegOps,
     tdfaTrans :: Map StateId TDFATransTable,
+    -- StateId to regops to perform at EOL. But only if a final state?
+    tdfaEOL :: Map StateId RegOps,
     tdfaFixedTags :: FixedTagMap,
     -- For debugging (mostly)
     tdfaTagRegMap :: Map StateId (Map TNFA.StateId (Map TagId RegId)),
@@ -75,9 +77,11 @@ type TDFAState = (StateClosure, Prec)
 -- State for determinization process
 data DetState = DetState {
   tags :: Set TagId,
+  finalRegisters :: Map TagId RegId,
   revStateMap :: Map TDFAState StateId,
   stateMap :: Map StateId TDFAState,
   transitions :: [(StateId, (Char, (StateId, RegOps)))],
+  eolTransitions :: [(StateId, RegOps)],
   tagRHSMap :: Map (TagId,RegRHS) RegId,
   nextState :: Int,
   nextReg :: Int
@@ -86,13 +90,16 @@ data DetState = DetState {
 
 initState :: TNFA -> DetState
 initState tnfa = DetState {
-    tags = TNFA.allTags tnfa,
+    tags = tags,
+    finalRegisters = M.fromList (zip (S.toList tags) (map R [0..])),
     revStateMap = M.empty,
     stateMap = M.empty,
     transitions = [],
+    eolTransitions = [],
     tagRHSMap = M.empty,
     nextState = 0,
-    nextReg = 0 }
+    nextReg = succ (S.size tags) }
+  where tags = TNFA.allTags tnfa
 
 type GenTDFA a = State DetState a
 
@@ -127,6 +134,10 @@ clearTagRHSMap = modify (\s -> s { tagRHSMap = M.empty })
 emitTransition :: StateId -> Char -> StateId -> RegOps -> GenTDFA ()
 emitTransition q c p o = do
     modify (\state@DetState{..} -> state{ transitions = (q, (c, (p,o))) : transitions })
+
+emitEOLTransition :: StateId -> RegOps -> GenTDFA ()
+emitEOLTransition q o = do
+    modify (\state@DetState{..} -> state{ eolTransitions = (q, o) : eolTransitions })
 
 type History = Map TagId RegVal
 
@@ -299,6 +310,14 @@ assignReg (tag, rhs) = do
       addTagRHS tag rhs r
       return (Just (r, rhs))
 
+addStateForReach :: TNFA -> Closure -> GenTDFA (Closure, RegOps)
+addStateForReach tnfa b = do
+    let c = epsilonClosure False tnfa b
+    let rhses = transitionRegRHSes c
+    o <- catMaybes <$> mapM assignReg rhses
+    c' <- updateTagMap c
+    return (c', o)
+
 visitState :: TNFA -> StateId -> GenTDFA [StateId]
 visitState tnfa s = do
     -- trace ("visitState " ++ show s) $ return ()
@@ -306,19 +325,30 @@ visitState tnfa s = do
     prevStates <- gets (M.keysSet . stateMap)
     let as = nextSymbols tnfa (S.fromList [q | (q,_,_) <- clos])
     ss <- forM as $ \a -> do
-        let b = stepOnSymbol tnfa prec a clos
-        let c = epsilonClosure False tnfa b
-        let rhses = transitionRegRHSes c
-        o <- catMaybes <$> mapM assignReg rhses
-        c' <- updateTagMap c
-        (s',o) <- addState c' o
-        --trace (show s ++ "[" ++ show a ++ "] -> " ++ show s' ++ ": " ++ show c' ++ " | " ++
-        --       show o) $ return ()
+        (c', o) <- addStateForReach tnfa (stepOnSymbol tnfa prec a clos)
+        (s', o) <- addState c' o
+        -- trace (show s ++ "[" ++ show a ++ "] -> " ++ show s' ++ ": "  ++
+        --        show c' ++ " | " ++ show o) $ return ()
         emitTransition s a s' o
         return s'
-    -- Cheating, without this it should all be wrong but it terminates at least
+
+    do
+        (c', o) <- addStateForReach tnfa (stepOnEOL tnfa prec clos)
+        when (containsFinalState tnfa c') $ do
+            -- trace (show s ++ "[EOL] -> " ++ show c' ++ " | " ++ show o) $ return ()
+            let fin = tnfaFinalState tnfa
+            let Just (_,r,_,l) = find (\(q,_,_,_) -> q == fin) c'
+            fo <- finalRegOps' tnfa r l
+            emitEOLTransition s (o ++ fo)
+
+    -- This seems to cause the generation to loop for some regexps, presumably
+    -- because mapState is not yet implemented?
     --clearTagRHSMap
+
+    -- Deduplicate and remove any reused existing states
     return (S.toList (S.fromList ss S.\\ prevStates))
+
+containsFinalState TNFA{..} = or . map (\(q,_,_,_) -> q == tnfaFinalState)
 
 sortByPrec :: Prec -> StateClosure -> StateClosure
 sortByPrec prec = sortOn (\(x,_,_) -> x `elemIndex` prec)
@@ -331,42 +361,61 @@ stepOnSymbol TNFA{..} prec c clos = go (sortByPrec prec clos)
     transitions q = filter (isTransition q) tnfaTrans
     isTransition q (q', t, _) = q == q' && matchTerm t c
 
-finalRegOps TNFA{..} outRegs s = do
+stepOnEOL :: TNFA -> Prec -> StateClosure -> Closure
+stepOnEOL TNFA{..} prec clos = go (sortByPrec prec clos)
+  where
+    go [] = []
+    go ((q,r,l):xs) = [(p,r,l,emptyHistory) | (_,_,p) <- transitions q] ++ go xs
+    transitions q = filter (isTransition q) tnfaTrans
+    isTransition q (q', t, _) = q == q' && t == EOL
+
+finalRegOps tnfa s = do
   (state,_) <- getState s
-  let Just (_,r,l) = find (\(q,_,_) -> q == tnfaFinalState) state
+  let Just (_,r,l) = find (\(q,_,_) -> q == tnfaFinalState tnfa) state
+  o <- finalRegOps' tnfa r l
+  return (s, o)
+
+finalRegOps' TNFA{..} r l = do
+  outRegs <- gets finalRegisters
   --trace (show r ++ " " ++ show l) $ return ()
   let ts = tagsInHistory l
-  o <- forEachTag $ \t -> do
+  forEachTag $ \t -> do
     let rhs | t `elem` ts              = regop_rhs l t
             | Just src <- M.lookup t r = CopyReg src
             | otherwise                = error "Missing either register or RHS for tag in finalRegOps"
     let Just dst = M.lookup t outRegs
     return (dst,rhs)
-  return (s,o)
 
 determinize :: TNFA -> GenTDFA TDFA
 determinize tnfa@TNFA{..} = do
   state0 <- generateInitialState tnfaStartState
   (s0, _) <- addState (epsilonClosure True tnfa state0) []
+  -- TODO Check if the BOL=False state can accept anything, if not we should
+  -- short circuit this to "fail".
+  -- And/or we should have this on a higher level and e.g. skip generating the
+  -- code for further matches if the regexp is anchored anyway.
   (s1, _) <- addState (epsilonClosure False tnfa state0) []
   -- s0 and s1 could be the same if there are no edges on BOL
   visitStates tnfa (nub [s0, s1])
 
   ts <- gets transitions
+  ets <- gets eolTransitions
   tagRegMap <- gets (M.map stateRegMap . stateMap)
   stateIdMap <- gets (M.map stateStateIds . stateMap)
   let hasFinalState (s,m) | S.member tnfaFinalState m = Just s
                           | otherwise                 = Nothing
       finalStates = mapMaybe hasFinalState (M.toList stateIdMap)
-  finRegs <- newRegForEachTag
-  finRegOps <- M.fromList <$> forM finalStates (finalRegOps tnfa finRegs)
+  finRegOps <- M.fromList <$> forM finalStates (finalRegOps tnfa)
+  finRegs <- gets finalRegisters
   return (TDFA {
     tdfaStartState = s0,
     tdfaStartStateNotBOL = s1,
+    -- TODO use one map for finalstates and finalfunction
     tdfaFinalStates = S.fromList finalStates,
     tdfaFinalRegisters = finRegs,
     tdfaFinalFunction = finRegOps,
     tdfaTrans = M.map CM.fromList (multiMapFromList ts),
+    tdfaEOL = M.fromList ets,
     tdfaFixedTags = tnfaTagMap,
     -- Debugging stuff:
     tdfaTagRegMap = tagRegMap,
@@ -407,7 +456,7 @@ prettyStates :: TDFA -> String
 prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
   where
     ss = tdfaStates tdfa
-    showState s = statePrefix s ++ " " ++ showState' s <> showTrans s <> showTagMap s <> showFinalRegOps s
+    showState s = statePrefix s ++ showState' s <> showTrans s <> showTagMap s <> showEOLRegOps s <> showFinalRegOps s
     statePrefix s = concat
         [ if s == tdfaStartState then "START " else ""
         , if s == tdfaStartStateNotBOL then "MID " else ""
@@ -456,6 +505,12 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
 
     showFinalRegOps s | isFinalState s = finalRegOps s
                       | otherwise = ""
+
+    eolRegOps ops = "  EOL reg ops:" ++
+        concat ["\n    " ++ show r ++ " <- " ++ show val | (r,val) <- ops] ++ "\n"
+
+    showEOLRegOps s | Just o <- M.lookup s tdfaEOL = eolRegOps o
+                    | otherwise = ""
 
 testTDFA :: String -> IO ()
 testTDFA = putStr . prettyStates . genTDFA . genTNFA . testTagRegex
