@@ -61,6 +61,7 @@ matchfld (T t) | even t = "rm_so"
 
 matchFromTag t | possibleTag t =
   stmt ("m->matches[" <> matchix t <> "]." <> matchfld t <> " = " <> showB t)
+               | otherwise = trace "found an unoptimized tag that can't be used by match" mempty -- skip all impossible tags
 
 setTagFromReg (t, r) = stmt (showB t <> " = " <>
     showB r <> " ? " <> showB r <> " - s->buf : -1")
@@ -85,7 +86,7 @@ emitCase c | c <= '\xff' = " case " <> cchar c <> ":\n"
 
 emitRegOp (r,SetReg val) = stmt ("  " <> showB r <> " = " <> g val)
   where
-    g Pos = "YYCURSOR"
+    g Pos = "YYCURSOR - 1" -- cases run after incrementing YYCURSOR
     g Nil = "NULL"
 emitRegOp (r,CopyReg r2) = stmt ("  " <> showB r <> " = " <> showB r2)
 
@@ -97,19 +98,24 @@ emitTrans (cs, (s', regops)) =
 
 emitState TDFA{..} s =
     decstate s <>
-    stmt ("YYNEXT(" <> endLabel <> ")") <>
+    stmt ("YYNEXT(" <> string8 endLabel <> ")") <>
+    -- TODO Detect wildcards and don't use switch? Or just detect ranges and
+    -- use "case x..y". That should<tm> get optimized away :)
     "switch (YYCHAR) {\n" <>
     foldMap emitTrans trans <>
+    -- TODO Don't emit "default" label if cases cover all possible values.
     " default: goto fail;\n" <>
-    "}\n"
-    -- This area is unreachable, so could put state-specific accept code here.
+    "}\n" <>
+    (if isFinalState then finalRegOps else mempty)
   where
     trans = CM.toList $ M.findWithDefault CM.empty s tdfaTrans
     isFinalState = S.member s tdfaFinalStates
-    -- TODO Matches also need to track which state we accepted from so that we
-    -- can apply the appropriate register operations.
-    -- Data is in tdfaFinalFunction
-    endLabel = if isFinalState then "match" else "fail"
+    endLabel = if isFinalState then matchLabelName else "fail"
+    matchLabelName = "matched_" <> show s
+    finalRegOps =
+        label matchLabelName <>
+        foldMap emitRegOp (M.findWithDefault [] s tdfaFinalFunction) <>
+        goto "match"
 
 -- Calling convention for matcher functions:
 -- 
@@ -155,7 +161,9 @@ genC tdfa@TDFA{..} =
 toStrictByteString = L.toStrict . toLazyByteString
 
 tdfa2c :: Regex -> ByteString
-tdfa2c = toStrictByteString . genC . genTDFA . genTNFA . fixTags . tagRegex
+tdfa2c = toStrictByteString .
+    genC . genTDFA . genTNFA .
+    fixTags . adjustForFind . tagRegex
 
 isCompatible :: Regex -> Bool
 isCompatible = Regex.tdfa2cCompatible

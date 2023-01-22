@@ -56,7 +56,6 @@ programHeader program =
     regexps :: Map IR.RE (S, Bool)
     regexps = IR.allRegexps program
     regexpvars = M.keys regexps
-    -- TODO Skip regexps where we can use tdfa2c
     initRegexp (re, (s, ere)) = sfun "compile_regexp" [regex re, cstring s, bool ere]
 
 programFooter program = "exit:\n" <>
