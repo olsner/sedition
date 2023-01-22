@@ -51,6 +51,7 @@ type TDFATransTable = CharMap TDFATrans
 
 data TDFA = TDFA {
     tdfaStartState :: StateId,
+    tdfaStartStateNotBOL :: StateId,
     tdfaFinalStates :: Set StateId,
     tdfaFinalRegisters :: Map TagId RegId,
     tdfaFinalFunction :: Map StateId RegOps,
@@ -220,6 +221,7 @@ symbolTrans _ = True
 
 -- TODO Need the bol case to be dynamically decided, e.g. for finding multiple
 -- matches when we're no longer at the beginning of the line.
+-- Make two starting states? If they're the same they'll be merged in addState.
 epsilonClosure :: Bool -> TNFA -> Closure -> Closure
 epsilonClosure bol TNFA{..} = possibleStates . go S.empty
   where
@@ -346,9 +348,11 @@ finalRegOps TNFA{..} outRegs s = do
 determinize :: TNFA -> GenTDFA TDFA
 determinize tnfa@TNFA{..} = do
   state0 <- generateInitialState tnfaStartState
-  let c0 = epsilonClosure True tnfa state0
-  (s0, _) <- addState c0 []
-  visitStates tnfa [s0]
+  (s0, _) <- addState (epsilonClosure True tnfa state0) []
+  (s1, _) <- addState (epsilonClosure False tnfa state0) []
+  -- s0 and s1 could be the same if there are no edges on BOL
+  visitStates tnfa (nub [s0, s1])
+
   ts <- gets transitions
   tagRegMap <- gets (M.map stateRegMap . stateMap)
   stateIdMap <- gets (M.map stateStateIds . stateMap)
@@ -359,6 +363,7 @@ determinize tnfa@TNFA{..} = do
   finRegOps <- M.fromList <$> forM finalStates (finalRegOps tnfa finRegs)
   return (TDFA {
     tdfaStartState = s0,
+    tdfaStartStateNotBOL = s1,
     tdfaFinalStates = S.fromList finalStates,
     tdfaFinalRegisters = finRegs,
     tdfaFinalFunction = finRegOps,
@@ -380,7 +385,7 @@ genTDFA :: TNFA -> TDFA
 genTDFA tnfa = evalState (determinize tnfa) (initState tnfa)
 
 tdfaStates :: TDFA -> [StateId]
-tdfaStates TDFA{..} = go S.empty [tdfaStartState]
+tdfaStates TDFA{..} = go S.empty [tdfaStartState, tdfaStartStateNotBOL]
   where
     go seen (s:ss)
       | not (S.member s seen) = s : go (S.insert s seen) (ss ++ nextStates s)
@@ -400,21 +405,14 @@ tdfaRegisters TDFA{..} = nub (M.elems tdfaFinalRegisters ++ usedRegs)
     nub = S.toList . S.fromList
 
 prettyStates :: TDFA -> String
-prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
+prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
   where
-    go seen (s:ss)
-        | not (S.member s seen) =
-            showState s <> showTrans s <> showTagMap s <>
-            showFinalRegOps s <>
-            go (S.insert s seen) (ss ++ nextStates s)
-        | otherwise = go seen ss
-    go seen [] = []
-    nextStates s = [t | (_,(t,_)) <- getTrans s]
-    showState s | s == tdfaStartState && isFinalState s
-                                      = "START FINAL " ++ showState' s
-                | s == tdfaStartState = "START " ++ showState' s
-                | isFinalState s      = "FINAL " ++ showState' s
-                | otherwise           = "State " ++ showState' s
+    ss = tdfaStates tdfa
+    showState s = statePrefix s ++ " " ++ showState' s <> showTrans s <> showTagMap s <> showFinalRegOps s
+    statePrefix s = concat
+        [ if s == tdfaStartState then "START " else ""
+        , if s == tdfaStartStateNotBOL then "MID " else ""
+        , if isFinalState s then "FINAL " else "" ]
     showState' s = show s ++ ": " ++ showStateIds s ++ "\n"
     showTrans s = concat [ "  " ++ showRanges rs ++ " => " ++
                            show s' ++ regOps o (getTagRegMap s') ++ "\n"

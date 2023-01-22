@@ -18,8 +18,6 @@ import Data.Set (Set)
 import qualified Data.Set as S
 
 import Data.List
-import Data.Maybe
-import Data.Word
 
 import Debug.Trace
 
@@ -33,8 +31,18 @@ import TDFA
 
 -- TODO Extract utility module to share with Compile...
 showB x = string8 (show x)
+
+intercalateB _   [] = mempty
+intercalateB sep (x:xs) = x <> go sep xs
+  where
+    go _   []     = mempty
+    go sep (x:xs) = sep <> x <> go sep xs
+
+fun function args = function <> "(" <> intercalateB ", " args <> ")"
+sfun function args = stmt (fun function args)
 stmt builder = builder <> ";\n"
 comment builder = "// " <> builder <> "\n"
+cIf cond t f = fun "if" [cond] <> "{\n  " <> t <> "} else {\n  " <> f <> "}\n"
 
 label name = string8 name <> ":\n"
 goto name = stmt ("goto " <> string8 name)
@@ -116,8 +124,7 @@ emitState TDFA{..} s =
 -- struct string { char* buf; size_t len; size_t alloc; };
 -- struct match_t { bool result; regmatch_t matches[]; }
 -- where regmatch_t has rm_so and rm_eo, corresponding to the even/odd tag
---
--- Will probably emulate re2c a bit with YY* variables to track position.
+-- offset is > 0 when repeating a match for a global replace
 --
 -- Tags are "tX" (offsets in string), registers are "rX" (pointers in string).
 genC :: TDFA -> B.Builder
@@ -134,7 +141,7 @@ genC tdfa@TDFA{..} =
     foldMap declareTagVar (S.toList allTags) <>
     foldMap declareReg allRegs <>
     stmt "m->result = false" <>
-    gostate tdfaStartState <>
+    cIf "offset > 0" (gostate tdfaStartStateNotBOL) (gostate tdfaStartState) <>
     -- states
     foldMap (emitState tdfa) (tdfaStates tdfa) <>
     -- finish successfully
