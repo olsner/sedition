@@ -324,7 +324,8 @@ visitState tnfa s = do
         --       show o) $ return ()
         emitTransition s a s' o
         return s'
-    clearTagRHSMap
+    -- Cheating, without this it should all be wrong but it terminates at least
+    --clearTagRHSMap
     return (S.toList (S.fromList ss S.\\ prevStates))
 
 sortByPrec :: Prec -> StateClosure -> StateClosure
