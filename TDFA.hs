@@ -15,10 +15,8 @@ import Data.List
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
-import Data.Ord
 import Data.Set (Set)
 import qualified Data.Set as S
-import Data.Word
 
 import Debug.Trace
 
@@ -41,15 +39,10 @@ data RegVal = Nil | Pos deriving (Show, Ord, Eq)
 data RegRHS
   = SetReg RegVal -- ^ i <- nil or position
   | CopyReg RegId -- ^ i <- j
-  -- Assuming for now that this is re2c-specific, we only use single-value tags.
-  | CopyAppend RegId [RegVal] -- ^ i <- j <>
   deriving (Ord, Eq)
 instance Show RegRHS where
   show (SetReg rv) = show rv
   show (CopyReg r) = show r
-  show (CopyAppend r vals) = show r ++ showVals vals
-    where showVals [] = ""
-          showVals (v:vs) = "<>" ++ show v ++ showVals vs
 type RegOp = (RegId, RegRHS)
 
 type RegOps = [RegOp]
@@ -73,8 +66,8 @@ data TDFA = TDFA {
 type Prio = TNFA.StateId
 type Prec = [Prio]
 -- Output or intermediate data of epsilon closure calculation
-type Closure = [(Prio, Map TagId RegId, [Tag], [Tag])]
-type StateClosure = [(Prio, Map TagId RegId, [Tag])]
+type Closure = [(Prio, Map TagId RegId, History, History)]
+type StateClosure = [(Prio, Map TagId RegId, History)]
 
 type TDFAState = (StateClosure, Prec)
 
@@ -134,18 +127,21 @@ emitTransition :: StateId -> Char -> StateId -> RegOps -> GenTDFA ()
 emitTransition q c p o = do
     modify (\state@DetState{..} -> state{ transitions = (q, (c, (p,o))) : transitions })
 
-history :: [Tag] -> TagId -> [RegVal]
-history []            _           = []
-history (Tag t':ts)   t | t == t' = Pos : history ts t
-history (UnTag t':ts) t | t == t' = Nil : history ts t
-history (_:ts)        t           = history ts t
+type History = Map TagId RegVal
 
-tagsInHistory :: [Tag] -> [TagId]
-tagsInHistory = S.toList . S.fromList . mapMaybe tag
-  where
-    tag (Tag t) = Just t
-    tag (UnTag t) = Just t
-    tag NoTag = Nothing
+emptyHistory = M.empty
+
+history :: History -> TagId -> [RegVal]
+history hs t | Just rv <- M.lookup t hs = [rv]
+             | otherwise                = []
+
+tagsInHistory :: History -> [TagId]
+tagsInHistory = M.keys
+
+appendHistory :: History -> Tag -> History
+appendHistory h (Tag t) = M.insert t Pos h
+appendHistory h (UnTag t) = M.insert t Nil h
+appendHistory h NoTag = h
 
 precedence :: Closure -> Prec
 precedence = map (\(q,_,_,_) -> q)
@@ -162,11 +158,7 @@ tdfaState :: Closure -> TDFAState
 tdfaState clos = (stateClosure clos, precedence clos)
 
 regop_rhs :: Map TagId RegId -> [RegVal] -> TagId -> RegRHS
-regop_rhs r ht t | isMultiValueTag t = CopyAppend (fromJust $ M.lookup t r) ht
 regop_rhs _ ht t = SetReg (last ht)
-
-isMultiValueTag :: TagId -> Bool
-isMultiValueTag _ = False
 
 findState :: TDFAState -> GenTDFA (Maybe StateId)
 findState statePrec = gets (M.lookup statePrec . revStateMap)
@@ -237,8 +229,8 @@ epsilonClosure bol TNFA{..} = possibleStates . go S.empty
       where
         seen' = S.insert q seen
         epst = sort [(prio,t,p) | (s,Eps prio t,p) <- tnfaTrans, s == q]
-        ys = [ (p,r,h,l ++ [t]) | (_,t,p) <- epst,
-                                   not (S.member p seen') ]
+        ys = [ (p,r,h,appendHistory l t) | (_,t,p) <- epst,
+                                           not (S.member p seen') ]
              ++ [ (p,r,h,l) | p <- anchors, not (S.member p seen') ]
         eol = False -- Should this really be handled here?
         anchors = [p | eol, (s,EOL,p) <- tnfaTrans, s == q] ++
@@ -259,7 +251,7 @@ newRegForEachTag = M.fromList <$> forEachTag (\t -> (t,) <$> newReg)
 generateInitialState :: TNFA.StateId -> GenTDFA Closure
 generateInitialState q0 = do
   --regs <- newRegForEachTag
-  return [(q0, M.empty, [], [])]
+  return [(q0, M.empty, emptyHistory, emptyHistory)]
 
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = concat <$> mapM f xs
@@ -335,7 +327,7 @@ stepOnSymbol :: TNFA -> Prec -> Char -> StateClosure -> Closure
 stepOnSymbol TNFA{..} prec c clos = go (sortByPrec prec clos)
   where
     go [] = []
-    go ((q,r,l):xs) = [(p,r,l,[]) | (_,_,p) <- transitions q] ++ go xs
+    go ((q,r,l):xs) = [(p,r,l,emptyHistory) | (_,_,p) <- transitions q] ++ go xs
     transitions q = filter (isTransition q) tnfaTrans
     isTransition q (q', t, _) = q == q' && matchTerm t c
 
