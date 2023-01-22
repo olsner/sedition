@@ -3,21 +3,18 @@
 
 module TDFA2C where
 
-import Control.Monad.Trans.State.Strict
-
 import Data.ByteString.Builder as B
-import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy.Char8 as L
 
 import qualified CharMap as CM
-import CharMap (CharMap)
-import Data.Map (Map)
+-- import CharMap (CharMap)
+-- import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Set (Set)
+-- import Data.Set (Set)
 import qualified Data.Set as S
 
-import Data.List
+-- import Data.List
 
 import Debug.Trace
 
@@ -25,23 +22,31 @@ import Regex (Regex)
 import qualified Regex
 
 import TaggedRegex
-import TNFA
-import SimulateTNFA
+import TNFA (genTNFA)
 import TDFA
 
 -- TODO Extract utility module to share with Compile...
+showB :: Show a => a -> Builder
 showB x = string8 (show x)
 
+-- TODO intercalateM since it's not builder-specific
+intercalateB :: Monoid a => a -> [a] -> a
 intercalateB _   [] = mempty
-intercalateB sep (x:xs) = x <> go sep xs
-  where
-    go _   []     = mempty
-    go sep (x:xs) = sep <> x <> go sep xs
+intercalateB sep (x:xs) = x <> foldMap (sep <>) xs
 
+fun :: Builder -> [Builder] -> Builder
 fun function args = function <> "(" <> intercalateB ", " args <> ")"
+
+sfun :: Builder -> [Builder] -> Builder
 sfun function args = stmt (fun function args)
+
+stmt :: Builder -> Builder
 stmt builder = builder <> ";\n"
+
+comment :: Builder -> Builder
 comment builder = "// " <> builder <> "\n"
+
+cIf :: Builder -> Builder -> Builder -> Builder
 cIf cond t f = fun "if" [cond] <> "{\n  " <> t <> "} else {\n  " <> f <> "}\n"
 
 label name = string8 name <> ":\n"
@@ -73,28 +78,35 @@ matchFromTag t | possibleTag t =
 
 debugTag t = stmt ("YYDEBUG(\"match[" <> matchix t <> "]." <> matchfld t <> " = %d\\n\", "  <> showB t <> ")")
 
+setTagFromReg :: (TagId, RegId) -> Builder
 setTagFromReg (t, r) = stmt (showB t <> " = " <>
     showB r <> " ? " <> showB r <> " - s->buf : -1")
 
+declareTagVar :: TagId -> Builder
 declareTagVar t = stmt ("regoff_t " <> showB t <> " = -1")
+declareReg :: RegId -> Builder
 declareReg r = stmt ("const char* " <> showB r <> " = NULL")
 
-emitCase (min,max)
-    | min == max = " case " <> cchar min <> ":\n"
-    | otherwise  = " case " <> cchar min <> " ... " <> cchar max <> ":\n"
+emitCase :: (Char,Char) -> Builder
+emitCase (lb,ub)
+    | lb == ub = " case " <> cchar lb <> ":\n"
+    | otherwise  = " case " <> cchar lb <> " ... " <> cchar ub <> ":\n"
 
+emitRegOp :: RegOp -> Builder
 emitRegOp (r,SetReg val) = stmt ("  " <> showB r <> " = " <> g val)
   where
     g Pos = "YYCURSOR - 1" -- cases run after incrementing YYCURSOR
     g Nil = "NULL"
 emitRegOp (r,CopyReg r2) = stmt ("  " <> showB r <> " = " <> showB r2)
 
+emitTrans :: ([(Char,Char)], TDFATrans) -> Builder
 emitTrans (cs, (s', regops)) =
     foldMap emitCase cs <> "{\n" <>
     foldMap emitRegOp regops <>
     "  " <> gostate s' <>
     "}\n"
 
+emitState :: TDFA -> StateId -> Builder
 emitState TDFA{..} s =
     decstate s <>
     stmt ("YYNEXT(" <> string8 endLabel <> ")") <>
@@ -161,9 +173,10 @@ genC tdfa@TDFA{..} =
     allTags = S.union (M.keysSet tdfaFixedTags) (M.keysSet tdfaFinalRegisters)
     allRegs = tdfaRegisters tdfa
 
+toStrictByteString :: Builder -> C.ByteString
 toStrictByteString = L.toStrict . toLazyByteString
 
-tdfa2c :: Regex -> ByteString
+tdfa2c :: Regex -> C.ByteString
 tdfa2c = toStrictByteString .
     genC . genTDFA . genTNFA .
     fixTags . adjustForFind . tagRegex

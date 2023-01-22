@@ -249,7 +249,7 @@ resolveStringIndex s ix = case ix of
     groupStart m i = match m <> ".matches[" <> intDec i <> "].rm_so"
     groupEnd m i = match m <> ".matches[" <> intDec i <> "].rm_eo"
 
-compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else tdfa2c r re
+compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else tdfa2c re
   where
     re = Regex.parseString ere s
     needRegexec = not (TDFA2C.isCompatible re)
@@ -259,7 +259,7 @@ compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else tdfa2c r re
     regexec = comment ("unsupported regex: " <> cstring res) <>
               sfun "match_regexp" ["m", "s", "offset", regex r, regexfun r]
 
-tdfa2c r re =
+tdfa2c re =
     comment ("tdfa2c regex: " <> cstring res) <>
     byteString (TDFA2C.tdfa2c re)
   where
