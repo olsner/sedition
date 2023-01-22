@@ -69,20 +69,9 @@ setTagFromReg (t, r) = stmt (showB t <> " = " <>
 declareTagVar t = stmt ("regoff_t " <> showB t <> " = -1")
 declareReg r = stmt ("const char* " <> showB r <> " = NULL")
 
-{-
-    finalRegOps s | null ops  = ""
-                  | otherwise = "  Final reg ops:" ++
-        concat [ "\n    " ++ show t ++ " " ++ show r ++ " <- " ++ show val |
-                 (t,r) <- M.toList tdfaFinalRegisters,
-                 (r',val) <- ops,
-                 r == r' ] ++ "\n"
-      where ops = fromJust $ M.lookup s tdfaFinalFunction
-    showFinalRegOps s | isFinalState s = finalRegOps s
-                      | otherwise = ""
--}
-
-emitCase c | c <= '\xff' = " case " <> cchar c <> ":\n"
-           | otherwise = error ("Character out of range: " ++ show c)
+emitCase (min,max)
+    | min == max = " case " <> cchar min <> ":\n"
+    | otherwise  = " case " <> cchar min <> " ... " <> cchar max <> ":\n"
 
 emitRegOp (r,SetReg val) = stmt ("  " <> showB r <> " = " <> g val)
   where
@@ -99,8 +88,6 @@ emitTrans (cs, (s', regops)) =
 emitState TDFA{..} s =
     decstate s <>
     stmt ("YYNEXT(" <> string8 endLabel <> ")") <>
-    -- TODO Detect wildcards and don't use switch? Or just detect ranges and
-    -- use "case x..y". That should<tm> get optimized away :)
     "switch (YYCHAR) {\n" <>
     foldMap emitTrans trans <>
     -- TODO Don't emit "default" label if cases cover all possible values.
@@ -108,7 +95,7 @@ emitState TDFA{..} s =
     "}\n" <>
     (if isFinalState then finalRegOps else mempty)
   where
-    trans = CM.toList $ M.findWithDefault CM.empty s tdfaTrans
+    trans = CM.toRanges $ M.findWithDefault CM.empty s tdfaTrans
     isFinalState = S.member s tdfaFinalStates
     endLabel = if isFinalState then matchLabelName else "fail"
     matchLabelName = "matched_" <> show s
