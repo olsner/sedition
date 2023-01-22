@@ -416,13 +416,17 @@ prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
                 | isFinalState s      = "FINAL " ++ showState' s
                 | otherwise           = "State " ++ showState' s
     showState' s = show s ++ ": " ++ showStateIds s ++ "\n"
-    showTrans s = concat [ "  " ++ show t ++ " => " ++ show s' ++
-                           regOps o (getTagRegMap s') ++ "\n"
-                           | (t,(s',o)) <- getTrans s ]
+    showTrans s = concat [ "  " ++ showRanges rs ++ " => " ++
+                           show s' ++ regOps o (getTagRegMap s') ++ "\n"
+                           | (rs,(s',o)) <- getTrans s ]
     fixedTags | M.null tdfaFixedTags = "(No fixed tags)"
               | otherwise = "Fixed tags:\n" ++
         concat [ "  " ++ show t ++ " <- " ++ show ft ++ "\n"
                  | (t,ft) <- M.toList tdfaFixedTags ]
+
+    showRanges = intercalate ", " . map showRange
+    showRange (min,max) | min == max = show min
+                        | otherwise  = show min ++ ".." ++ show max
 
     regOps [] _ = ""
     regOps ops regMap = prefix "\n    " (map regOp ops)
@@ -443,8 +447,8 @@ prettyStates TDFA{..} = go S.empty [tdfaStartState] <> fixedTags <> "\n"
         showStateId s | s == tdfaOriginalFinalState = "[" ++ show s ++ "]"
                       | otherwise               = show s
 
-    getTrans :: StateId -> [([Char],TDFATrans)]
-    getTrans s = CM.toList (M.findWithDefault CM.empty s tdfaTrans)
+    getTrans :: StateId -> [([(Char,Char)],TDFATrans)]
+    getTrans s = CM.toRanges (M.findWithDefault CM.empty s tdfaTrans)
 
     isFinalState s = s `S.member` tdfaFinalStates
     finalRegOps s = "  Final reg ops:" ++
