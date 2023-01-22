@@ -158,8 +158,8 @@ stateStateIds = S.fromList . map (\(q,_,_) -> q) . fst
 tdfaState :: Closure -> TDFAState
 tdfaState clos = (stateClosure clos, precedence clos)
 
-regop_rhs :: Map TagId RegId -> History -> TagId -> RegRHS
-regop_rhs _ h t = SetReg (last (history h t))
+regop_rhs :: History -> TagId -> RegRHS
+regop_rhs h t = SetReg (last (history h t))
 
 findState :: TDFAState -> GenTDFA (Maybe StateId)
 findState statePrec = gets (M.lookup statePrec . revStateMap)
@@ -283,12 +283,12 @@ collectSymbols ts = S.toList . S.unions $ map chars ts
 
 transitionRegRHSes :: Closure -> [(TagId, RegRHS)]
 transitionRegRHSes = S.toList . S.fromList . concatMap stateRegOps
-  where stateRegOps (_,r,h,_) =
-          map (\t -> (t, regop_rhs r h t)) (tagsInHistory h)
+  where stateRegOps (_,_,h,_) =
+          map (\t -> (t, regop_rhs h t)) (tagsInHistory h)
 
 updateTagMap :: Closure -> GenTDFA Closure
 updateTagMap = mapM $ \(q,r,h,l) -> do
-    let o = map (\t -> (t, regop_rhs r h t)) (tagsInHistory h)
+    let o = map (\t -> (t, regop_rhs h t)) (tagsInHistory h)
     r' <- forM o $ \(t,rhs) -> gets ((t,) <$> fromJust . M.lookup (t,rhs) . tagRHSMap)
     return (q,M.union (M.fromList r') r,h,l)
 
@@ -340,7 +340,7 @@ finalRegOps TNFA{..} outRegs s = do
   --trace (show r ++ " " ++ show l) $ return ()
   let ts = tagsInHistory l
   o <- forEachTag $ \t -> do
-    let rhs | t `elem` ts              = regop_rhs r l t
+    let rhs | t `elem` ts              = regop_rhs l t
             | Just src <- M.lookup t r = CopyReg src
             | otherwise                = error "Missing either register or RHS for tag in finalRegOps"
     let Just dst = M.lookup t outRegs
