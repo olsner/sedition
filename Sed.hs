@@ -102,7 +102,7 @@ getScript options inputs = case scripts options of
 
 compileProgram :: Bool -> (H.Label, Program) -> FilePath -> IO ()
 compileProgram ipc (label, program) ofile = do
-    let compiled = compileIR ipc label program
+    let compiled = compileIR ofile ipc label program
     C.writeFile ofile compiled
 
 compileC cFile exeFile = rawSystem "cc" ["-g", "-Og", cFile, "-o", exeFile]

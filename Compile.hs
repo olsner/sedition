@@ -14,7 +14,7 @@ import qualified Data.Map as M
 import Data.String
 import Data.Word
 
-import Debug.Trace
+-- import Debug.Trace
 
 import System.Exit
 
@@ -28,9 +28,8 @@ seditionRuntime :: IsString a => a
 seditionRuntime = $(embedStringFile "sedition.h")
 startingLine = length (lines seditionRuntime) + 2
 
-programHeader program =
-    -- TODO Could include the output file name too
-    "#line " <> intDec startingLine <> " \"<generated>\"\n" <>
+programHeader ofile program =
+    "#line " <> intDec startingLine <> " " <> cstring ofile <> "\n" <>
     "/* ^ runtime system */\n\
     \/* v compiled program */\n\
     \static bool hasPendingIPC = false;\n\
@@ -71,10 +70,10 @@ programFooter program = "exit:\n" <>
     freeRegex re = sfun "free_regexp" [regex re]
     freeString s = sfun "free_string" [string s]
 
-compileIR :: Bool -> H.Label -> Program -> S
-compileIR _ipc entry program = L.toStrict . toLazyByteString $
+compileIR :: FilePath -> Bool -> H.Label -> Program -> S
+compileIR ofile _ipc entry program = L.toStrict . toLazyByteString $
   seditionRuntime
-  <> programHeader program
+  <> programHeader (C.pack ofile) program
   <> goto entry
   <> foldMap compileBlock blocks
   <> programFooter program
