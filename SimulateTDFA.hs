@@ -20,15 +20,15 @@ import Debug.Trace
 import qualified CharMap as CM
 import CharMap (CharMap)
 import TaggedRegex
-import TNFA (genTNFA, testTNFA)
-import SimulateTNFA (testTNFASimulation, tnfaSimulation)
+import TNFA (genTNFA, testTNFA, testTNFAFind, FindType(..))
+import SimulateTNFA (testTNFASimulation, testTNFASimulationFind, tnfaSimulation)
 import TDFA hiding (initState)
 
 regexFind :: String -> String -> Maybe TagMap
-regexFind = runTDFA . genTDFA . genTNFA . testTagRegexFind
+regexFind = runTDFA . genTDFA . genTNFA ForFind . testTagRegex
 
 regexMatch :: String -> String -> Maybe TagMap
-regexMatch = runTDFA . genTDFA . genTNFA . testTagRegex
+regexMatch = runTDFA . genTDFA . genTNFA ForMatch . testTagRegex
 
 type RegMap = Map RegId Int
 

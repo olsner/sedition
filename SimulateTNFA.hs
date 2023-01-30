@@ -15,8 +15,11 @@ import TaggedRegex
 import TNFA
 
 testTNFASimulation :: String -> String -> Maybe TagMap
-testTNFASimulation = tnfaSimulation . genTNFA . testTagRegex
+testTNFASimulation = tnfaSimulation . genTNFA ForMatch . testTagRegex
+testTNFASimulationFind = tnfaSimulation . genTNFA ForFind . testTagRegex
 
+-- TODO Needs to maintain ordering of states for priority to work right, I
+-- think.
 type ConfigMap = Map StateId TagMap
 
 tnfaSimulation :: TNFA -> String -> Maybe TagMap

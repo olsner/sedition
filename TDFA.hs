@@ -24,7 +24,7 @@ import Debug.Trace
 import qualified CharMap as CM
 import CharMap (CharMap)
 import TaggedRegex hiding (Prio)
-import TNFA (genTNFA, TNFA(..))
+import TNFA (genTNFA, TNFA(..), FindType(..))
 import qualified TNFA
 import SimulateTNFA (matchTerm)
 
@@ -237,6 +237,7 @@ mapState allTags ops (s,p) (t,q)
     -- i.e. unmodified (here)
     unsetTags (_, hs) = S.toList (allTags S.\\ M.keysSet hs)
     mapTags ts xs ys = makeBijection =<< (forM ts $ \t -> do
+      -- All tags must have registers for this
       let Just x = M.lookup t xs
       let Just y = M.lookup t ys
       return (x, y))
@@ -290,7 +291,7 @@ addNewState state ops = do
     ns <- gets (M.size . stateMap)
     when (ns > maxStates) $ error "Too many states, giving up"
     s <- newState state
-    trace ("new state " ++ show s ++ ": " ++ show state ++ " " ++ show ops) $ return ()
+    -- trace ("new state " ++ show s ++ ": " ++ show state ++ " " ++ show ops) $ return ()
     return (s, ops)
 
 symbolTrans :: TNFATrans -> Bool
@@ -673,5 +674,5 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
                     | otherwise = ""
 
 testTDFA :: String -> IO ()
-testTDFA = putStr . prettyStates . genTDFA . genTNFA . testTagRegex
-testTDFAFind = putStr . prettyStates . genTDFA . genTNFA . testTagRegexFind
+testTDFA = putStr . prettyStates . genTDFA . genTNFA ForMatch . testTagRegex
+testTDFAFind = putStr . prettyStates . genTDFA . genTNFA ForFind . testTagRegex

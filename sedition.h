@@ -157,8 +157,14 @@ static void concat_inplace(string* dst, string* b)
 
 static void substring(string* dst, string* src, size_t i1, size_t i2)
 {
-    assert(i1 <= src->len && i2 <= src->len);
+    // Check for likely overflow
+    assert(i1 < UINT32_MAX);
+    assert(i2 < UINT32_MAX);
+    // Check bounds
+    assert(i1 <= src->len);
+    assert(i2 <= src->len);
     assert(i1 <= i2);
+
     const size_t n = i2 - i1;
     ensure_len_discard(dst, n);
     memcpy(dst->buf, src->buf + i1, n);

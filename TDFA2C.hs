@@ -22,7 +22,7 @@ import Regex (Regex)
 import qualified Regex
 
 import TaggedRegex
-import TNFA (genTNFA)
+import TNFA (genTNFA, FindType(..))
 import TDFA
 
 -- TODO Extract utility module to share with Compile...
@@ -189,11 +189,10 @@ toStrictByteString = L.toStrict . toLazyByteString
 
 tdfa2c :: Regex -> C.ByteString
 tdfa2c = toStrictByteString .
-    genC . genTDFA . genTNFA .
-    fixTags . adjustForFind . tagRegex
+    genC . genTDFA . genTNFA ForFind . fixTags . tagRegex
 
 isCompatible :: Regex -> Bool
 isCompatible = Regex.tdfa2cCompatible
 
 testTDFA2C :: String -> IO ()
-testTDFA2C = L.putStrLn . toLazyByteString . genC . genTDFA . genTNFA . testTagRegex
+testTDFA2C = L.putStrLn . toLazyByteString . genC . genTDFA . genTNFA ForFind . testTagRegex
