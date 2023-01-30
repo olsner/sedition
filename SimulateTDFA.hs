@@ -36,7 +36,7 @@ runTDFA :: TDFA -> String -> Maybe TagMap
 runTDFA tdfa@TDFA{..} = go' tdfaStartState M.empty 0
   where
     go :: StateId -> RegMap -> Int -> String -> Maybe TagMap
-    go s regs pos [] = applyFinalState s regs pos
+    go s regs pos [] = applyFinalState Nothing s regs pos
     go s regs pos (x:xs)
       | Just (s',o) <- next s x = go' s' (applyRegOps' o regs pos) (pos + 1) xs
       | otherwise               = Nothing
@@ -50,13 +50,18 @@ runTDFA tdfa@TDFA{..} = go' tdfaStartState M.empty 0
     next :: StateId -> Char -> Maybe (StateId, RegOps)
     next s x = CM.lookup x (M.findWithDefault CM.empty s tdfaTrans)
 
-    applyFinalState s regs pos
-      | M.member s tdfaFinalFunction = Just (fixedTags pos $ tagsFromRegs regs')
-      | Just o <- M.lookup s tdfaEOL = Just (fixedTags pos $ tagsFromRegs $
-                                             applyRegOps o regs pos)
+    applyFinalState maybeFallback s regs pos
+      -- TODO: Note that this is dead code since we're not tracking any
+      -- previous fallback state to fallback to.
+      | Just (pos, fs) <- maybeFallback,
+        Just o <- M.lookup s tdfaFallbackFunction = outTags pos o
+      | Just o <- M.lookup s tdfaFinalFunction = outTags pos o
+      | Just o <- M.lookup s tdfaEOL = outTags pos o
       | otherwise                  = trace "non-accepting state at end" Nothing
       where
-        regs' = applyRegOps' (M.findWithDefault [] s tdfaFinalFunction) regs pos
+        -- Takes position to handle fallback to a previous match
+        outTags pos ops =
+            Just . fixedTags pos . tagsFromRegs $ applyRegOps ops regs pos
 
     tagsFromRegs :: RegMap -> TagMap
     tagsFromRegs rs = M.mapMaybe (\r -> M.lookup r rs) tdfaFinalRegisters
@@ -64,11 +69,12 @@ runTDFA tdfa@TDFA{..} = go' tdfaStartState M.empty 0
     fixedTags :: Int -> TagMap -> TagMap
     fixedTags = resolveFixedTags tdfaFixedTags
 
-    applyRegOps' xs rs pos | False = trace (unwords ["applyRegOps{", show xs, show rs, show pos, "}"]) $ applyRegOps xs rs pos
-                           | otherwise = applyRegOps xs rs pos
+    applyRegOps xs rs pos | False = trace msg (applyRegOps' xs rs pos)
+                          | otherwise = applyRegOps' xs rs pos
+      where msg = unwords ["applyRegOps{", show xs, show rs, show pos, "}"]
 
-    applyRegOps :: RegOps -> RegMap -> Int -> RegMap
-    applyRegOps xs rs pos = foldr f rs xs
+    applyRegOps' :: RegOps -> RegMap -> Int -> RegMap
+    applyRegOps' xs rs pos = foldr f rs xs
       where
         f :: RegOp -> RegMap -> RegMap
         f (dst, CopyReg src) rs = M.alter (\_ -> M.lookup src rs) dst rs
