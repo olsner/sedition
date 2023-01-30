@@ -30,19 +30,6 @@ regexFind = runTDFA . genTDFA . genTNFA . testTagRegexFind
 regexMatch :: String -> String -> Maybe TagMap
 regexMatch = runTDFA . genTDFA . genTNFA . testTagRegex
 
-{-data TDFA = TDFA {
-    tdfaStartState :: StateId,
-    tdfaFinalStates :: Set StateId,
-    tdfaFinalRegisters :: Map TagId RegId,
-    tdfaFinalFunction :: Map StateId RegOps,
-    tdfaTrans :: Map StateId [TDFATrans],
-    tdfaFixedTags :: FixedTagMap,
-    tdfaTagRegMap :: Map StateId (Map TNFA.StateId (Map TagId RegId)),
-    tdfaStateMap :: Map StateId (Set TNFA.StateId)
-  }
-  deriving (Show, Ord, Eq)
--}
-
 type RegMap = Map RegId Int
 
 runTDFA :: TDFA -> String -> Maybe TagMap
@@ -64,7 +51,7 @@ runTDFA tdfa@TDFA{..} = go' tdfaStartState M.empty 0
     next s x = CM.lookup x (M.findWithDefault CM.empty s tdfaTrans)
 
     applyFinalState s regs pos
-      | S.member s tdfaFinalStates   = Just (fixedTags pos $ tagsFromRegs regs')
+      | M.member s tdfaFinalFunction = Just (fixedTags pos $ tagsFromRegs regs')
       | Just o <- M.lookup s tdfaEOL = Just (fixedTags pos $ tagsFromRegs $
                                              applyRegOps o regs pos)
       | otherwise                  = trace "non-accepting state at end" Nothing

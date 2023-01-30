@@ -53,7 +53,6 @@ type TDFATransTable = CharMap TDFATrans
 data TDFA = TDFA {
     tdfaStartState :: StateId,
     tdfaStartStateNotBOL :: StateId,
-    tdfaFinalStates :: Set StateId,
     tdfaFinalRegisters :: Map TagId RegId,
     tdfaFinalFunction :: Map StateId RegOps,
     tdfaFallbackFunction :: Map StateId RegOps,
@@ -508,8 +507,6 @@ determinize tnfa@TNFA{..} = do
   return (TDFA {
     tdfaStartState = s0,
     tdfaStartStateNotBOL = s1,
-    -- TODO use one map for finalstates and finalfunction
-    tdfaFinalStates = S.fromList finalStates,
     tdfaFinalRegisters = finRegs,
     tdfaFinalFunction = finRegOps,
     tdfaFallbackFunction = M.fromList fb,
@@ -595,7 +592,7 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
     getTrans :: StateId -> [([(Char,Char)],TDFATrans)]
     getTrans s = CM.toRanges (M.findWithDefault CM.empty s tdfaTrans)
 
-    isFinalState s = s `S.member` tdfaFinalStates
+    isFinalState s = s `M.member` tdfaFinalFunction
     finalRegOps ops =
         concat ["\n    " ++ show r ++ " <- " ++ show val | (r,val) <- ops] ++
         concat ["\n    " ++ show t ++ " <- " ++ show r  |
