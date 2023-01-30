@@ -148,6 +148,9 @@ history :: History -> TagId -> [RegVal]
 history hs t | Just rv <- M.lookup t hs = [rv]
              | otherwise                = []
 
+hasHistory :: History -> TagId -> Bool
+hasHistory hs t = M.member t hs
+
 tagsInHistory :: History -> [TagId]
 tagsInHistory = M.keys
 
@@ -177,25 +180,78 @@ regop_rhs h t = SetReg (last (history h t))
 findState :: TDFAState -> GenTDFA (Maybe StateId)
 findState statePrec = gets (M.lookup statePrec . revStateMap)
 
+type Bijection a = Map a a
+
+makeBijection :: Ord a => [(a,a)] -> Maybe (Bijection a)
+makeBijection = go M.empty
+  where
+    go res []         = Just res
+    go res ((x,y):xs) | x == y = go res xs
+                      | Nothing <- M.lookup x res,
+                        Nothing <- M.lookup y res = go (add x y res) xs
+                      | Just x' <- M.lookup x res, x' == y,
+                        Just y' <- M.lookup y res,  x == y' = go res xs
+                      | otherwise = Nothing
+    add x y = M.insert x y . M.insert y x
+
+bijectionToList :: Ord a => Bijection a -> [(a,a)]
+bijectionToList = filter (\(x,y) -> x < y) . M.toList
+
+unionsBijection :: Ord a => [Bijection a] -> Maybe (Bijection a)
+unionsBijection = makeBijection . concatMap bijectionToList
+
+bijectionRemove x m | Just y <- M.lookup x m = M.delete x (M.delete y m)
+                    | otherwise              = m
+
 -- First check if the states are compatible:
 -- 1. same subset of TNFA states
 -- 2. same precedence
--- 3. no "different lookahead tags for some TNFA state"? whatever that means,
---    perhaps that destination states for all outgoing transitions are the same
---    Something about tags can be different though - two states at the end of
---    ((a)|(b)) would have different outgoing tags for the (a) and (b).
+-- 3. no "different lookahead tags for some TNFA state"?
+--    the "lookahead tags" seems to refer to the "history" (in this case
+--    mapping of tag to positive or negative) for each TNFA state. This and 1
+--    can be checked at the same time in mappableStates.
 --
 -- Then try to map registers and return modified register operations.
-mapState :: RegOps -> TDFAState -> TDFAState -> Maybe RegOps
-mapState ops (s,p) (s',p')
-    | mappableStates s s', p == p' = do
-        -- TODO
-        trace ("possibly mappable: " ++ show (s,p) ++ " <> " ++ show (s',p')
-               ++ " | " ++ show ops) $ return ()
-        Nothing
+mapState :: Set TagId -> RegOps -> TDFAState -> TDFAState -> Maybe RegOps
+mapState allTags ops (s,p) (t,q)
+    | statesMappable, p == q = do
+        -- trace ("mappable?\n   " ++ show (s,p) ++ "\n<> " ++ show (t,q)
+        --        ++ " | " ++ show ops) $ return ()
+        subMappings <- mappedRegs
+        -- trace ("Mapped regs: " ++ show subMappings) $ return ()
+        allMappings <- unionsBijection subMappings
+        -- trace ("All mapped regs: " ++ show allMappings) $ return ()
+        let copyMappings = bijectionToList (foldr bijectionRemove allMappings (map fst ops))
+        let ops' = (topo_sort (copyOps copyMappings ++ adjustOps allMappings))
+        -- trace ("Mapped ops: " ++ show ops ++ "\nto: " ++ show ops') $ return ()
+        return ops'
     | otherwise = Nothing
+  where
+    substates = M.fromList . map (\(q,r,h) -> ((q,h),r))
+    s_regs = substates s
+    t_regs = substates t
+    statesMappable = M.keysSet s_regs == M.keysSet t_regs
+    mappedRegs = M.elems <$> unionWithMaybe mapRegs s_regs t_regs
+    mapRegs :: (Prio, History) -> Map TagId RegId -> Map TagId RegId -> Maybe (Bijection RegId)
+    mapRegs k xs ys = mapTags (unsetTags k) xs ys
+    -- i.e. unmodified (here)
+    unsetTags (_, hs) = S.toList (allTags S.\\ M.keysSet hs)
+    mapTags ts xs ys = makeBijection =<< (forM ts $ \t -> do
+      let Just x = M.lookup t xs
+      let Just y = M.lookup t ys
+      return (x, y))
 
-mappableStates s t = tnfaStatesInClosure s == tnfaStatesInClosure t
+    regsWithOps = M.keysSet (M.fromList ops)
+    copyOps xs = [(i, CopyReg j) | (i,j) <- xs, i /= j]
+    adjustOps m = [(j, o) | (i, o) <- ops, let Just j = M.lookup i m]
+
+    -- Unsure if true, probably not :)
+    topo_sort = sort
+
+unionWithMaybe :: (Applicative t, Ord a) => (a -> b -> b -> t c) -> Map a b -> Map a b -> t (Map a c)
+unionWithMaybe f x y = M.fromList <$> sequenceA (zipWith f' (M.toList x) (M.toList y))
+  where f' (k1,x) (k2,y) | k1 == k2 = (k1,) <$> f k1 x y
+                         | otherwise = error "Unmatching maps in unionWithMaybe"
 
 -- mapMaybeM f = liftM catMaybes . mapM f
 maybeHead (x:_) = Just x
@@ -204,10 +260,11 @@ maybeHead [] = Nothing
 findMapState :: TDFAState -> RegOps -> GenTDFA (Maybe (StateId, RegOps))
 findMapState new ops = do
   states <- gets (M.toList . stateMap)
-  return (maybeHead (mapMaybe tryMapState states))
+  allTags <- gets tags
+  return (maybeHead (mapMaybe (tryMapState allTags) states))
   where
-    tryMapState (id, s) = do
-      (id,) <$> mapState ops new s
+    tryMapState allTags (id, s) = do
+      (id,) <$> mapState allTags ops new s
 
 -- 1. Find exact match and return existing state id
 -- 2. Look through all states to find mappable state
@@ -280,8 +337,8 @@ newRegForEachTag = M.fromList <$> forEachTag (\t -> (t,) <$> newReg)
 
 generateInitialState :: TNFA.StateId -> GenTDFA Closure
 generateInitialState q0 = do
-  --regs <- newRegForEachTag
-  return [(q0, M.empty, emptyHistory, emptyHistory)]
+  regs <- newRegForEachTag
+  return [(q0, regs, emptyHistory, emptyHistory)]
 
 concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
 concatMapM f xs = concat <$> mapM f xs
