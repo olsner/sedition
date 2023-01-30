@@ -133,7 +133,7 @@ testTagRegexFind = fixTags . adjustForFind . testParseTagRegex
 
 -- Note that this should/must be run before fixing tags, probably.
 -- Once we implement fallback, we can remove the trailing anyStar?
-adjustForFind re = cat3 anyStar re anyStar
+adjustForFind re = cat anyStar re
   where anyStar = Repeat 0 Nothing (Term Any)
 
 -- Based on usgae information, eliminate some of the tags in a regex.
