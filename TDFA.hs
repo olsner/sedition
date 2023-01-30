@@ -6,7 +6,7 @@
 
 module TDFA where
 
-import Control.Monad.Trans.State.Strict
+import Control.Monad.Trans.State.Strict hiding (mapState)
 import Control.Monad
 
 -- import Data.ByteString.Char8 (ByteString)
@@ -17,8 +17,9 @@ import qualified Data.Map as M
 import Data.Maybe
 import Data.Set (Set)
 import qualified Data.Set as S
+import Data.Either (partitionEithers)
 
--- import Debug.Trace
+import Debug.Trace
 
 import qualified CharMap as CM
 import CharMap (CharMap)
@@ -41,8 +42,8 @@ data RegRHS
   | CopyReg RegId -- ^ i <- j
   deriving (Ord, Eq)
 instance Show RegRHS where
-  show (SetReg rv) = show rv
-  show (CopyReg r) = show r
+  show (SetReg rv) = "set" ++ show rv
+  show (CopyReg r) = "copy " ++ show r
 type RegOp = (RegId, RegRHS)
 
 type RegOps = [RegOp]
@@ -55,6 +56,7 @@ data TDFA = TDFA {
     tdfaFinalStates :: Set StateId,
     tdfaFinalRegisters :: Map TagId RegId,
     tdfaFinalFunction :: Map StateId RegOps,
+    tdfaFallbackFunction :: Map StateId RegOps,
     tdfaTrans :: Map StateId TDFATransTable,
     -- StateId to regops to perform at EOL. But only if a final state?
     tdfaEOL :: Map StateId RegOps,
@@ -164,7 +166,8 @@ stateClosure = map (\(q,r,_,l) -> (q,r,l))
 stateRegMap :: TDFAState -> Map TNFA.StateId (Map TagId RegId)
 stateRegMap = M.fromList . map (\(q,r,_) -> (q,r)) . fst
 stateStateIds :: TDFAState -> Set TNFA.StateId
-stateStateIds = S.fromList . map (\(q,_,_) -> q) . fst
+stateStateIds (c, _) = tnfaStatesInClosure c
+tnfaStatesInClosure = S.fromList . map (\(q,_,_) -> q)
 
 tdfaState :: Closure -> TDFAState
 tdfaState clos = (stateClosure clos, precedence clos)
@@ -180,41 +183,58 @@ findState statePrec = gets (M.lookup statePrec . revStateMap)
 -- 2. same precedence
 -- 3. no "different lookahead tags for some TNFA state"? whatever that means,
 --    perhaps that destination states for all outgoing transitions are the same
+--    Something about tags can be different though - two states at the end of
+--    ((a)|(b)) would have different outgoing tags for the (a) and (b).
 --
--- Then try to map registers and return new register operations.
-mapState :: TDFAState -> TDFAState -> RegOps -> Maybe RegOps
-mapState _ _ _ = Nothing
--- mapState (s,p) (s',p') ops = Nothing
+-- Then try to map registers and return modified register operations.
+mapState :: RegOps -> TDFAState -> TDFAState -> Maybe RegOps
+mapState ops (s,p) (s',p')
+    | mappableStates s s', p == p' = do
+        -- TODO
+        trace ("possibly mappable: " ++ show (s,p) ++ " <> " ++ show (s',p')
+               ++ " | " ++ show ops) $ return ()
+        Nothing
+    | otherwise = Nothing
+
+mappableStates s t = tnfaStatesInClosure s == tnfaStatesInClosure t
+
+-- mapMaybeM f = liftM catMaybes . mapM f
+maybeHead (x:_) = Just x
+maybeHead [] = Nothing
+
+findMapState :: TDFAState -> RegOps -> GenTDFA (Maybe (StateId, RegOps))
+findMapState new ops = do
+  states <- gets (M.toList . stateMap)
+  return (maybeHead (mapMaybe tryMapState states))
+  where
+    tryMapState (id, s) = do
+      (id,) <$> mapState ops new s
 
 -- 1. Find exact match and return existing state id
 -- 2. Look through all states to find mappable state
 -- 3. Create new state
 addState :: Closure -> RegOps -> GenTDFA (StateId, RegOps)
 addState closure ops = do
-     prev <- findState state
-     case prev of
-       Just p -> return (p, ops)
-       Nothing -> do
-         -- TODO Find a state that can be mapped and reuse it
-         -- I think this is "optional", rather just results in adding more
-         -- states than necessary. (Perhaps *many* more than necessary for
-         -- complicated regexps...)
-         -- Actually does not seem to be optional after all, the example tagged
-         -- regexp from the TDFA paper generates infinite states.
-         -- states <- gets (M.toList . stateMap)
-         addNewState state ops
+  prev <- findState state
+  case prev of
+    Just p -> return (p, ops)
+    Nothing -> do
+      mapped <- findMapState state ops
+      case mapped of
+        Just (p, ops') -> return (p, ops')
+        Nothing -> addNewState state ops
   where
     state = tdfaState closure
 
 -- Mainly to prevent runaway
-maxStates = 10000
+maxStates = 1000
 
 addNewState :: TDFAState -> RegOps -> GenTDFA (StateId, RegOps)
 addNewState state ops = do
     ns <- gets (M.size . stateMap)
     when (ns > maxStates) $ error "Too many states, giving up"
     s <- newState state
-    -- trace ("new state " ++ show s ++ ": " ++ show state ++ " " ++ show ops) $ return ()
+    trace ("new state " ++ show s ++ ": " ++ show state ++ " " ++ show ops) $ return ()
     return (s, ops)
 
 symbolTrans :: TNFATrans -> Bool
@@ -287,7 +307,7 @@ collectSymbols ts = S.toList . S.unions $ map chars ts
     chars (CNotClass cs) = allChars S.\\ S.fromList cs
     chars EOL = S.empty
     chars BOL = S.empty
-    chars x = error ("Unhandled case " ++ show x)
+    chars (Eps _ _) = S.empty
 
 transitionRegRHSes :: Closure -> [(TagId, RegRHS)]
 transitionRegRHSes = S.toList . S.fromList . concatMap stateRegOps
@@ -332,6 +352,8 @@ visitState tnfa s = do
         emitTransition s a s' o
         return s'
 
+    -- Annoyingly complicated and duplicatey. stepOnSymbol only looks for
+    -- character transitions, and treating EOL as a character is ugly?
     do
         (c', o) <- addStateForReach tnfa (stepOnEOL tnfa prec clos)
         when (containsFinalState tnfa c') $ do
@@ -343,7 +365,7 @@ visitState tnfa s = do
 
     -- This seems to cause the generation to loop for some regexps, presumably
     -- because mapState is not yet implemented?
-    --clearTagRHSMap
+    clearTagRHSMap
 
     -- Deduplicate and remove any reused existing states
     return (S.toList (S.fromList ss S.\\ prevStates))
@@ -386,6 +408,73 @@ finalRegOps' TNFA{..} r l = do
     let Just dst = M.lookup t outRegs
     return (dst,rhs)
 
+
+-- For each final state that is a fallback state, return a set of clobbered
+-- registers that need backup.
+-- Fallback states:
+-- * Identify states that have a transition to the default state (= any gaps
+--   in their TDFATransTable).
+-- * Add states that have transitions to those states, record their register
+--   set operations, continue to fixpoint
+fallbackStates :: Set StateId -> DetState -> Map StateId (Set RegId)
+fallbackStates finalStates s = defaultable
+  where
+    ts = M.map CM.fromList . multiMapFromList . transitions $ s
+    defaultable :: Map StateId (Set RegId)
+    defaultable = go M.empty (zip statesWithDefaultTransitions (repeat S.empty))
+    go :: Map StateId (Set RegId) -> [(StateId, Set RegId)] -> Map StateId (Set RegId)
+    go def     [] = def
+    go def ((s,rs):ss)
+      | s `M.member` def || s `S.member` finalStates = go def' ss
+      | otherwise = go def' (reaches s ++ ss)
+      where def' = M.insertWith S.union s rs def
+    reaches s | Just ts <- M.lookup s ts = map (\(s,ops) -> (s, regSet ops)) (CM.elems ts)
+              | otherwise = []
+
+    regSet = S.fromList . map fst
+
+    statesWithDefaultTransitions = mapMaybe hasDefaultTransitions (M.toList ts)
+    hasDefaultTransitions (s,cm) | not (CM.isComplete cm) = Just s
+                                 | otherwise              = Nothing
+
+-- For each finalfunction in each fallback state, check which regops are
+-- reading from clobbered registers and add backup and fallback operations.
+-- Note that the fallback/backup is much simplified when not dealing with
+-- register append operations.
+-- If there's a finalReg <- otherReg in the final function, add it as a backup
+-- operation on all outgoing edges that clobber otherReg. That way the final
+-- register will have the correct value already. (and the fallback function
+-- for the state will not include a setting of finalReg)
+-- Any finalReg <- nonclobbered or finalReg <- position are added to the
+-- fallback function.
+-- From what I can gather, the final function is replaced by the fallback
+-- function when doing fallback. The TDFA runner will need to remember the
+-- input position and the state when leaving a final/fallback state.
+-- I *guess* the point of all this (except for multi-valued tags?) is to avoid
+-- redundant register operations on outgoing edges from final states. Which
+-- can be significant if there are many possibly-final states to pass through
+-- before reaching the last one.
+fallbackRegOps :: RegOps -> Map StateId (Set RegId) -> StateId -> GenTDFA ((StateId, RegOps), Map (StateId, StateId) RegOps)
+fallbackRegOps finRegOps clobbered s = do
+  let clobberedRegs = M.findWithDefault S.empty s clobbered
+  -- TODO Looks like it doesn't need to be in the monad
+  fallBackups <- forM finRegOps $ \(i,o) -> do
+    case o of
+      CopyReg j | j `S.member` clobberedRegs -> return (Right (i, o))
+      _ -> return (Left (i, o))
+  let (fallback, backup) = partitionEithers (fallBackups)
+  ts <- gets transitions
+  let additionalOps
+       | null backup = []
+       | otherwise = [((s, s'), backup) | (q,(_,(s',_))) <- ts,
+                                          q == s, M.member s' clobbered]
+  return ((s, fallback), M.fromList additionalOps)
+
+insertRegOps :: Map (StateId, StateId) RegOps -> [(StateId, (Char, (StateId, RegOps)))] -> [(StateId, (Char, (StateId, RegOps)))]
+insertRegOps m = map $ \(s, (c, (s', o))) -> (s, (c, (s', o ++ added s s')))
+  where
+   added s s' = M.findWithDefault [] (s,s') m
+
 determinize :: TNFA -> GenTDFA TDFA
 determinize tnfa@TNFA{..} = do
   state0 <- generateInitialState tnfaStartState
@@ -405,8 +494,17 @@ determinize tnfa@TNFA{..} = do
   let hasFinalState (s,m) | S.member tnfaFinalState m = Just s
                           | otherwise                 = Nothing
       finalStates = mapMaybe hasFinalState (M.toList stateIdMap)
+      finalStateSet = S.fromList finalStates
   finRegOps <- M.fromList <$> forM finalStates (finalRegOps tnfa)
   finRegs <- gets finalRegisters
+  defaultableStates <- gets (fallbackStates finalStateSet)
+  let fallbackStates = M.restrictKeys defaultableStates finalStateSet
+  (fb, backups) <- unzip <$> (forM (M.keys fallbackStates) $ \s ->
+    fallbackRegOps (M.findWithDefault [] s finRegOps) defaultableStates s)
+  let mergedBackups = foldr (M.unionWith (<>)) M.empty backups
+  let ts' = insertRegOps mergedBackups ts
+  -- trace ("fallbacks: " ++ show fb) (pure ())
+  -- trace ("all backup operations: " ++ show mergedBackups) (pure ())
   return (TDFA {
     tdfaStartState = s0,
     tdfaStartStateNotBOL = s1,
@@ -414,7 +512,8 @@ determinize tnfa@TNFA{..} = do
     tdfaFinalStates = S.fromList finalStates,
     tdfaFinalRegisters = finRegs,
     tdfaFinalFunction = finRegOps,
-    tdfaTrans = M.map CM.fromList (multiMapFromList ts),
+    tdfaFallbackFunction = M.fromList fb,
+    tdfaTrans = M.map CM.fromList (multiMapFromList ts'),
     tdfaEOL = M.fromList ets,
     tdfaFixedTags = tnfaTagMap,
     -- Debugging stuff:
@@ -456,7 +555,7 @@ prettyStates :: TDFA -> String
 prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
   where
     ss = tdfaStates tdfa
-    showState s = statePrefix s ++ showState' s <> showTrans s <> showTagMap s <> showEOLRegOps s <> showFinalRegOps s
+    showState s = statePrefix s <> showState' s <> showTrans s <> showTagMap s <> showEOLRegOps s <> showFinalRegOps s <> showFallbackRegOps s
     statePrefix s = concat
         [ if s == tdfaStartState then "START " else ""
         , if s == tdfaStartStateNotBOL then "MID " else ""
@@ -497,14 +596,21 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
     getTrans s = CM.toRanges (M.findWithDefault CM.empty s tdfaTrans)
 
     isFinalState s = s `S.member` tdfaFinalStates
-    finalRegOps s = "  Final reg ops:" ++
+    finalRegOps ops =
         concat ["\n    " ++ show r ++ " <- " ++ show val | (r,val) <- ops] ++
         concat ["\n    " ++ show t ++ " <- " ++ show r  |
                  (t,r) <- M.toList tdfaFinalRegisters ] ++ "\n"
+
+    showFinalRegOps s | isFinalState s = "  Final reg ops:" ++ finalRegOps ops
+                      | otherwise = ""
       where ops = fromJust $ M.lookup s tdfaFinalFunction
 
-    showFinalRegOps s | isFinalState s = finalRegOps s
-                      | otherwise = ""
+    isFallbackState s = s `M.member` tdfaFallbackFunction
+    showFallbackRegOps s
+      | isFallbackState s && ops /= M.findWithDefault [] s tdfaFinalFunction
+        = "  Fallback reg ops:" ++ finalRegOps ops
+      | otherwise = ""
+      where ops = fromJust $ M.lookup s tdfaFallbackFunction
 
     eolRegOps ops = "  EOL reg ops:" ++
         concat ["\n    " ++ show r ++ " <- " ++ show val | (r,val) <- ops] ++ "\n"

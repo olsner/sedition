@@ -5,13 +5,17 @@ module CharMap (
     -- access/update
     CharMap.lookup, insert, delete,
     -- conversion/extraction
-    elems, toList, toRanges) where
+    elems, toList, toRanges,
+    isComplete) where
 
 import Data.List (sort)
 
 import Data.Map (Map)
 import qualified Data.Map as M
+import qualified Data.Set as S
 
+-- Make this e.g. RangeMap k v, then add CharMap a = RangeMap Char a
+-- That would allow adding a few metavalues besides char?
 newtype CharMap a = CharMap (Map Char a) deriving (Show, Ord, Eq)
 
 empty = CharMap (M.empty)
@@ -54,3 +58,6 @@ insert :: Char -> a -> CharMap a -> CharMap a
 insert k v (CharMap m) = CharMap (M.insert k v m)
 
 delete k (CharMap m) = CharMap (M.delete k m)
+
+-- Cheating here - Char has a large range but we'll work like Char8 here.
+isComplete (CharMap m) = S.toList (M.keysSet m) == ['\0'..'\xff']
