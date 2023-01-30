@@ -22,7 +22,7 @@ import CharMap (CharMap)
 import TaggedRegex
 import TNFA (genTNFA, testTNFA)
 import SimulateTNFA (testTNFASimulation, tnfaSimulation)
-import TDFA
+import TDFA hiding (initState)
 
 regexFind :: String -> String -> Maybe TagMap
 regexFind = runTDFA . genTDFA . genTNFA . testTagRegexFind
@@ -32,36 +32,65 @@ regexMatch = runTDFA . genTDFA . genTNFA . testTagRegex
 
 type RegMap = Map RegId Int
 
+data RunState = RunState {
+    sFallback :: Maybe (Int, StateId),
+    sPos :: Int,
+    sRegs :: RegMap
+  } deriving (Show, Ord, Eq)
+
+initState = RunState { sFallback = Nothing, sPos = 0, sRegs = M.empty }
+
+getPos = gets sPos
+incPos = modify $ \s@RunState{..} -> s { sPos = succ sPos }
+getRegs = gets sRegs
+modifyRegs f = modify $ \s@RunState{..} -> s { sRegs = f sRegs }
+setFallback fs = modify $ \s@RunState{..} -> s { sFallback = Just (sPos, fs) }
+
+type RunTDFA a = State RunState a
+
 runTDFA :: TDFA -> String -> Maybe TagMap
-runTDFA tdfa@TDFA{..} = go' tdfaStartState M.empty 0
+runTDFA tdfa@TDFA{..} xs = evalState (go' tdfaStartState xs) initState
   where
-    go :: StateId -> RegMap -> Int -> String -> Maybe TagMap
-    go s regs pos [] = applyFinalState Nothing s regs pos
-    go s regs pos (x:xs)
-      | Just (s',o) <- next s x = go' s' (applyRegOps' o regs pos) (pos + 1) xs
-      | otherwise               = Nothing
+    go :: StateId -> String -> RunTDFA (Maybe TagMap)
+    go s [] = applyFinalState s
+    go s (x:xs)
+      | Just (s',o) <- next s x = applyRegOps o >> incPos >> maybeSetFallback s' >> go' s' xs
+      | otherwise               = applyFallbackState s
 
     debug = True
 
-    go' s regs pos xs
-        | debug     = trace (unwords ["go", show pos, show xs, show s, show (M.toList regs)]) (go s regs pos xs)
-        | otherwise = go s regs pos xs
+    go' s xs = do
+      pos <- getPos
+      regs <- getRegs
+      when debug (trace (unwords ["go", show pos, show xs, show s, show (M.toList regs)]) (return ()))
+      go s xs
 
     next :: StateId -> Char -> Maybe (StateId, RegOps)
     next s x = CM.lookup x (M.findWithDefault CM.empty s tdfaTrans)
 
-    applyFinalState maybeFallback s regs pos
-      -- TODO: Note that this is dead code since we're not tracking any
-      -- previous fallback state to fallback to.
-      | Just (pos, fs) <- maybeFallback,
-        Just o <- M.lookup s tdfaFallbackFunction = outTags pos o
-      | Just o <- M.lookup s tdfaFinalFunction = outTags pos o
-      | Just o <- M.lookup s tdfaEOL = outTags pos o
-      | otherwise                  = trace "non-accepting state at end" Nothing
-      where
-        -- Takes position to handle fallback to a previous match
-        outTags pos ops =
-            Just . fixedTags pos . tagsFromRegs $ applyRegOps ops regs pos
+    maybeSetFallback s | s `M.member` tdfaFinalFunction = trace "setting fallback!" (setFallback s)
+                       | otherwise                      = trace ("no fallback for " ++ show s) (return ())
+
+    applyFallbackState s = do
+      maybeFallback <- gets sFallback
+      pos <- getPos
+      case maybeFallback of
+        Just (pos, fs)  -> outTags pos fs tdfaFallbackFunction
+        _ -> trace "no match for character" (return Nothing)
+
+    applyFinalState s = do
+      maybeFallback <- gets sFallback
+      pos <- getPos
+      case maybeFallback of
+        _ | M.member s tdfaFinalFunction -> outTags pos s tdfaFinalFunction
+        _ | M.member s tdfaEOL           -> outTags pos s tdfaEOL
+        Just (pos, fs)                   -> outTags pos fs tdfaFallbackFunction
+        _ -> trace "non-accepting state at end" (return Nothing)
+
+    -- Takes position to handle fallback to a previous match
+    outTags pos s opfun | ops <- fromJust (M.lookup s opfun) = do
+      applyRegOps ops
+      gets (Just . fixedTags pos . tagsFromRegs . sRegs)
 
     tagsFromRegs :: RegMap -> TagMap
     tagsFromRegs rs = M.mapMaybe (\r -> M.lookup r rs) tdfaFinalRegisters
@@ -69,12 +98,12 @@ runTDFA tdfa@TDFA{..} = go' tdfaStartState M.empty 0
     fixedTags :: Int -> TagMap -> TagMap
     fixedTags = resolveFixedTags tdfaFixedTags
 
-    applyRegOps xs rs pos | False = trace msg (applyRegOps' xs rs pos)
-                          | otherwise = applyRegOps' xs rs pos
-      where msg = unwords ["applyRegOps{", show xs, show rs, show pos, "}"]
+    applyRegOps xs = do
+      pos <- getPos
+      modifyRegs (applyRegOps' xs pos)
 
-    applyRegOps' :: RegOps -> RegMap -> Int -> RegMap
-    applyRegOps' xs rs pos = foldr f rs xs
+    applyRegOps' :: RegOps -> Int -> RegMap -> RegMap
+    applyRegOps' xs pos rs = foldr f rs xs
       where
         f :: RegOp -> RegMap -> RegMap
         f (dst, CopyReg src) rs = M.alter (\_ -> M.lookup src rs) dst rs
