@@ -633,12 +633,16 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
       where
         getTags reg = [show s ++ ":" ++ show t |
                          (s,ts) <- regMap,
-                         (t,r) <- M.toList ts,
+                         (t,r) <- ts,
                          r == reg ]
         regOp (r,val) = intercalate "," (getTags r) ++ " " ++ show r ++ " <- " ++ show val
 
-    getTagRegMap s = M.toList $ fromJust $ M.lookup s tdfaTagRegMap
-    showTagMap s = "  Regs:" <> showPrefix "\n   " (getTagRegMap s) <> "\n"
+    getTagRegMap s = [(s, M.toList rs) |
+        (s,rs) <- M.toList $ M.findWithDefault M.empty s tdfaTagRegMap,
+        not (M.null rs) ]
+    showTagMap s | not (null rs) = "  Regs:" <> showPrefix "\n   " rs <> "\n"
+                 | otherwise     = ""
+      where rs = getTagRegMap s
     showPrefix prefix xs = concat [ prefix ++ show x | x <- xs ]
     prefix p xs = concat [p ++ x | x <- xs ]
 
