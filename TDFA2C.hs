@@ -177,18 +177,19 @@ emitState TDFA{..} s =
 -- Tags are "tX" (offsets in string), registers are "rX" (pointers in string).
 genC :: TDFA -> B.Builder
 genC tdfa@TDFA{..} =
-    stmt ("const char *const YYBEGIN = s->buf + offset") <>
-    "for (; offset <= s->len; offset++) {\n" <>
+    stmt ("YYDEBUG(\"Starting match at %zu (of %zu)\\n\", offset, s->len)") <>
+    stmt ("const char *const YYBEGIN = s->buf") <>
     stmt ("const char *const YYLIMIT = s->buf + s->len") <>
-    stmt ("const char *YYCURSOR = s->buf + offset") <>
-    stmt ("unsigned char YYCHAR = 0") <>
-    stmt ("void *fallback_label = NULL") <>
-    stmt ("const char *fallback_cursor = NULL") <>
     "#define YYPOS (YYCURSOR - YYBEGIN)\n" <>
     "#define YYNEXT(endlabel) do { \\\n" <>
     "   if (YYCURSOR >= YYLIMIT) goto endlabel; \\\n" <>
     "   else YYCHAR = *YYCURSOR++; \\\n" <>
     "  } while (0)\n" <>
+    "for (; offset <= s->len; offset++) {\n" <>
+    stmt ("const char *YYCURSOR = s->buf + offset") <>
+    stmt ("unsigned char YYCHAR = 0") <>
+    stmt ("void *fallback_label = NULL") <>
+    stmt ("const char *fallback_cursor = NULL") <>
     foldMap declareTagVar (S.toList allTags) <>
     foldMap declareReg allRegs <>
     stmt "m->result = false" <>
@@ -208,7 +209,7 @@ genC tdfa@TDFA{..} =
     label "fail" <>
     -- TODO Check if this is same as SimulateTDFA
     cWhen "fallback_label" (goto "*fallback_label") <>
-    cWhen "offset <= s->len" (stmt "YYDEBUG(\"retry match\\n\")") <>
+    cWhen "offset < s->len" (stmt "YYDEBUG(\"retry match\\n\")") <>
     "}\n" <>
     stmt "YYDEBUG(\"match failed\\n\")" <>
     stmt "return"
