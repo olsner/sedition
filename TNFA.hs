@@ -128,21 +128,10 @@ tnfa finalState re =
         q1 <- tnfa (tnfaFinalState q2) x
         return (q1 <> q2)
 
-adjustForFind :: FindType -> TNFA -> GenTNFA TNFA
-adjustForFind ForMatch tnfa = return tnfa
-adjustForFind ForFind q2 = do
-   q0 <- newState
-   q1 <- trans Any q0
-   return (eps q0 (tnfaStartState q2) (P 1) <>
-           eps q0 (tnfaStartState q1) (P 2) <> q1 <> q2)
-
 -- API?
 
-data FindType = ForFind | ForMatch deriving (Show, Ord, Eq)
-
-genTNFA :: FindType -> (TaggedRegex, FixedTagMap) -> TNFA
-genTNFA ft (re, m) = res { tnfaTagMap = m }
-  where res = evalState (tnfa (S 0) re >>= adjustForFind ft) 1
+genTNFA :: (TaggedRegex, FixedTagMap) -> TNFA
+genTNFA (re, m) = (evalState (tnfa (S 0) re) 1) { tnfaTagMap = m }
 
 tnfaStates TNFA{..} = go S.empty [tnfaStartState]
   where
@@ -170,7 +159,4 @@ prettyStates tnfa@TNFA{..} = foldMap showState ss <> fixedTags <> "\n"
                  | (t,ft) <- M.toList tnfaTagMap ]
 
 testTNFA :: String -> IO ()
-testTNFA = putStr . prettyStates . genTNFA ForMatch . testTagRegex
-
-testTNFAFind :: String -> IO ()
-testTNFAFind = putStr . prettyStates . genTNFA ForFind . testTagRegex
+testTNFA = putStr . prettyStates . genTNFA . testTagRegex

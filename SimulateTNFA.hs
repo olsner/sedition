@@ -15,15 +15,20 @@ import TaggedRegex
 import TNFA
 
 testTNFASimulation :: String -> String -> Maybe TagMap
-testTNFASimulation = tnfaSimulation . genTNFA ForMatch . testTagRegex
-testTNFASimulationFind = tnfaSimulation . genTNFA ForFind . testTagRegex
+testTNFASimulation = tnfaMatch . genTNFA . testTagRegex
+testTNFASimulationFind = tnfaSearch 0 . genTNFA . testTagRegex
 
--- TODO Needs to maintain ordering of states for priority to work right, I
--- think.
 type ConfigMap = Map StateId TagMap
 
-tnfaSimulation :: TNFA -> String -> Maybe TagMap
-tnfaSimulation tnfa as =     initSimulation tnfa (M.singleton (tnfaStartState tnfa) M.empty) as
+tnfaSearch :: Int -> TNFA -> String -> Maybe TagMap
+tnfaSearch k tnfa as
+  | match@(Just _) <- initSimulation tnfa (initState tnfa) k as = match
+  | null as   = Nothing
+  | otherwise = tnfaSearch (k + 1) tnfa (tail as)
+
+tnfaMatch tnfa = initSimulation tnfa (initState tnfa) 0
+
+initState TNFA{..} = M.singleton tnfaStartState M.empty
 
 finalSimulatedState :: TNFA -> Int -> ConfigMap -> Maybe TagMap
 finalSimulatedState TNFA{..} k c = go (M.toList c)
@@ -33,11 +38,13 @@ finalSimulatedState TNFA{..} k c = go (M.toList c)
       | q == tnfaFinalState = Just (resolveFixedTags tnfaTagMap k m)
       | otherwise = go xs
 
-initSimulation :: TNFA -> ConfigMap -> String -> Maybe TagMap
-initSimulation tnfa c xs = trace simTrace $ simulation tnfa c' 0 xs
-  where c' = epsilonClosure tnfa c 0 (null xs)
+initSimulation :: TNFA -> ConfigMap -> Int -> String -> Maybe TagMap
+initSimulation tnfa c k xs = trace simTrace $ simulation tnfa c' k xs
+  where c' = epsilonClosure tnfa c k (null xs)
         simTrace = "Init: " ++ show c ++ " -> " ++ show c'
 
+-- TODO Remember the last time the final state is part of the state set, and
+-- pull that out when failing.
 simulation :: TNFA -> ConfigMap -> Int -> String -> Maybe TagMap
 simulation tnfa c k [] =
     trace simTrace $ finalSimulatedState tnfa k c'
@@ -93,4 +100,3 @@ epsilonClosure tnfa c k eol = M.fromList $ go (M.toList c) M.empty
                   [p | bol, (s,BOL,p) <- ts, s == q]
     possibleStates c' = [y | y@(q,_) <- M.toList c', q == fin || possibleState q]
     possibleState q = or [symbolTrans t | (s,t,_) <- ts, s == q]
-

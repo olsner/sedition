@@ -24,7 +24,7 @@ import Debug.Trace
 import qualified CharMap as CM
 import CharMap (CharMap)
 import TaggedRegex hiding (Prio)
-import TNFA (genTNFA, TNFA(..), FindType(..))
+import TNFA (genTNFA, TNFA(..))
 import qualified TNFA
 import SimulateTNFA (matchTerm)
 
@@ -678,5 +678,4 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
                     | otherwise = ""
 
 testTDFA :: String -> IO ()
-testTDFA = putStr . prettyStates . genTDFA . genTNFA ForMatch . testTagRegex
-testTDFAFind = putStr . prettyStates . genTDFA . genTNFA ForFind . testTagRegex
+testTDFA = putStr . prettyStates . genTDFA . genTNFA . testTagRegex
