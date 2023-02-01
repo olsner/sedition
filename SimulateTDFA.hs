@@ -56,10 +56,10 @@ runTDFA search tdfa@TDFA{..} xs = evalState (go' tdfaStartState xs) initState
     orig_xs = xs
 
     go :: StateId -> String -> RunTDFA (Maybe TagMap)
-    go s [] = applyFinalState s
+    go s [] = applyFinalState True s
     go s (x:xs)
       | Just (s',o) <- next s x = applyRegOps o >> incPos >> maybeSetFallback s' >> go' s' xs
-      | otherwise               = applyFallbackState s
+      | otherwise               = applyFinalState False s
 
     debug = True
 
@@ -80,24 +80,15 @@ runTDFA search tdfa@TDFA{..} xs = evalState (go' tdfaStartState xs) initState
     maybeSetFallback s | s `M.member` tdfaFinalFunction = trace "setting fallback!" (setFallback s)
                        | otherwise                      = trace ("no fallback for " ++ show s) (return ())
 
-    applyFallbackState s = do
-      maybeFallback <- gets sFallback
-      case maybeFallback of
-        -- found accepting state at EOF
-        _ | M.member s tdfaFinalFunction -> outTags s tdfaFinalFunction
-        Just (pos, fs) ->
-            trace ("fallback at end to " ++ show pos ++ " " ++ show fs) $
-                (setPos pos >> outTags fs tdfaFallbackFunction)
-        _ | search -> trace "no match, retry" retry
-        _ -> trace "no match for character" (return Nothing)
-
-    applyFinalState s = do
+    applyFinalState eol s = do
       maybeFallback <- gets sFallback
       case maybeFallback of
         _ | M.member s tdfaFinalFunction -> outTags s tdfaFinalFunction
-        _ | M.member s tdfaEOL           -> outTags s tdfaEOL
+        _ | eol && M.member s tdfaEOL    -> outTags s tdfaEOL
         Just (pos, fs) -> setPos pos >> outTags fs tdfaFallbackFunction
-        _ -> trace "non-accepting state at end" (return Nothing)
+        _ | search -> trace "no match, retry" retry
+        _ | eol -> trace "non-accepting state at end" (return Nothing)
+        _ -> trace "non-accepting state in middle" (return Nothing)
 
     -- Takes position to handle fallback to a previous match
     outTags s opfun | ops <- fromJust (M.lookup s opfun) = do
