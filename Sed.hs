@@ -45,6 +45,7 @@ data Options = Options
   , runIt :: Bool
   , compileIt :: Bool
   , fuel :: Int
+  , defines :: [String]
   } deriving (Show, Eq)
 defaultOptions = Options
     { extendedRegexps = False
@@ -59,12 +60,14 @@ defaultOptions = Options
     , timeIt = False
     , runIt = True
     , compileIt = False
-    , fuel = 1000000 }
+    , fuel = 1000000
+    , defines = [] }
 addScript s o = o { scripts = Left (C.pack s) : scripts o }
 addScriptFile f o = o { scripts = Right f : scripts o }
 setCOutputFile f o = o { cOutputFile = f }
 setExeOutputFile f o = o { exeOutputFile = f }
 setFuel f o = o { fuel = f }
+addDefine f o = o { defines = f : defines o }
 
 sedOptions =
   [ Option ['r', 'E'] ["regexp-extended"] (NoArg $ \o -> o { extendedRegexps = True }) "Use extended regexps"
@@ -84,6 +87,7 @@ sedOptions =
   , Option [] ["run"] (NoArg $ \o -> o { runIt = True }) "Compile and run."
   , Option ['o'] ["c-output"] (ReqArg setCOutputFile "C_FILE") "Path to compiled C output file."
   , Option [] ["exe"] (ReqArg setExeOutputFile "EXEC_FILE") "Path to compiled executable."
+  , Option ['D'] [] (ReqArg addDefine "MACRO") "Add macro to C compilation"
   ]
 
 -- TODO Include source file/line info here, thread through to the parser...
@@ -105,7 +109,8 @@ compileProgram ipc (label, program) ofile = do
     let compiled = compileIR ofile ipc label program
     C.writeFile ofile compiled
 
-compileC cFile exeFile = rawSystem "cc" ["-g", "-Og", cFile, "-o", exeFile]
+compileC cFile exeFile defines =
+    rawSystem "cc" (["-g", "-Og", cFile, "-o", exeFile] ++ map ("-D"++) defines)
 
 -- TODO Use some realPath function instead of ./, in case a full path is used.
 runExecutable exe inputs = rawSystem ("./" ++ exe) (map C.unpack inputs)
@@ -174,7 +179,7 @@ do_main args = do
     -- one pass without an extra file inbetween.
     when (compileIt && runIt) $ do
       tCompileStart <- timestamp
-      status <- compileC cOutputFile exeOutputFile
+      status <- compileC cOutputFile exeOutputFile defines
       tCompileEnd <- timestamp
 
       when timeIt $ do
