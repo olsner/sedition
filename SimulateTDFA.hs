@@ -36,10 +36,11 @@ data RunState = RunState {
     sFallback :: Maybe (Int, StateId),
     sPos :: Int,
     sRegs :: RegMap,
-    sRetryPos :: Int
+    sRetryPos :: Int,
+    sRetryString :: String
   } deriving (Show, Ord, Eq)
 
-initState = RunState { sFallback = Nothing, sPos = 0, sRegs = M.empty, sRetryPos = 0 }
+initState p s = RunState { sFallback = Nothing, sPos = p, sRegs = M.empty, sRetryPos = p, sRetryString = s }
 
 getPos = gets sPos
 incPos = modify $ \s@RunState{..} -> s { sPos = succ sPos }
@@ -51,10 +52,9 @@ setFallback fs = modify $ \s@RunState{..} -> s { sFallback = Just (sPos, fs) }
 type RunTDFA a = State RunState a
 
 runTDFA :: Bool -> TDFA -> String -> Maybe TagMap
-runTDFA search tdfa@TDFA{..} xs = evalState (go' tdfaStartState xs) initState
+runTDFA search tdfa@TDFA{..} xs =
+  evalState (go' tdfaStartState xs) (initState 0 xs)
   where
-    orig_xs = xs
-
     go :: StateId -> String -> RunTDFA (Maybe TagMap)
     go s [] = applyFinalState True s
     go s (x:xs)
@@ -70,9 +70,13 @@ runTDFA search tdfa@TDFA{..} xs = evalState (go' tdfaStartState xs) initState
       go s xs
 
     retry = do
-      pos <- gets (succ . sRetryPos)
-      put (initState { sPos = pos, sRetryPos = pos})
-      go' tdfaStartState (drop pos orig_xs)
+      pos <- gets sRetryPos
+      str <- gets sRetryString
+      if null str
+        then return Nothing
+        else do
+          put (initState (succ pos) (tail str))
+          go' tdfaStartState (tail str)
 
     next :: StateId -> Char -> Maybe (StateId, RegOps)
     next s x = CM.lookup x (M.findWithDefault CM.empty s tdfaTrans)
@@ -85,7 +89,7 @@ runTDFA search tdfa@TDFA{..} xs = evalState (go' tdfaStartState xs) initState
       case maybeFallback of
         _ | M.member s tdfaFinalFunction -> outTags s tdfaFinalFunction
         _ | eol && M.member s tdfaEOL    -> outTags s tdfaEOL
-        Just (pos, fs) -> setPos pos >> outTags fs tdfaFallbackFunction
+        Just (pos, fs) -> trace ("falling back to " ++ show fs ++ " @" ++ show pos) setPos pos >> outTags fs tdfaFallbackFunction
         _ | search -> trace "no match, retry" retry
         _ | eol -> trace "non-accepting state at end" (return Nothing)
         _ -> trace "non-accepting state in middle" (return Nothing)

@@ -6,6 +6,7 @@ module TDFA2C where
 import Data.ByteString.Builder as B
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy.Char8 as L
+import Data.Semigroup
 
 import qualified CharMap as CM
 -- import CharMap (CharMap)
@@ -46,8 +47,14 @@ stmt builder = builder <> ";\n"
 comment :: Builder -> Builder
 comment builder = "// " <> builder <> "\n"
 
+blockComment :: Builder -> Builder
+blockComment builder = hsep <> "// " <> builder <> "\n"
+
+hsep = stimes 79 "/" <> "\n"
+
 cIf :: Builder -> Builder -> Builder -> Builder
-cIf cond t f = fun "if" [cond] <> "{\n  " <> t <> "} else {\n  " <> f <> "}\n"
+cIf cond t f = fun "if " [cond] <> " {\n  " <> t <> "} else {\n  " <> f <> "}\n"
+cWhen cond t = fun "if " [cond] <> " {\n  " <> t <> "}\n"
 
 label name = string8 name <> ":\n"
 goto name = stmt ("goto " <> string8 name)
@@ -57,12 +64,6 @@ gostate s = goto (show s)
 
 cchar = showB . fromEnum
 
--- Since back references are single-digit, only the first 20 tags can be
--- output.
--- TODO Do this as part of previus optimizations. Will be automatic when we
--- track used groups since impossible tags cannot be used then.
-possibleTag (T t) = t < 20
-
 fixedTag (t, f) = stmt (showB t <> " = " <> g f)
   where
     g (EndOfMatch dist) = "YYPOS - " <> showB dist
@@ -71,6 +72,14 @@ fixedTag (t, f) = stmt (showB t <> " = " <> g f)
 matchix (T t) = showB (t `div` 2)
 matchfld (T t) | even t = "rm_so"
                | otherwise = "rm_eo"
+
+-- Since back references are single-digit, only the first 20 tags can be
+-- output. POSIX requires parens in a lot of places and can't be told not to
+-- add a capturable subexpression for it though, so this can pop up.
+-- We need to ensure we don't write past the end of m->matches.
+-- With optimization of unused tags this should not be used.
+-- (And along with that we can probably stop using regmatch_t.)
+possibleTag (T t) = t < 20
 
 matchFromTag t | possibleTag t =
   stmt ("m->matches[" <> matchix t <> "]." <> matchfld t <> " = " <> showB t)
@@ -108,38 +117,54 @@ emitTrans (cs, (s', regops)) =
 
 emitState :: TDFA -> StateId -> Builder
 emitState TDFA{..} s =
+    hsep <>
+    (if isFallbackState then fallbackRegOps else mempty) <>
+    (if isFinalState then finalRegOps else mempty) <>
+    (if isEOLState then eolRegOps else mempty) <>
+    hsep <>
     decstate s <>
     stmt ("YYNEXT(" <> string8 eolLabel <> ")") <>
-    -- TODO if this is an accepting state we should generate code to set a flag
-    -- that a match was found and back up the tags before continuing if we're
-    -- *not* at EOF. (which we know now that we've passed YYNEXT)
-    stmt ("YYDEBUG(\"" <> showB s <> ": YYCHAR=%d (%c)\\n\", YYCHAR, YYCHAR)") <>
+    stmt ("YYDEBUG(\"" <> showB s <> ": YYCHAR=%d (%c) at %zu\\n\", YYCHAR, YYCHAR, YYPOS - 1)") <>
+    -- TODO Check for off-by-one in position etc
+    maybeSetFallback <>
     "switch (YYCHAR) {\n" <>
     foldMap emitTrans trans <>
     -- TODO Don't emit "default" label if cases cover all possible values.
-    " default: goto fail;\n" <>
-    "}\n" <>
-    -- TODO See above
-    -- (if isFinalState then finalRegOps else mempty) <>
-    (if isEOLState then eolRegOps else mempty)
+    " default:\n" <>
+    (if isFinalState then stmt "YYCURSOR--" <> goto matchLabelName else goto "fail") <>
+    "}\n"
   where
     trans = CM.toRanges $ M.findWithDefault CM.empty s tdfaTrans
-    --isFinalState = S.member s tdfaFinalStates
+    isFallbackState = M.member s tdfaFallbackFunction
+    isFinalState = M.member s tdfaFinalFunction
     isEOLState = M.member s tdfaEOL
-    eolLabel = if isEOLState then eolLabelName else "fail"
-    --matchLabelName = "matched_" <> show s
+    eolLabel | isEOLState = eolLabelName
+             | isFinalState = matchLabelName
+             | otherwise = "fail"
+    fallbackLabelName = "fallback_" <> show s
+    matchLabelName = "matched_" <> show s
     eolLabelName = "eol_" <> show s
-    -- finalRegOps =
-    --     emitEndRegOps matchLabelName (M.findWithDefault [] s tdfaFinalFunction)
-    eolRegOps =
-        emitEndRegOps eolLabelName (M.findWithDefault [] s tdfaEOL)
-    emitEndRegOps l ops =
-        label l <>
-        -- Use the one-past index for positions set in final regops
-        stmt ("YYCURSOR++") <>
+    finalRegOps = label matchLabelName  <>
+        stmt ("YYDEBUG(\"Final state " <> showB s <> " at %zu\\n\", YYPOS)") <>
+        emitEndRegOps tdfaFinalFunction
+    -- applyFinalState True s:
+    -- 1. final function
+    -- 2. eol function
+    eolRegOps = label eolLabelName <>
         stmt ("YYDEBUG(\"Matched EOF in " <> showB s <> " at %zu\\n\", YYPOS)") <>
-        foldMap emitRegOp ops <>
-        goto "match"
+        emitEndRegOps tdfaEOL
+    fallbackRegOps = label fallbackLabelName  <>
+        stmt ("YYCURSOR = fallback_cursor") <>
+        stmt ("YYDEBUG(\"Fell back to " <> showB s <> " at %zu\\n\", YYPOS)") <>
+        emitEndRegOps tdfaFallbackFunction
+    emitEndRegOps opfun =
+        foldMap emitRegOp (M.findWithDefault [] s opfun) <> goto "match"
+
+    setFallback =
+        stmt ("fallback_label = &&" <> string7 fallbackLabelName) <>
+        stmt ("fallback_cursor = YYCURSOR")
+    maybeSetFallback | isFallbackState = setFallback
+                     | otherwise    = mempty
 
 -- Calling convention for matcher functions:
 -- 
@@ -153,9 +178,12 @@ emitState TDFA{..} s =
 genC :: TDFA -> B.Builder
 genC tdfa@TDFA{..} =
     stmt ("const char *const YYBEGIN = s->buf + offset") <>
+    "for (; offset <= s->len; offset++) {\n" <>
     stmt ("const char *const YYLIMIT = s->buf + s->len") <>
-    stmt ("const char *YYCURSOR = YYBEGIN") <>
+    stmt ("const char *YYCURSOR = s->buf + offset") <>
     stmt ("unsigned char YYCHAR = 0") <>
+    stmt ("void *fallback_label = NULL") <>
+    stmt ("const char *fallback_cursor = NULL") <>
     "#define YYPOS (YYCURSOR - YYBEGIN)\n" <>
     "#define YYNEXT(endlabel) do { \\\n" <>
     "   if (YYCURSOR >= YYLIMIT) goto endlabel; \\\n" <>
@@ -164,10 +192,10 @@ genC tdfa@TDFA{..} =
     foldMap declareTagVar (S.toList allTags) <>
     foldMap declareReg allRegs <>
     stmt "m->result = false" <>
-    cIf "offset > 0" (gostate tdfaStartStateNotBOL) (gostate tdfaStartState) <>
-    -- states
+    gotoStart <>
+    blockComment "States" <>
     foldMap (emitState tdfa) (tdfaStates tdfa) <>
-    -- finish successfully
+    blockComment "Successful finish: found match" <>
     label "match" <>
     stmt "YYDEBUG(\"match found\\n\")" <>
     stmt "m->result = true" <>
@@ -176,13 +204,22 @@ genC tdfa@TDFA{..} =
     foldMap matchFromTag (S.toList allTags) <>
     foldMap debugTag (S.toList allTags) <>
     stmt "return" <>
-    -- no match
+    blockComment "No match: retry, or fail" <>
     label "fail" <>
+    -- TODO Check if this is same as SimulateTDFA
+    cWhen "fallback_label" (goto "*fallback_label") <>
+    cWhen "offset <= s->len" (stmt "YYDEBUG(\"retry match\\n\")") <>
+    "}\n" <>
     stmt "YYDEBUG(\"match failed\\n\")" <>
     stmt "return"
   where
     allTags = S.union (M.keysSet tdfaFixedTags) (M.keysSet tdfaFinalRegisters)
     allRegs = tdfaRegisters tdfa
+
+    gotoStart
+      | tdfaStartStateNotBOL /= tdfaStartState =
+        cIf "offset > 0" (gostate tdfaStartStateNotBOL) (gostate tdfaStartState)
+      | otherwise = gostate tdfaStartState
 
 toStrictByteString :: Builder -> C.ByteString
 toStrictByteString = L.toStrict . toLazyByteString
