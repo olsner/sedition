@@ -16,7 +16,7 @@
 #include <sys/random.h>
 
 #if ENABLE_YYDEBUG
-#define YYDEBUG(fmt,...) printf("%s: " fmt, __PRETTY_FUNCTION__, ## __VA_ARGS__)
+#define YYDEBUG(fmt,...) fprintf(stderr, "%s: " fmt, __PRETTY_FUNCTION__, ## __VA_ARGS__)
 #else
 #define YYDEBUG(...) (void)0
 #endif
