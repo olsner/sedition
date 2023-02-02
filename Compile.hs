@@ -248,6 +248,7 @@ resolveStringIndex s ix = case ix of
     groupStart m i = match m <> ".matches[" <> intDec i <> "].rm_so"
     groupEnd m i = match m <> ".matches[" <> intDec i <> "].rm_eo"
 
+-- TODO Use both TDFA2C and regcomp/regexec and compare the results.
 compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else tdfa2c r re
   where
     re = Regex.parseString ere s

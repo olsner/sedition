@@ -50,7 +50,7 @@ comment builder = "// " <> builder <> "\n"
 blockComment :: Builder -> Builder
 blockComment builder = hsep <> "// " <> builder <> "\n"
 
-hsep = stimes 79 "/" <> "\n"
+hsep = stimes (79 :: Int) "/" <> "\n"
 
 cIf :: Builder -> Builder -> Builder -> Builder
 cIf cond t f = fun "if " [cond] <> " {\n  " <> t <> "} else {\n  " <> f <> "}\n"
@@ -102,11 +102,14 @@ emitCase (lb,ub)
     | otherwise  = " case " <> cchar lb <> " ... " <> cchar ub <> ":\n"
 
 emitRegOp :: RegOp -> Builder
-emitRegOp (r,SetReg val) = stmt ("  " <> showB r <> " = " <> g val)
+emitRegOp (r,val) = stmt ("  " <> showB r <> " = " <> g val) <>
+    stmt ("YYDEBUG(\"" <> showB r <> " <- " <> showB val <> " == %td\\n\", " <> showB r <> " - YYBEGIN)") <>
+    stmt ("assert(" <> showB r <> " <= YYLIMIT)")
   where
-    g Pos = "YYCURSOR - 1" -- cases run after incrementing YYCURSOR
-    g Nil = "NULL"
-emitRegOp (r,CopyReg r2) = stmt ("  " <> showB r <> " = " <> showB r2)
+    -- register operations (here) run after incrementing YYCURSOR.
+    g (SetReg Pos) = "YYCURSOR > YYBEGIN ? YYCURSOR - 1 : YYBEGIN"
+    g (SetReg Nil) = "NULL"
+    g (CopyReg r2) = showB r2
 
 emitTrans :: ([(Char,Char)], TDFATrans) -> Builder
 emitTrans (cs, (s', regops)) =
@@ -119,40 +122,39 @@ emitState :: TDFA -> StateId -> Builder
 emitState TDFA{..} s =
     hsep <>
     (if isFallbackState then fallbackRegOps else mempty) <>
-    (if isFinalState then finalRegOps else mempty) <>
-    (if isEOLState then eolRegOps else mempty) <>
-    hsep <>
+    (if isEOLState || isFinalState then eolRegOps else mempty) <>
     decstate s <>
     stmt ("YYNEXT(" <> string8 eolLabel <> ")") <>
-    stmt ("YYDEBUG(\"" <> showB s <> ": YYCHAR=%d (%c) at %zu\\n\", YYCHAR, YYCHAR, YYPOS - 1)") <>
-    -- TODO Check for off-by-one in position etc
+    stmt ("YYDEBUG(\"" <> showB s <> ": YYCHAR=%d (%c) at %zu\\n\", YYCHAR, YYCHAR, YYPOS)") <>
     maybeSetFallback <>
     "switch (YYCHAR) {\n" <>
-    foldMap emitTrans trans <>
-    -- TODO Don't emit "default" label if cases cover all possible values.
-    " default:\n" <>
-    (if isFinalState then stmt "YYCURSOR--" <> goto matchLabelName else goto "fail") <>
+    foldMap emitTrans (CM.toRanges trans) <>
+    (if not (CM.isComplete trans)
+        then (" default:\n" <>
+              if isFinalState then finalRegOps else goto "fail")
+        else mempty) <>
     "}\n"
   where
-    trans = CM.toRanges $ M.findWithDefault CM.empty s tdfaTrans
+    trans = M.findWithDefault CM.empty s tdfaTrans
     isFallbackState = M.member s tdfaFallbackFunction
     isFinalState = M.member s tdfaFinalFunction
     isEOLState = M.member s tdfaEOL
-    eolLabel | isEOLState = eolLabelName
-             | isFinalState = matchLabelName
+    eolLabel | isEOLState || isFinalState = eolLabelName
              | otherwise = "fail"
     fallbackLabelName = "fallback_" <> show s
-    matchLabelName = "matched_" <> show s
     eolLabelName = "eol_" <> show s
-    finalRegOps = label matchLabelName  <>
-        stmt ("YYDEBUG(\"Final state " <> showB s <> " at %zu\\n\", YYPOS)") <>
+    finalRegOps =
+        -- The match label is used when moving from an accepting state to the
+        -- "fail" state (in the default branch). So pretend we didn't read a
+        -- character and accepted before reading anything.
+        -- BUT: there's some edge case where this ends up setting a negative
+        -- position and register value?
+        stmt "YYCURSOR--" <>
+        stmt ("YYDEBUG(\"default-transition from final state " <> showB s <> " at %zd\\n\", YYPOS)") <>
         emitEndRegOps tdfaFinalFunction
-    -- applyFinalState True s:
-    -- 1. final function
-    -- 2. eol function
     eolRegOps = label eolLabelName <>
         stmt ("YYDEBUG(\"Matched EOF in " <> showB s <> " at %zu\\n\", YYPOS)") <>
-        emitEndRegOps tdfaEOL
+        emitEndRegOps (if isEOLState then tdfaEOL else tdfaFinalFunction)
     fallbackRegOps = label fallbackLabelName  <>
         stmt ("YYCURSOR = fallback_cursor") <>
         stmt ("YYDEBUG(\"Fell back to " <> showB s <> " at %zu\\n\", YYPOS)") <>
@@ -177,6 +179,11 @@ emitState TDFA{..} s =
 -- Tags are "tX" (offsets in string), registers are "rX" (pointers in string).
 genC :: TDFA -> B.Builder
 genC tdfa@TDFA{..} =
+    cWhen "offset && offset >= s->len" (
+        stmt ("YYDEBUG(\"Already at EOF (%zu >= %zu)\\n\", offset, s->len)") <>
+        stmt "m->result = false" <>
+        stmt "return;"
+    ) <>
     stmt ("YYDEBUG(\"Starting match at %zu (of %zu)\\n\", offset, s->len)") <>
     stmt ("const char *const YYBEGIN = s->buf") <>
     stmt ("const char *const YYLIMIT = s->buf + s->len") <>
