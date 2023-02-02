@@ -556,7 +556,7 @@ u2/g' lines1
 		echo 'BSD sed does not handle branch defined REs'
 	else
 		echo 'eeefff' | $SED -e 'p' -e 's/e/X/p' -e ':x' \
-		    -e 's//Y/p' -e '/f/bx'
+		    -e 's//Y/p' -e '/f/bx' | head -100
 	fi
 	# Check that all 9 back references work.
 	mark '8.17' ; echo '123456789' | $SED -e 's/\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)/\9\8\7\6\5\4\3\2\1/g'
