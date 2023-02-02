@@ -566,6 +566,9 @@ u2/g' lines1
 	mark '8.19' ; echo | $SED -e 's/a?/b/g'
 	mark '8.20' ; echo foo | $SED -e 's/a?/b/g'
 	mark '8.21' ; echo foo foo | $SED -e 's/foo$/bar/'
+	mark '8.22' ; $SED -e 's/^x*/y/' lines1
+	mark '8.23' ; $SED -e 's/^l*/m/' lines1
+	mark '8.24' ; $SED -e 's/.*/&/' lines1
 }
 
 test_sedition()
