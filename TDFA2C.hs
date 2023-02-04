@@ -182,8 +182,7 @@ genC tdfa@TDFA{..} =
     cWhen "fallback_label" (goto "*fallback_label") <>
     cWhen "offset < s->len" (stmt "YYDEBUG(\"retry match\\n\")") <>
     "}\n" <>
-    stmt "YYDEBUG(\"match failed\\n\")" <>
-    stmt "return"
+    stmt "YYDEBUG(\"match failed\\n\")"
   where
     allTags = S.union (M.keysSet tdfaFixedTags) (M.keysSet tdfaFinalRegisters)
     allRegs = tdfaRegisters tdfa
