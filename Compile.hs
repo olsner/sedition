@@ -6,19 +6,17 @@ import Prelude hiding (pred)
 import Compiler.Hoopl as H
 
 import qualified Data.ByteString.Char8 as C
-import qualified Data.ByteString.Lazy.Char8 as L
-import Data.ByteString.Builder as B
 import Data.FileEmbed (embedStringFile)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.String
-import Data.Word
 
 -- import Debug.Trace
 
 import System.Exit
 
 import AST
+import GenC
 import qualified IR
 import IR (Program)
 import qualified Regex
@@ -71,10 +69,10 @@ programFooter program = "exit:\n" <>
     freeString s = sfun "free_string" [string s]
 
 compileIR :: FilePath -> Bool -> H.Label -> Program -> S
-compileIR ofile _ipc entry program = L.toStrict . toLazyByteString $
+compileIR ofile _ipc entry program = toByteString $
   seditionRuntime
   <> programHeader (C.pack ofile) program
-  <> goto entry
+  <> gotoL entry
   <> foldMap compileBlock blocks
   <> programFooter program
   where GMany _ blocks _ = program
@@ -87,15 +85,9 @@ compileBlock block = fold (mempty :: Builder)
     f :: forall e x . IR.Insn e x -> Builder -> Builder
     f insn builder = builder <> compileInsn insn
 
-goto :: H.Label -> Builder
-goto l = goto' (label l)
+gotoL :: H.Label -> Builder
+gotoL l = goto (show l)
 
-goto' l = stmt ("goto " <> l)
-
-idIntDec i | i >= 0    = intDec i
-           | otherwise = "_" <> intDec (negate i)
-
-label l = showB l
 string (IR.SVar s) = "&S" <> intDec s
 stringvar (IR.SVar s) = "S" <> intDec s
 pred (IR.Pred p) = "P" <> intDec p
@@ -112,33 +104,6 @@ lineNumber = "lineNumber"
 hasPendingIPC = "hasPendingIPC"
 lastRegex = "lastRegex"
 
-cstring s = "\"" <> foldMap quoteC (C.unpack s) <> "\""
-  where
-    quoteC '\n' = "\\n"
-    quoteC '\"' = "\\\""
-    quoteC '\\' = "\\\\"
-    quoteC c
-      -- Add an extra "" pair to terminate the hex escape in case it is
-      -- followed by a valid hex digit.
-      | length (show c) /= 3 = "\\x" <> word8HexFixed (toWord8 c) <> "\"\""
-    quoteC c = char8 c
-    toWord8 :: Char -> Word8
-    toWord8 = fromIntegral . fromEnum
-
-showB x = string8 (show x)
-bool True = "true"
-bool False = "false"
-intercalateB _   [] = mempty
-intercalateB sep (x:xs) = x <> go sep xs
-  where
-    go _   []     = mempty
-    go sep (x:xs) = sep <> x <> go sep xs
-
-fun function args = function <> "(" <> intercalateB ", " args <> ")"
-sfun function args = stmt (fun function args)
-stmt builder = builder <> ";\n"
-comment builder = "// " <> builder <> "\n"
-
 compileCond cond = case cond of
   IR.Bool b -> bool b
   IR.Line l -> intDec l <> " == " <> lineNumber
@@ -148,10 +113,6 @@ compileCond cond = case cond of
   IR.AtEOF i -> fun "is_eof" [infd i]
   IR.PendingIPC -> hasPendingIPC
 
-cIf cond t f = fun "if" [cond] <> "{\n  " <> t <> "} else {\n  " <> f <> "}\n"
---cWhen cond t = fun "if" [cond] <> "{\n  " <> t <> "}\n"
-cWhile cond t = fun "while" [cond] <> "{\n  " <> t <> "}\n"
-
 compileMatch m (IR.Match svar re) = fun (regexfun re) [matchref m, string svar, "0"]
 compileMatch m (IR.MatchLastRE svar) = fun lastRegex [matchref m, string svar, "0"]
 compileMatch m (IR.NextMatch m2 s) = fun "next_match" [matchref m, matchref m2, string s]
@@ -160,20 +121,20 @@ compileMatch m (IR.MVarRef m2) = fun "copy_match" [matchref m, matchref m2]
 closeFile i = sfun "close_file" [infd i] <> sfun "close_file" [outfd i]
 
 compileInsn :: IR.Insn e x -> Builder
-compileInsn (IR.Label lbl) = label lbl <> ":\n"
-compileInsn (IR.Branch l) = goto l
+compileInsn (IR.Label lbl) = label (show lbl)
+compileInsn (IR.Branch l) = gotoL l
 compileInsn (IR.SetP p cond) = stmt (pred p <> " = " <> compileCond cond)
 compileInsn (IR.SetS s expr) = stmt (setString s expr)
 compileInsn (IR.SetM m expr) = stmt (compileMatch m expr)
 compileInsn (IR.AppendS s s2) = sfun "concat_inplace" [string s, string s2]
-compileInsn (IR.If p t f) = cIf (pred p) (goto t) (goto f)
+compileInsn (IR.If p t f) = cIf (pred p) (gotoL t) (gotoL f)
 compileInsn (IR.Listen i maybeHost port) =
   sfun "sock_listen" [infd i, chost maybeHost, intDec port]
   where
     chost (Just host) = cstring host
     chost Nothing = "NULL"
 compileInsn (IR.Accept s c) = stmt (infd c <> " = " <> fun "accept" [infd s])
-compileInsn (IR.Fork entry next) = sfun "FORK" [label entry, label next]
+compileInsn (IR.Fork entry next) = sfun "FORK" [showB entry, showB next]
 compileInsn (IR.Redirect i j) =
   closeFile i <>
   stmt (outfd i <> " = " <> outfd j) <>
@@ -189,7 +150,7 @@ compileInsn (IR.Message s) = sfun "send_message" [string s]
 
 compileInsn (IR.Print i s) = sfun "print" [outfd i, string s]
 compileInsn (IR.Quit code) =
-    stmt ("exit_status = " <> c_code code) <> goto' "exit"
+    stmt ("exit_status = " <> c_code code) <> goto "exit"
   where
     c_code (ExitFailure n) = intDec n
     c_code ExitSuccess = "EXIT_SUCCESS"
@@ -248,7 +209,7 @@ resolveStringIndex s ix = case ix of
     groupStart m i = match m <> ".matches[" <> intDec i <> "].rm_so"
     groupEnd m i = match m <> ".matches[" <> intDec i <> "].rm_eo"
 
--- TODO Use both TDFA2C and regcomp/regexec and compare the results.
+-- TODO Emit both TDFA2C and regcomp/regexec code and compare the results.
 compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else tdfa2c r re
   where
     re = Regex.parseString ere s

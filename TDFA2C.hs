@@ -3,10 +3,7 @@
 
 module TDFA2C where
 
-import Data.ByteString.Builder as B
 import qualified Data.ByteString.Char8 as C
-import qualified Data.ByteString.Lazy.Char8 as L
-import Data.Semigroup
 
 import qualified CharMap as CM
 -- import CharMap (CharMap)
@@ -19,6 +16,8 @@ import qualified Data.Set as S
 
 import Debug.Trace
 
+import GenC
+
 import Regex (Regex)
 import qualified Regex
 
@@ -26,43 +25,8 @@ import TaggedRegex
 import TNFA (genTNFA)
 import TDFA
 
--- TODO Extract utility module to share with Compile...
-showB :: Show a => a -> Builder
-showB x = string8 (show x)
-
--- TODO intercalateM since it's not builder-specific
-intercalateB :: Monoid a => a -> [a] -> a
-intercalateB _   [] = mempty
-intercalateB sep (x:xs) = x <> foldMap (sep <>) xs
-
-fun :: Builder -> [Builder] -> Builder
-fun function args = function <> "(" <> intercalateB ", " args <> ")"
-
-sfun :: Builder -> [Builder] -> Builder
-sfun function args = stmt (fun function args)
-
-stmt :: Builder -> Builder
-stmt builder = builder <> ";\n"
-
-comment :: Builder -> Builder
-comment builder = "// " <> builder <> "\n"
-
-blockComment :: Builder -> Builder
-blockComment builder = hsep <> "// " <> builder <> "\n"
-
-hsep = stimes (79 :: Int) "/" <> "\n"
-
-cIf :: Builder -> Builder -> Builder -> Builder
-cIf cond t f = fun "if " [cond] <> " {\n  " <> t <> "} else {\n  " <> f <> "}\n"
-cWhen cond t = fun "if " [cond] <> " {\n  " <> t <> "}\n"
-
-label name = string8 name <> ":\n"
-goto name = stmt ("goto " <> string8 name)
-
 decstate s = label (show s)
 gostate s = goto (show s)
-
-cchar = showB . fromEnum
 
 fixedTag (t, f) = stmt (showB t <> " = " <> g f)
   where
@@ -163,7 +127,7 @@ emitState TDFA{..} s =
         foldMap emitRegOp (M.findWithDefault [] s opfun) <> goto "match"
 
     setFallback =
-        stmt ("fallback_label = &&" <> string7 fallbackLabelName) <>
+        stmt ("fallback_label = &&" <> string8 fallbackLabelName) <>
         stmt ("fallback_cursor = YYCURSOR")
     maybeSetFallback | isFallbackState = setFallback
                      | otherwise    = mempty
@@ -177,7 +141,7 @@ emitState TDFA{..} s =
 -- offset is > 0 when repeating a match for a global replace
 --
 -- Tags are "tX" (offsets in string), registers are "rX" (pointers in string).
-genC :: TDFA -> B.Builder
+genC :: TDFA -> Builder
 genC tdfa@TDFA{..} =
     cWhen "offset && offset >= s->len" (
         stmt ("YYDEBUG(\"Already at EOF (%zu >= %zu)\\n\", offset, s->len)") <>
@@ -229,15 +193,12 @@ genC tdfa@TDFA{..} =
         cIf "offset > 0" (gostate tdfaStartStateNotBOL) (gostate tdfaStartState)
       | otherwise = gostate tdfaStartState
 
-toStrictByteString :: Builder -> C.ByteString
-toStrictByteString = L.toStrict . toLazyByteString
-
 tdfa2c :: Regex -> C.ByteString
-tdfa2c = toStrictByteString .
+tdfa2c = toByteString .
     genC . genTDFA . genTNFA . fixTags . tagRegex
 
 isCompatible :: Regex -> Bool
 isCompatible = Regex.tdfa2cCompatible
 
 testTDFA2C :: String -> IO ()
-testTDFA2C = L.putStrLn . toLazyByteString . genC . genTDFA . genTNFA . testTagRegex
+testTDFA2C = C.putStrLn . toByteString . genC . genTDFA . genTNFA . testTagRegex
