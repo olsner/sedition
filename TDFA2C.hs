@@ -143,12 +143,12 @@ emitState TDFA{..} s =
 -- Tags are "tX" (offsets in string), registers are "rX" (pointers in string).
 genC :: TDFA -> Builder
 genC tdfa@TDFA{..} =
-    cWhen "offset && offset >= s->len" (
-        stmt ("YYDEBUG(\"Already at EOF (%zu >= %zu)\\n\", offset, s->len)") <>
+    cWhen "orig_offset && orig_offset >= s->len" (
+        stmt ("YYDEBUG(\"Already at EOF (%zu >= %zu)\\n\", orig_offset, s->len)") <>
         stmt "m->result = false" <>
         stmt "return;"
     ) <>
-    stmt ("YYDEBUG(\"Starting match at %zu (of %zu)\\n\", offset, s->len)") <>
+    stmt ("YYDEBUG(\"Starting match at %zu (of %zu)\\n\", orig_offset, s->len)") <>
     stmt ("const char *const YYBEGIN = s->buf") <>
     stmt ("const char *const YYLIMIT = s->buf + s->len") <>
     "#define YYPOS (YYCURSOR - YYBEGIN)\n" <>
@@ -156,7 +156,7 @@ genC tdfa@TDFA{..} =
     "   if (YYCURSOR >= YYLIMIT) goto endlabel; \\\n" <>
     "   else YYCHAR = *YYCURSOR++; \\\n" <>
     "  } while (0)\n" <>
-    "for (; offset <= s->len; offset++) {\n" <>
+    "for (size_t offset = orig_offset; offset <= s->len; offset++) {\n" <>
     stmt ("const char *YYCURSOR = s->buf + offset") <>
     stmt ("unsigned char YYCHAR = 0") <>
     stmt ("void *fallback_label = NULL") <>

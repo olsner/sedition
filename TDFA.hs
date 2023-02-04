@@ -358,7 +358,7 @@ collectSymbols ts = S.toList . S.unions $ map chars ts
   where
     allChars = S.fromList ['\0'..'\255']
     chars :: TNFATrans -> Set Char
-    chars Any = S.delete '\n' allChars
+    chars Any = allChars
     chars (Symbol c) = S.singleton c
     chars (CClass cs) = S.fromList cs
     chars (CNotClass cs) = allChars S.\\ S.fromList cs

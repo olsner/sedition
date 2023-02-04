@@ -213,14 +213,14 @@ resolveStringIndex s ix = case ix of
 compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else match_for_compare <> tdfa2c r re <> compare_matches
   where
     re = Regex.parseString ere s
-    needRegexec = not (TDFA2C.isCompatible re)
+    needRegexec = True -- not (TDFA2C.isCompatible re)
     res = C.pack $ Regex.reString re
-    wrapper b = "static void " <> regexfun r <> "(match_t* m, string* s, size_t offset) {\n" <> b <> "}\n"
-    match m = sfun "match_regexp" [m, "s", "offset", regex r, regexfun r]
+    wrapper b = "static void " <> regexfun r <> "(match_t* m, string* s, const size_t orig_offset) {\n" <> b <> "}\n"
+    match m = sfun "match_regexp" [m, "s", "orig_offset", regex r, regexfun r]
     -- regcomp is run at start of main so we just need to forward the arguments.
     regexec = comment ("unsupported regex: " <> cstring res) <> match "m"
     match_for_compare = stmt "match_t m2" <> match "&m2"
-    compare_matches = sfun "compare_regexp_matches" ["&m2", "m", cstring res]
+    compare_matches = sfun "compare_regexp_matches" ["&m2", "m", "s", "orig_offset", cstring res]
 
 tdfa2c r re =
     comment ("tdfa2c regex: " <> cstring res) <>

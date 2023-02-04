@@ -255,6 +255,33 @@ static void free_regexp(regex_t* re)
     regfree(re);
 }
 
+static void compare_regexp_matches(match_t* ref, match_t* m, string* s, size_t offset, const char *re)
+{
+    if (ref->result != m->result) {
+        fprintf(stderr, "mismatch in /%s/: should %s \"%.*s\", but did %s\n",
+                re,
+                ref->result ? "match" : "not match",
+                (int)(s->len - offset), s->buf + offset,
+                m->result ? "match" : "not");
+    }
+    assert(ref->result == m->result);
+    if (ref->result) {
+        for (int i = 0; i <= MAXGROUP; i++) {
+            if (ref->matches[i].rm_so != m->matches[i].rm_so ||
+                    ref->matches[i].rm_eo != m->matches[i].rm_eo) {
+                fprintf(stderr, "mismatch in /%s/: group %d should be %d..%d, not %d..%d\n",
+                        re, i,
+                        ref->matches[i].rm_so, ref->matches[i].rm_eo,
+                        m->matches[i].rm_so, m->matches[i].rm_eo);
+            }
+        }
+        for (int i = 0; i <= MAXGROUP; i++) {
+            assert(ref->matches[i].rm_so == m->matches[i].rm_so &&
+                    ref->matches[i].rm_eo == m->matches[i].rm_eo);
+        }
+    }
+}
+
 static void match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
                          regex_match_fun_t* fun)
 {

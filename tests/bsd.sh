@@ -569,6 +569,8 @@ u2/g' lines1
 	mark '8.22' ; $SED -e 's/^x*/y/' lines1
 	mark '8.23' ; $SED -e 's/^l*/m/' lines1
 	mark '8.24' ; $SED -e 's/.*/&/' lines1
+    # . should match \n in sed
+    mark '8.25' ; $SED -n '1N; s/./f/gp' lines1
 }
 
 test_sedition()
