@@ -47,7 +47,9 @@ incPos = modify $ \s@RunState{..} -> s { sPos = succ sPos }
 setPos new = modify $ \s@RunState{..} -> s { sPos = new }
 getRegs = gets sRegs
 modifyRegs f = modify $ \s@RunState{..} -> s { sRegs = f sRegs }
-setFallback fs = modify $ \s@RunState{..} -> s { sFallback = Just (sPos, fs) }
+setFallback fs = modify $ \s@RunState{..} ->
+    trace ("setting fallback! " ++ show fs ++ " @" ++ show sPos) $
+    s { sFallback = Just (sPos, fs) }
 
 type RunTDFA a = State RunState a
 
@@ -81,7 +83,10 @@ runTDFA search tdfa@TDFA{..} xs =
     next :: StateId -> Char -> Maybe (StateId, RegOps)
     next s x = CM.lookup x (M.findWithDefault CM.empty s tdfaTrans)
 
-    maybeSetFallback s | s `M.member` tdfaFinalFunction = trace "setting fallback!" (setFallback s)
+    -- This also means "last accepting state", not just fallback. E.g. if there
+    -- are no clobbered registers then the fallback function is the same as the
+    -- final function and there are no backup regops.
+    maybeSetFallback s | s `M.member` tdfaFinalFunction = setFallback s
                        | otherwise                      = trace ("no fallback for " ++ show s) (return ())
 
     applyFinalState eol s = do
@@ -89,16 +94,17 @@ runTDFA search tdfa@TDFA{..} xs =
       case maybeFallback of
         _ | M.member s tdfaFinalFunction -> outTags s tdfaFinalFunction
         _ | eol && M.member s tdfaEOL    -> outTags s tdfaEOL
-        Just (pos, fs) -> trace ("falling back to " ++ show fs ++ " @" ++ show pos) setPos pos >> outTags fs tdfaFallbackFunction
+        Just (pos, fs) -> trace ("falling back to " ++ show fs ++ " @" ++ show pos) (setPos pos) >> outTags fs tdfaFallbackFunction
         _ | search -> trace "no match, retry" retry
         _ | eol -> trace "non-accepting state at end" (return Nothing)
         _ -> trace "non-accepting state in middle" (return Nothing)
 
     -- Takes position to handle fallback to a previous match
-    outTags s opfun | ops <- fromJust (M.lookup s opfun) = do
+    outTags s opfun | Just ops <- M.lookup s opfun = do
       applyRegOps ops
       pos <- getPos
       gets (Just . fixedTags pos . tagsFromRegs . sRegs)
+                    | otherwise = error ("Missing final function for " ++ show s)
 
     tagsFromRegs :: RegMap -> TagMap
     tagsFromRegs rs = M.mapMaybe (\r -> M.lookup r rs) tdfaFinalRegisters
