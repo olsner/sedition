@@ -601,7 +601,7 @@ tdfaRegisters :: TDFA -> [RegId]
 tdfaRegisters TDFA{..} = nub (M.elems tdfaFinalRegisters ++ usedRegs)
   where
     usedRegs :: [RegId]
-    usedRegs = concatMap (\(_,ops) -> regs ops) (concatMap CM.elems $ M.elems tdfaTrans)
+    usedRegs = concatMap (\(_,ops) -> regs ops) (concatMap CM.elems $ M.elems tdfaTrans) ++ concatMap (concatMap regs . M.elems) [tdfaFinalFunction, tdfaEOL, tdfaFallbackFunction]
     regs :: RegOps -> [RegId]
     regs = map fst
     nub = S.toList . S.fromList
