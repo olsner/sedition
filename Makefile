@@ -47,21 +47,17 @@ run-bsdtests: sed
 run-bsdtests-compiled: sed
 	cd tests && ./bsd.sh ../runsed
 
-run-gnused-tests: sed
-	@if test -d gnused; \
-		then \
-			echo "Running GNU tests on interpreter..."; \
-			./run-gnused-tests.sh gnused; \
-		else echo "Check out GNU sed into a directory called gnused"; \
-	fi
+gnused:
+	@test -d gnused || echo "Check out GNU sed into a directory called gnused"
+	@test -d gnused
 
-run-gnused-tests-compiled: sed
-	@if test -d gnused; \
-		then \
-			echo "Running GNU tests on compiler..."; \
-			SED=`pwd`/runsed ./run-gnused-tests.sh gnused; \
-		else echo "Check out GNU sed into a directory called gnused"; \
-	fi
+run-gnused-tests: sed gnused
+	@echo "Running GNU tests on interpreter..."
+	./run-gnused-tests.sh gnused
+
+run-gnused-tests-compiled: sed gnused
+	@echo "Running GNU tests on compiler..."
+	SED=`pwd`/runsed ./run-gnused-tests.sh gnused
 
 MODULES = Sed Parser AST Bus ParserTest IR \
 	Optimize ConstPred RedundantBranches LivePred \
