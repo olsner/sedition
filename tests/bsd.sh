@@ -571,6 +571,9 @@ u2/g' lines1
 	mark '8.24' ; $SED -e 's/.*/&/' lines1
     # . should match \n in sed
     mark '8.25' ; $SED -n '1N; s/./f/gp' lines1
+    # from dc.sed, regression test(s)
+    mark '8.26' ; echo "2002~|P|K0|I10|O10|?~" | $SED -n 's/^[^A-F~]*~.*|I10|/{&}/p'
+    #mark '8.27' ; echo "2002~|P|K0|I10|O10|?~" | $SED -n 's/^\(-*\)0*\([0-9.]*[0-9]\)[^~]*/{&}/p'
 }
 
 test_sedition()
