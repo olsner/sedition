@@ -70,15 +70,16 @@ emitRegOp (r,val) = stmt ("  " <> showB r <> " = " <> g val) <>
     stmt ("YYDEBUG(\"" <> showB r <> " <- " <> showB val <> " == %td\\n\", " <> showB r <> " - YYBEGIN)") <>
     stmt ("assert(" <> showB r <> " <= YYLIMIT)")
   where
-    -- register operations (here) run after incrementing YYCURSOR.
-    g (SetReg Pos) = "YYCURSOR > YYBEGIN ? YYCURSOR - 1 : YYBEGIN"
+    g (SetReg Pos) = "YYCURSOR"
     g (SetReg Nil) = "NULL"
     g (CopyReg r2) = showB r2
 
 emitTrans :: ([(Char,Char)], TDFATrans) -> Builder
 emitTrans (cs, (s', regops)) =
     foldMap emitCase cs <> "{\n" <>
+    (if not (null regops) then stmt ("YYDEBUG(\" -> " <> showB s' <> " at %zd\\n\", YYPOS)") else mempty) <>
     foldMap emitRegOp regops <>
+    stmt "YYNEXT()" <>
     "  " <> gostate s' <>
     "}\n"
 
@@ -88,9 +89,12 @@ emitState TDFA{..} s =
     (if isFallbackState then fallbackRegOps else mempty) <>
     (if isEOLState || isFinalState then eolRegOps else mempty) <>
     decstate s <>
-    stmt ("YYNEXT(" <> string8 eolLabel <> ")") <>
-    stmt ("YYDEBUG(\"" <> showB s <> ": YYCHAR=%d (%c) at %zu\\n\", YYCHAR, YYCHAR, YYPOS)") <>
+    -- SimulateTDFA does this after incPos for the state we're going to, so
+    -- do it first thing in the state block. Should be the same, I hope :)
     maybeSetFallback <>
+    cWhen "YYEOF" (goto eolLabel) <>
+    stmt "YYCHAR = YYGET()" <>
+    stmt ("YYDEBUG(\"" <> showB s <> ": YYCHAR=%x at %zu\\n\", YYCHAR, YYPOS)") <>
     "switch (YYCHAR) {\n" <>
     foldMap emitTrans (CM.toRanges trans) <>
     (if not (CM.isComplete trans)
@@ -108,12 +112,6 @@ emitState TDFA{..} s =
     fallbackLabelName = "fallback_" <> show s
     eolLabelName = "eol_" <> show s
     finalRegOps =
-        -- The match label is used when moving from an accepting state to the
-        -- "fail" state (in the default branch). So pretend we didn't read a
-        -- character and accepted before reading anything.
-        -- BUT: there's some edge case where this ends up setting a negative
-        -- position and register value?
-        stmt "YYCURSOR--" <>
         stmt ("YYDEBUG(\"default-transition from final state " <> showB s <> " at %zd\\n\", YYPOS)") <>
         emitEndRegOps tdfaFinalFunction
     eolRegOps = label eolLabelName <>
@@ -127,9 +125,10 @@ emitState TDFA{..} s =
         foldMap emitRegOp (M.findWithDefault [] s opfun) <> goto "match"
 
     setFallback =
+        stmt ("YYDEBUG(\"Setting fallback to " <> showB s <> " @%zu\\n\", YYPOS)") <>
         stmt ("fallback_label = &&" <> string8 fallbackLabelName) <>
-        stmt ("fallback_cursor = YYCURSOR - 1")
-    maybeSetFallback | isFallbackState = setFallback
+        stmt ("fallback_cursor = YYCURSOR")
+    maybeSetFallback | isFinalState = setFallback
                      | otherwise    = mempty
 
 -- Calling convention for matcher functions:
@@ -155,10 +154,9 @@ genC tdfa@TDFA{..} =
     stmt ("const char *const YYBEGIN = s->buf") <>
     stmt ("const char *const YYLIMIT = s->buf + s->len") <>
     "#define YYPOS (YYCURSOR - YYBEGIN)\n" <>
-    "#define YYNEXT(endlabel) do { \\\n" <>
-    "   if (YYCURSOR >= YYLIMIT) goto endlabel; \\\n" <>
-    "   else YYCHAR = *YYCURSOR++; \\\n" <>
-    "  } while (0)\n" <>
+    "#define YYEOF (YYCURSOR >= YYLIMIT)\n" <>
+    "#define YYGET() (*YYCURSOR)\n" <>
+    "#define YYNEXT() (YYCURSOR++)\n" <>
     "for (size_t offset = orig_offset; offset <= s->len; offset++) {\n" <>
     stmt ("const char *YYCURSOR = s->buf + offset") <>
     stmt ("unsigned char YYCHAR = 0") <>
