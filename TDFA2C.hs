@@ -128,7 +128,7 @@ emitState TDFA{..} s =
 
     setFallback =
         stmt ("fallback_label = &&" <> string8 fallbackLabelName) <>
-        stmt ("fallback_cursor = YYCURSOR")
+        stmt ("fallback_cursor = YYCURSOR - 1")
     maybeSetFallback | isFallbackState = setFallback
                      | otherwise    = mempty
 
