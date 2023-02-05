@@ -68,7 +68,6 @@ emitCase (lb,ub)
 emitRegOp :: RegOp -> Builder
 emitRegOp (r,val) = stmt ("  " <> showB r <> " = " <> g val) <>
     stmt ("YYDEBUG(\"" <> showB r <> " <- " <> showB val <> " == %td\\n\", " <> showB r <> " - YYBEGIN)") <>
-    stmt ("assert(" <> showB r <> " <= YYLIMIT)") <>
     sfun "YYSTATS" ["regops", intDec 1]
   where
     g (SetReg Pos) = "YYCURSOR"
