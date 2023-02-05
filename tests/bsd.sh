@@ -575,6 +575,7 @@ u2/g' lines1
     # from dc.sed, regression test(s)
     mark '8.26' ; echo "2002~|P|K0|I10|O10|?~" | $SED -n 's/^[^A-F~]*~.*|I10|/{&}/p'
     mark '8.27' ; echo "2002~|P|K0|I10|O10|?~" | $SED -n 's/^\(-*\)0*\([0-9.]*[0-9]\)[^~]*/{&}/p'
+                  echo "04.~0~20.02~2002~2002" | $SED -n 's/^\(-*\)0*\([0-9.]*[0-9]\)[^~]*/{&}/p'
     mark '8.28' ; echo "aaaa" | $SED -rn 's/a{10}/{&}/p'
                   echo "aaaa" | $SED -rn 's/a{4}/{&}/p'
 }
