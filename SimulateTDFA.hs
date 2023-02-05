@@ -93,9 +93,9 @@ runTDFA search tdfa@TDFA{..} xs =
       maybeFallback <- gets sFallback
       pos <- getPos
       case maybeFallback of
-        _ | M.member s tdfaFinalFunction -> trace ("at final state, pos=" ++ show pos) outTags s tdfaFinalFunction
+        _ | M.member s tdfaFinalFunction -> trace ("at final state " ++ show s ++ ", pos=" ++ show pos) outTags s tdfaFinalFunction
         _ | eol && M.member s tdfaEOL    -> trace "at EOL-only final state" outTags s tdfaEOL
-        Just (pos, fs) -> trace ("falling back to " ++ show fs ++ " @" ++ show pos) (setPos pos) >> outTags fs tdfaFallbackFunction
+        Just (pos, fs) -> trace ("falling back to " ++ show fs ++ " @" ++ show pos) (setPos pos) >> outTags fs (tdfaFallbackFunction `M.union` tdfaFinalFunction)
         _ | search -> trace "no match, retry" retry
         _ | eol -> trace "non-accepting state at end" (return Nothing)
         _ -> trace "non-accepting state in middle" (return Nothing)

@@ -86,7 +86,7 @@ emitTrans (cs, (s', regops)) =
 emitState :: TDFA -> StateId -> Builder
 emitState TDFA{..} s =
     hsep <>
-    (if isFallbackState then fallbackRegOps else mempty) <>
+    (if isFallbackState || isFinalState then fallbackRegOps else mempty) <>
     (if isEOLState || isFinalState then eolRegOps else mempty) <>
     decstate s <>
     -- SimulateTDFA does this after incPos for the state we're going to, so
@@ -121,7 +121,7 @@ emitState TDFA{..} s =
     fallbackRegOps = label fallbackLabelName  <>
         stmt ("YYCURSOR = fallback_cursor") <>
         stmt ("YYDEBUG(\"Fell back to " <> showB s <> " at %zu\\n\", YYPOS)") <>
-        emitEndRegOps tdfaFallbackFunction
+        emitEndRegOps (tdfaFallbackFunction `M.union` tdfaFinalFunction)
     emitEndRegOps opfun =
         foldMap emitRegOp (M.findWithDefault [] s opfun) <> goto "match"
 
