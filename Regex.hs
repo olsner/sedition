@@ -189,6 +189,8 @@ reString Empty              = ""
 reString (Or rs)            = intercalate "|" (map reString rs)
 reString (BackRef i)        = "\\" ++ show i
 
+-- TODO Add a CharSet (and use that for CClass), convert to ranges here and
+-- avoid special cases if - or ^ are in the middle of a range.
 shuffleClass cs
     | ']' `elem` cs = putFirst ']'
     | '-' `elem` cs = putLast '-'

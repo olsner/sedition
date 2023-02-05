@@ -154,6 +154,8 @@ instance HooplNode Insn where
 
 type Program = Graph IR.Insn C C
 
+-- TODO remove freshUnique (unless Hoopl uses it internally?), then add
+-- separate counters for strings, regexps and matches.
 data IRState = State
   { firstFreeUnique :: Unique
   , autoprint :: Bool
