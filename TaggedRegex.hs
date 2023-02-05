@@ -8,7 +8,7 @@ import Control.Monad.Trans.State.Strict
 
 -- import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as C
-import Data.List
+import Data.List (intercalate)
 import Data.Map (Map)
 import qualified Data.Map as M
 -- import Data.Maybe
