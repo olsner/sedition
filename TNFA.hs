@@ -125,7 +125,7 @@ tnfa finalState re =
                 eps q1 finalState (P 1))
     (Repeat n m x) -> do
         q2 <- tnfa finalState (Repeat (pred n) (pred <$> m) x)
-        q1 <- tnfa (tnfaFinalState q2) x
+        q1 <- tnfa (tnfaStartState q2) x
         return (q1 <> q2)
 
 -- API?
