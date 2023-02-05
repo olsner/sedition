@@ -12,7 +12,6 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set (Set)
 import qualified Data.Set as S
-import Data.Maybe
 
 import Debug.Trace
 
@@ -26,6 +25,7 @@ testTNFASimulationFind = tnfaSearch 0 . genTNFA . testTagRegex
 type ConfigMap = [(StateId, TagMap)]
 type FinalState = Maybe (Int, TagMap)
 
+showC :: ConfigMap -> String
 showC = intercalate "; " . map showState
   where
     showState (s, ts) = show s ++ ": " ++ intercalate "," (map showTag (M.toList ts))

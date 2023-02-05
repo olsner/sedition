@@ -241,7 +241,6 @@ mapState allTags ops (s,p) (t,q)
       let Just y = M.lookup t ys
       return (x, y))
 
-    regsWithOps = M.keysSet (M.fromList ops)
     copyOps xs = [(i, CopyReg j) | (i,j) <- xs, i /= j]
     adjustOps m = [(j, o) | (i, o) <- ops, let Just j = M.lookup i m]
 

@@ -61,7 +61,7 @@ runTDFA search tdfa@TDFA{..} xs =
     go s [] = applyFinalState True s
     go s (x:xs)
       | Just (s',o) <- next s x = applyRegOps o >> incPos >> maybeSetFallback s' >> go' s' xs
-      | otherwise               = applyFinalState False s
+      | otherwise               = trace ("default-transition from " ++ show s) $ applyFinalState False s
 
     debug = True
 
@@ -91,9 +91,10 @@ runTDFA search tdfa@TDFA{..} xs =
 
     applyFinalState eol s = do
       maybeFallback <- gets sFallback
+      pos <- getPos
       case maybeFallback of
-        _ | M.member s tdfaFinalFunction -> outTags s tdfaFinalFunction
-        _ | eol && M.member s tdfaEOL    -> outTags s tdfaEOL
+        _ | M.member s tdfaFinalFunction -> trace ("at final state, pos=" ++ show pos) outTags s tdfaFinalFunction
+        _ | eol && M.member s tdfaEOL    -> trace "at EOL-only final state" outTags s tdfaEOL
         Just (pos, fs) -> trace ("falling back to " ++ show fs ++ " @" ++ show pos) (setPos pos) >> outTags fs tdfaFallbackFunction
         _ | search -> trace "no match, retry" retry
         _ | eol -> trace "non-accepting state at end" (return Nothing)
@@ -119,6 +120,8 @@ applyRegOps xs = do
 applyRegOps' :: RegOps -> Int -> RegMap -> RegMap
 applyRegOps' xs pos rs = foldr f rs xs
   where
+    tf :: RegOp -> RegMap -> RegMap
+    tf (dst, val) rs = trace (show dst ++ " <- " ++ show val ++ " == " ++ show (M.lookup dst (f (dst,val) rs))) $ f (dst,val) rs
     f :: RegOp -> RegMap -> RegMap
     f (dst, CopyReg src) rs = M.alter (\_ -> M.lookup src rs) dst rs
     f (dst, SetReg Nil) rs = M.delete dst rs
