@@ -296,33 +296,25 @@ addNewState state ops = do
 symbolTrans :: TNFATrans -> Bool
 symbolTrans (Eps _ _) = False
 symbolTrans BOL = False
--- TODO Handle end-of-line. Something like a final state that is only accepting
--- at the end of the line. (This would also not need fallbacks, since it
--- should have no outgoing edges. Except we do need to handle register setting.)
--- Treating EOL as a character will probably lead to loops when actually
--- matching on them using a TDFA? This is rather just to see how things work.
--- Probably need to understand the stuff like fallback transitions first. The
--- "normal" way is rather for every final state to implicitly only be accepting
--- when having reached the end of the string.
 symbolTrans EOL = True
 symbolTrans _ = True
 
 epsilonClosure :: Bool -> TNFA -> Closure -> Closure
-epsilonClosure bol TNFA{..} = possibleStates . go S.empty
+epsilonClosure bol TNFA{..} = possibleStates . go S.empty []
   where
-    go :: Set TNFA.StateId -> Closure -> Closure
-    go _ [] = []
-    go seen (s@(q,r,h,l):xs) = s : go seen' (reverse ys ++ xs)
+    go :: Set TNFA.StateId -> Closure -> Closure -> Closure
+    go _     c []               = reverse c
+    go added c (s@(q,r,h,l):xs) = go (S.insert q added) (s:c) (ys ++ xs)
       where
-        seen' = S.insert q seen
         epst = sort [(prio,t,p) | (s,Eps prio t,p) <- tnfaTrans, s == q]
         ys = [ (p,r,h,appendHistory l t) | (_,t,p) <- epst,
-                                           not (S.member p seen') ]
-             ++ [ (p,r,h,l) | p <- anchors, not (S.member p seen') ]
+                                           not (S.member p added) ]
+             ++ [ (p,r,h,l) | p <- anchors, not (S.member p added) ]
         eol = False -- Should this really be handled here?
         anchors = [p | eol, (s,EOL,p) <- tnfaTrans, s == q] ++
                   [p | bol, (s,BOL,p) <- tnfaTrans, s == q]
     fin = tnfaFinalState
+    -- TODO Same TODO as in SimulateTNFA
     possibleStates c = [y | y@(q,_,_,_) <- c, q == fin || possibleState q]
     possibleState q = or [symbolTrans t | (s,t,_) <- tnfaTrans, s == q]
 
