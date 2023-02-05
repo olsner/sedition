@@ -39,7 +39,7 @@ programHeader ofile program =
     foldMap (declare "FILE*" outfd) files <>
     foldMap (declare "match_t" match) matches <>
     foldMap (declare "re_t" regexvar) regexpvars <>
-    foldMap compileRE (M.assocs regexps) <>
+    foldMap compileRE (M.assocs allRegexps) <>
     "int main(int argc, const char *argv[]) {\n" <>
     foldMap initRegexp (M.assocs regexps) <>
     infd 0 <> " = next_input(argc, argv);\n" <>
@@ -51,7 +51,8 @@ programHeader ofile program =
     files = IR.allFiles program
     matches = IR.allMatches program
     regexps :: Map IR.RE (S, Bool)
-    regexps = IR.allRegexps program
+    allRegexps = IR.allRegexps program
+    regexps = M.filter needRegcomp allRegexps
     regexpvars = M.keys regexps
     initRegexp (re, (s, ere)) = sfun "compile_regexp" [regex re, cstring s, bool ere]
 
@@ -59,12 +60,13 @@ programFooter program = "exit:\n" <>
     foldMap closeFile files <>
     foldMap freeRegex regexps <>
     foldMap freeString strings <>
+    sfun "tdfa2c_statistics" [] <>
     "return exit_status;\n" <>
     "}\n"
   where
     strings = IR.allStrings program
     files = IR.allFiles program
-    regexps = M.keys (IR.allRegexps program)
+    regexps = M.keys (M.filter needRegcomp (IR.allRegexps program))
     freeRegex re = sfun "free_regexp" [regex re]
     freeString s = sfun "free_string" [string s]
 
@@ -209,6 +211,11 @@ resolveStringIndex s ix = case ix of
     groupStart m i = match m <> ".matches[" <> intDec i <> "].rm_so"
     groupEnd m i = match m <> ".matches[" <> intDec i <> "].rm_eo"
 
+testCompare = False
+
+needRegcomp (s, ere) =
+    testCompare || not (TDFA2C.isCompatible (Regex.parseString ere s))
+
 compileRE (r, (s, ere)) = wrapper body
   where
     body | needRegexec = regexec
@@ -222,8 +229,7 @@ compileRE (r, (s, ere)) = wrapper body
     -- regcomp is run at start of main so we just need to forward the arguments.
     regexec = match "m"
     match_for_compare = stmt "match_t m2" <> match "&m2"
-    compare_matches = sfun "compare_regexp_matches" ["&m2", "m", "s", "orig_offset", "__PRETTY_FUNCTION__"]
-    testCompare = True
+    compare_matches = sfun "compare_regexp_matches" ["&m2", "m", "s", "orig_offset", "__PRETTY_FUNCTION__", cstring s]
 
     description =
         (if ere then "ERE: "  else "BRE: ") <> cstring s <>
