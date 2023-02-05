@@ -68,7 +68,8 @@ emitCase (lb,ub)
 emitRegOp :: RegOp -> Builder
 emitRegOp (r,val) = stmt ("  " <> showB r <> " = " <> g val) <>
     stmt ("YYDEBUG(\"" <> showB r <> " <- " <> showB val <> " == %td\\n\", " <> showB r <> " - YYBEGIN)") <>
-    stmt ("assert(" <> showB r <> " <= YYLIMIT)")
+    stmt ("assert(" <> showB r <> " <= YYLIMIT)") <>
+    sfun "YYSTATS" ["regops", intDec 1]
   where
     g (SetReg Pos) = "YYCURSOR"
     g (SetReg Nil) = "NULL"
@@ -93,6 +94,7 @@ emitState TDFA{..} s =
     -- do it first thing in the state block. Should be the same, I hope :)
     maybeSetFallback <>
     cWhen "YYEOF" (goto eolLabel) <>
+    sfun "YYSTATS" ["visited_chars", "1"] <>
     stmt "YYCHAR = YYGET()" <>
     stmt ("YYDEBUG(\"" <> showB s <> ": YYCHAR=%x at %zu\\n\", YYCHAR, YYPOS)") <>
     "switch (YYCHAR) {\n" <>
@@ -133,7 +135,7 @@ emitState TDFA{..} s =
 
 -- Calling convention for matcher functions:
 -- 
--- static void FUN(match_t* m, string* s, size_t offset)
+-- static void FUN(match_t* m, string* s, const size_t orig_offset)
 -- struct string { char* buf; size_t len; size_t alloc; };
 -- struct match_t { bool result; regmatch_t matches[]; }
 -- where regmatch_t has rm_so and rm_eo, corresponding to the even/odd tag
@@ -153,11 +155,13 @@ genC tdfa@TDFA{..} =
     stmt ("YYDEBUG(\"Starting match at %zu (of %zu)\\n\", orig_offset, s->len)") <>
     stmt ("const char *const YYBEGIN = s->buf") <>
     stmt ("const char *const YYLIMIT = s->buf + s->len") <>
+    sfun "YYSTATS" ["matched_chars", "s->len - orig_offset"] <>
     "#define YYPOS (YYCURSOR - YYBEGIN)\n" <>
     "#define YYEOF (YYCURSOR >= YYLIMIT)\n" <>
     "#define YYGET() (*YYCURSOR)\n" <>
     "#define YYNEXT() (YYCURSOR++)\n" <>
     "for (size_t offset = orig_offset; offset <= s->len; offset++) {\n" <>
+    cWhen "offset > orig_offset" (sfun "YYSTATS" ["retries", "1"]) <>
     stmt ("const char *YYCURSOR = s->buf + offset") <>
     stmt ("unsigned char YYCHAR = 0") <>
     stmt ("void *fallback_label = NULL") <>
@@ -183,7 +187,9 @@ genC tdfa@TDFA{..} =
     cWhen "offset < s->len" (stmt "YYDEBUG(\"retry match\\n\")") <>
     "}\n" <>
     stmt "YYDEBUG(\"match failed\\n\")" <>
-    label "end"
+    label "end" <>
+    sfun "YYSTATS" ["matched", "m->result"] <>
+    sfun "YYSTATS" ["failed", "!m->result"]
   where
     allTags = S.union (M.keysSet tdfaFixedTags) (M.keysSet tdfaFinalRegisters)
     allRegs = tdfaRegisters tdfa

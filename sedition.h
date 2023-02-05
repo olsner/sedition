@@ -15,11 +15,21 @@
 #include <string.h>
 #include <sys/random.h>
 
+// TODO Rename to YYTRACE use YYDEBUG for e.g. statistics collection.
 #if ENABLE_YYDEBUG
 #define YYDEBUG(fmt,...) fprintf(stderr, "%s: " fmt, __PRETTY_FUNCTION__, ## __VA_ARGS__)
 #else
 #define YYDEBUG(...) (void)0
 #endif
+
+static struct {
+    size_t retries;
+    size_t matched_chars, visited_chars;
+    size_t regops;
+    size_t matched, failed;
+} yystats;
+
+#define YYSTATS(field, incr) (yystats.field += (incr))
 
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
@@ -47,8 +57,8 @@ static int inputFileIndex;
 
 static size_t grow(size_t prev, size_t min)
 {
-    const size_t plus10 = prev + prev / 10;
-    // Grow 10% or directly to the given size
+    const size_t plus10 = prev + prev / 8;
+    // Grow 12.5% or directly to the given size
     return min > plus10 ? min : plus10;
 }
 
@@ -157,10 +167,6 @@ static void concat_inplace(string* dst, string* b)
 
 static void substring(string* dst, string* src, size_t i1, size_t i2)
 {
-    // Check for likely overflow
-    assert(i1 < UINT32_MAX);
-    assert(i2 < UINT32_MAX);
-    // Check bounds
     assert(i1 <= src->len);
     assert(i2 <= src->len);
     assert(i1 <= i2);
@@ -255,7 +261,7 @@ static void free_regexp(regex_t* re)
     regfree(re);
 }
 
-static void compare_regexp_matches(match_t* ref, match_t* m, string* s, size_t offset, const char *function)
+static void compare_regexp_matches(match_t* ref, match_t* m, string* s, size_t offset, const char *function, const char *original_re)
 {
     bool diff = false;
     if (ref->result != m->result) {
@@ -280,21 +286,33 @@ static void compare_regexp_matches(match_t* ref, match_t* m, string* s, size_t o
         fprintf(stderr, "%s: diff on input \"%.*s\"\n",
                 function,
                 (int)(s->len - offset), s->buf + offset);
+        fprintf(stderr, "%s: for regexp \"%s\"\n", function, original_re);
     }
     assert(!diff);
+}
+
+static void tdfa2c_statistics() {
+#if 0
+    fprintf(stderr, "%zu retried matches\n", yystats.retries);
+    fprintf(stderr, "%zu matched chars, %zu visited\n", yystats.matched_chars, yystats.visited_chars);
+    fprintf(stderr, "%zu register operations performed\n", yystats.regops);
+    fprintf(stderr, "%zu matches, %zu failed matches\n", yystats.matched, yystats.failed);
+#endif
 }
 
 static void clear_match(match_t* m)
 {
     memset(m, 0, sizeof(*m));
+#if 0
     // since regexec seems to set all unused matches to -1, do the same for
     // compare_regexp_matches.
     // TODO get the number of groups to the compare function to avoid extra
     // work here...
     memset(&m->matches, 0xff, sizeof(m->matches));
+#endif
 }
 
-static void copy_match(match_t* dst, match_t* src)
+__attribute__((noinline)) static void copy_match(match_t* dst, match_t* src)
 {
     memcpy(dst, src, sizeof(match_t));
 }
