@@ -211,6 +211,11 @@ bijectionRemove x m | Just y <- M.lookup x m = M.delete x (M.delete y m)
 --    can be checked at the same time in mappableStates.
 --
 -- Then try to map registers and return modified register operations.
+-- I don't think we mess with reg/tag mappings here, as the output are
+-- register operations to be performed in the transition to 't' instead of 's',
+-- i.e. input ops is suitable for transition from 'u' to 's', output ops go
+-- from 'u' to 't'. 'u' has the same tag/register mappings as before, 's' will
+-- not exist and 't' is not modified.
 mapState :: Set TagId -> RegOps -> TDFAState -> TDFAState -> Maybe RegOps
 mapState allTags ops (s,p) (t,q)
     | statesMappable, p == q = do
@@ -233,19 +238,24 @@ mapState allTags ops (s,p) (t,q)
     mappedRegs = M.elems <$> unionWithMaybe mapRegs s_regs t_regs
     mapRegs :: (Prio, History) -> Map TagId RegId -> Map TagId RegId -> Maybe (Bijection RegId)
     mapRegs k xs ys = mapTags (unsetTags k) xs ys
-    -- i.e. unmodified (here)
+    -- i.e. unmodified (here) - tags that are overwritten here can simply be
+    -- put in different registers without copying some old value first.
     unsetTags (_, hs) = S.toList (allTags S.\\ M.keysSet hs)
     mapTags ts xs ys = makeBijection =<< (forM ts $ \t -> do
-      -- All tags must have registers for this
+      -- All tags must have registers for this to work, even if the registers
+      -- are never set before. This is ensured in the initial DetState.
       let Just x = M.lookup t xs
       let Just y = M.lookup t ys
       return (x, y))
 
-    copyOps xs = [(i, CopyReg j) | (i,j) <- xs, i /= j]
+    -- TODO i/j order, what's being mapped to what? This seems to work but I'm
+    -- not sure why :D
+    copyOps xs = [(j, CopyReg i) | (i,j) <- xs, i /= j]
     adjustOps m = [(j, o) | (i, o) <- ops, let Just j = M.lookup i m]
 
-    -- Unsure if true, probably not :)
-    topo_sort = sort
+    -- "sort" probably doesn't work, but neither probably does 'id'. What kind
+    -- of topological sort do they mean?
+    topo_sort = id -- sort
 
 unionWithMaybe :: (Applicative t, Ord a) => (a -> b -> b -> t c) -> Map a b -> Map a b -> t (Map a c)
 unionWithMaybe f x y = M.fromList <$> sequenceA (zipWith f' (M.toList x) (M.toList y))
@@ -410,8 +420,6 @@ visitState tnfa s = do
             fo <- finalRegOps' tnfa r l
             emitEOLTransition s (o ++ fo)
 
-    -- This seems to cause the generation to loop for some regexps, presumably
-    -- because mapState is not yet implemented?
     clearTagRHSMap
 
     -- Deduplicate and remove any reused existing states
@@ -518,7 +526,7 @@ fallbackRegOps finRegOps clobbered s = do
   return ((s, fallback), M.fromList additionalOps)
 
 insertRegOps :: Map (StateId, StateId) RegOps -> [(StateId, (Char, (StateId, RegOps)))] -> [(StateId, (Char, (StateId, RegOps)))]
-insertRegOps m = map $ \(s, (c, (s', o))) -> (s, (c, (s', o ++ added s s')))
+insertRegOps m = map $ \(s, (c, (s', o))) -> (s, (c, (s', added s s' ++ o)))
   where
    added s s' = M.findWithDefault [] (s,s') m
 
@@ -557,7 +565,7 @@ determinize tnfa@TNFA{..} = do
     tdfaStartStateNotBOL = s1,
     tdfaFinalRegisters = finRegs,
     tdfaFinalFunction = finRegOps,
-    tdfaFallbackFunction = M.fromList fb `M.union` finRegOps,
+    tdfaFallbackFunction = M.fromList fb,
     tdfaTrans = M.map CM.fromList (multiMapFromList ts'),
     tdfaEOL = M.fromList ets,
     tdfaFixedTags = tnfaTagMap,
