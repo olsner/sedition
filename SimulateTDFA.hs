@@ -108,7 +108,7 @@ runTDFA search tdfa@TDFA{..} xs =
                     | otherwise = error ("Missing final function for " ++ show s)
 
     tagsFromRegs :: RegMap -> TagMap
-    tagsFromRegs rs = M.mapMaybe (\r -> M.lookup r rs) tdfaFinalRegisters
+    tagsFromRegs rs = M.map (\r -> M.findWithDefault (-1) r rs) tdfaFinalRegisters
 
     fixedTags :: Int -> TagMap -> TagMap
     fixedTags = resolveFixedTags tdfaFixedTags
@@ -118,7 +118,7 @@ applyRegOps xs = do
   modifyRegs (applyRegOps' xs pos)
 
 applyRegOps' :: RegOps -> Int -> RegMap -> RegMap
-applyRegOps' xs pos rs = foldr f rs xs
+applyRegOps' xs pos rs = foldl (flip tf) rs xs
   where
     tf :: RegOp -> RegMap -> RegMap
     tf (dst, val) rs = trace (show dst ++ " <- " ++ show val ++ " == " ++ show (M.lookup dst (f (dst,val) rs))) $ f (dst,val) rs
