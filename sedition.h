@@ -22,6 +22,7 @@
 #define YYDEBUG(...) (void)0
 #endif
 
+#if ENABLE_YYSTATS
 static struct {
     size_t retries;
     size_t matched_chars, visited_chars;
@@ -30,6 +31,9 @@ static struct {
 } yystats;
 
 #define YYSTATS(field, incr) (yystats.field += (incr))
+#else
+#define YYSTATS(field, incr) (void)0
+#endif
 
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
@@ -292,7 +296,7 @@ static void compare_regexp_matches(match_t* ref, match_t* m, string* s, size_t o
 }
 
 static void tdfa2c_statistics() {
-#if 0
+#if ENABLE_YYSTATS
     fprintf(stderr, "%zu retried matches\n", yystats.retries);
     fprintf(stderr, "%zu matched chars, %zu visited\n", yystats.matched_chars, yystats.visited_chars);
     fprintf(stderr, "%zu register operations performed\n", yystats.regops);
