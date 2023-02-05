@@ -141,12 +141,15 @@ emitState TDFA{..} s =
 -- offset is > 0 when repeating a match for a global replace
 --
 -- Tags are "tX" (offsets in string), registers are "rX" (pointers in string).
+--
+-- Although it complicates things a bit in here (more goto spaghetti!), never
+-- return directly but goto the end of the block, where the caller may have put
+-- some before-return debugging code.
 genC :: TDFA -> Builder
 genC tdfa@TDFA{..} =
     cWhen "orig_offset && orig_offset >= s->len" (
         stmt ("YYDEBUG(\"Already at EOF (%zu >= %zu)\\n\", orig_offset, s->len)") <>
-        stmt "m->result = false" <>
-        stmt "return;"
+        goto "end"
     ) <>
     stmt ("YYDEBUG(\"Starting match at %zu (of %zu)\\n\", orig_offset, s->len)") <>
     stmt ("const char *const YYBEGIN = s->buf") <>
@@ -163,7 +166,6 @@ genC tdfa@TDFA{..} =
     stmt ("const char *fallback_cursor = NULL") <>
     foldMap declareTagVar (S.toList allTags) <>
     foldMap declareReg allRegs <>
-    stmt "m->result = false" <>
     gotoStart <>
     blockComment "States" <>
     foldMap (emitState tdfa) (tdfaStates tdfa) <>
@@ -175,14 +177,15 @@ genC tdfa@TDFA{..} =
     foldMap fixedTag (M.toList tdfaFixedTags) <>
     foldMap matchFromTag (S.toList allTags) <>
     foldMap debugTag (S.toList allTags) <>
-    stmt "return" <>
+    goto "end" <>
     blockComment "No match: retry, or fail" <>
     label "fail" <>
     -- TODO Check if this is same as SimulateTDFA
     cWhen "fallback_label" (goto "*fallback_label") <>
     cWhen "offset < s->len" (stmt "YYDEBUG(\"retry match\\n\")") <>
     "}\n" <>
-    stmt "YYDEBUG(\"match failed\\n\")"
+    stmt "YYDEBUG(\"match failed\\n\")" <>
+    label "end"
   where
     allTags = S.union (M.keysSet tdfaFixedTags) (M.keysSet tdfaFinalRegisters)
     allRegs = tdfaRegisters tdfa

@@ -255,37 +255,54 @@ static void free_regexp(regex_t* re)
     regfree(re);
 }
 
-static void compare_regexp_matches(match_t* ref, match_t* m, string* s, size_t offset, const char *re)
+static void compare_regexp_matches(match_t* ref, match_t* m, string* s, size_t offset, const char *function)
 {
+    bool diff = false;
     if (ref->result != m->result) {
-        fprintf(stderr, "mismatch in /%s/: should %s \"%.*s\", but did %s\n",
-                re,
+        fprintf(stderr, "%s: should %s, but did %s\n",
+                function,
                 ref->result ? "match" : "not match",
-                (int)(s->len - offset), s->buf + offset,
                 m->result ? "match" : "not");
-    }
-    assert(ref->result == m->result);
-    if (ref->result) {
+        diff = true;
+    } else if (ref->result) {  // Only compare groups on match
         for (int i = 0; i <= MAXGROUP; i++) {
             if (ref->matches[i].rm_so != m->matches[i].rm_so ||
                     ref->matches[i].rm_eo != m->matches[i].rm_eo) {
-                fprintf(stderr, "mismatch in /%s/: group %d should be %d..%d, not %d..%d\n",
-                        re, i,
+                fprintf(stderr, "%s: group %d should be %d..%d, not %d..%d\n",
+                        function, i,
                         ref->matches[i].rm_so, ref->matches[i].rm_eo,
                         m->matches[i].rm_so, m->matches[i].rm_eo);
+                diff = true;
             }
         }
-        for (int i = 0; i <= MAXGROUP; i++) {
-            assert(ref->matches[i].rm_so == m->matches[i].rm_so &&
-                    ref->matches[i].rm_eo == m->matches[i].rm_eo);
-        }
     }
+    if (diff) {
+        fprintf(stderr, "%s: diff on input \"%.*s\"\n",
+                function,
+                (int)(s->len - offset), s->buf + offset);
+    }
+    assert(!diff);
+}
+
+static void clear_match(match_t* m)
+{
+    memset(m, 0, sizeof(*m));
+    // since regexec seems to set all unused matches to -1, do the same for
+    // compare_regexp_matches.
+    // TODO get the number of groups to the compare function to avoid extra
+    // work here...
+    memset(&m->matches, 0xff, sizeof(m->matches));
+}
+
+static void copy_match(match_t* dst, match_t* src)
+{
+    memcpy(dst, src, sizeof(match_t));
 }
 
 static void match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
                          regex_match_fun_t* fun)
 {
-    memset(m, 0, sizeof(*m));
+    clear_match(m);
 
     // Stop matching when we've consumed the whole string, but allow a zero
     // length match if it comes first?
@@ -306,11 +323,6 @@ static void match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
     m->result = (res == 0);
 }
 
-static void copy_match(match_t* dst, match_t* src)
-{
-    memcpy(dst, src, sizeof(match_t));
-}
-
 static void next_match(match_t* dst, match_t* src, string* s)
 {
     size_t offset = src->matches[0].rm_eo;
@@ -320,20 +332,6 @@ static void next_match(match_t* dst, match_t* src, string* s)
         offset++;
     }
     src->fun(dst, s, offset);
-}
-
-static void set_match(match_t* m, string* s, const char** pmatch, size_t nmatch,
-                      regex_match_fun_t* fun)
-{
-    memset(m, 0, sizeof(*m));
-    assert(nmatch <= MAXGROUP + 1);
-    m->fun = fun;
-    m->result = true; // Only called for a successful match
-    const char* base = s->buf;
-    for (int i = 0; i < nmatch; i++) {
-        m->matches[i].rm_so = pmatch[2 * i + 0] - base;
-        m->matches[i].rm_eo = pmatch[2 * i + 1] - base;
-    }
 }
 
 //

@@ -35,6 +35,7 @@ cchar = showB . fromEnum
 cstring s = "\"" <> foldMap quoteC (C.unpack s) <> "\""
   where
     quoteC '\n' = "\\n"
+    quoteC '\t' = "\\t"
     quoteC '\"' = "\\\""
     quoteC '\\' = "\\\\"
     quoteC c

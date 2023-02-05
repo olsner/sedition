@@ -209,21 +209,30 @@ resolveStringIndex s ix = case ix of
     groupStart m i = match m <> ".matches[" <> intDec i <> "].rm_so"
     groupEnd m i = match m <> ".matches[" <> intDec i <> "].rm_eo"
 
--- TODO Emit both TDFA2C and regcomp/regexec code and compare the results.
-compileRE (r, (s, ere)) = wrapper $ if needRegexec then regexec else match_for_compare <> tdfa2c r re <> compare_matches
+compileRE (r, (s, ere)) = wrapper body
   where
+    body | needRegexec = regexec
+         | testCompare = match_for_compare <> tdfa2c r re <> compare_matches
+         | otherwise   = tdfa2c r re
     re = Regex.parseString ere s
-    needRegexec = True -- not (TDFA2C.isCompatible re)
+    needRegexec = not (TDFA2C.isCompatible re)
     res = C.pack $ Regex.reString re
-    wrapper b = "static void " <> regexfun r <> "(match_t* m, string* s, const size_t orig_offset) {\n" <> b <> "}\n"
+    wrapper b = "static void " <> regexfun r <> "(match_t* m, string* s, const size_t orig_offset) {\n" <> comment description <> b <> "}\n"
     match m = sfun "match_regexp" [m, "s", "orig_offset", regex r, regexfun r]
     -- regcomp is run at start of main so we just need to forward the arguments.
-    regexec = comment ("unsupported regex: " <> cstring res) <> match "m"
+    regexec = match "m"
     match_for_compare = stmt "match_t m2" <> match "&m2"
-    compare_matches = sfun "compare_regexp_matches" ["&m2", "m", "s", "orig_offset", cstring res]
+    compare_matches = sfun "compare_regexp_matches" ["&m2", "m", "s", "orig_offset", "__PRETTY_FUNCTION__"]
+    testCompare = True
+
+    description =
+        (if ere then "ERE: "  else "BRE: ") <> cstring s <>
+        " -> ERE: " <> cstring res <>
+        (if needRegexec then " (using regcomp)" else " (using TDFA2C)")
 
 tdfa2c r re =
     comment ("tdfa2c regex: " <> cstring res) <>
+    sfun "clear_match" ["m"] <>
     stmt ("m->fun = " <> regexfun r)  <>
     byteString (TDFA2C.tdfa2c re)
   where
