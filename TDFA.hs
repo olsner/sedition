@@ -144,9 +144,8 @@ type History = Map TagId RegVal
 
 emptyHistory = M.empty
 
-history :: History -> TagId -> [RegVal]
-history hs t | Just rv <- M.lookup t hs = [rv]
-             | otherwise                = []
+history :: History -> TagId -> Maybe RegVal
+history hs t = M.lookup t hs
 
 hasHistory :: History -> TagId -> Bool
 hasHistory hs t = M.member t hs
@@ -175,7 +174,7 @@ tdfaState :: Closure -> TDFAState
 tdfaState clos = (stateClosure clos, precedence clos)
 
 regop_rhs :: History -> TagId -> RegRHS
-regop_rhs h t = SetReg (last (history h t))
+regop_rhs h t = SetReg (fromJust (history h t))
 
 findState :: TDFAState -> GenTDFA (Maybe StateId)
 findState statePrec = gets (M.lookup statePrec . revStateMap)
@@ -377,21 +376,21 @@ updateTagMap = mapM $ \(q,r,h,l) -> do
     r' <- forM o $ \(t,rhs) -> gets ((t,) <$> fromJust . M.lookup (t,rhs) . tagRHSMap)
     return (q,M.union (M.fromList r') r,h,l)
 
-assignReg :: (TagId, RegRHS) -> GenTDFA (Maybe RegOp)
+assignReg :: (TagId, RegRHS) -> GenTDFA RegOp
 assignReg (tag, rhs) = do
   existingReg <- gets (M.lookup (tag, rhs) . tagRHSMap)
   case existingReg of
-    Just r -> return (Just (r, rhs))
+    Just r -> return (r, rhs)
     Nothing -> do
       r <- newReg
       addTagRHS tag rhs r
-      return (Just (r, rhs))
+      return (r, rhs)
 
 addStateForReach :: TNFA -> Closure -> GenTDFA (Closure, RegOps)
 addStateForReach tnfa b = do
     let c = epsilonClosure False tnfa b
     let rhses = transitionRegRHSes c
-    o <- catMaybes <$> mapM assignReg rhses
+    o <- mapM assignReg rhses
     c' <- updateTagMap c
     return (c', o)
 
