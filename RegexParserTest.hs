@@ -28,10 +28,14 @@ tests =
   [ (Both, "a", Char 'a')
   , (Both, "foo", literal "foo")
   , (Both, "/", Char '/')
+  , (Both, "", Empty)
 
   -- BRE doesn't have alternation, but we add it anyway.
   , (BRE, "a\\|b", Or [Char 'a', Char 'b'])
   , (ERE, "a|b", Or [Char 'a', Char 'b'])
+  -- Not quite handling empty alternatives yet.
+  --, (ERE, "|b", Or [Empty, Char 'b'])
+  --, (ERE, "a|", Or [Char 'a', Empty])
   -- Escaped/unesacped should be a literal pipe character
   , (BRE, "|", Char '|')
   , (ERE, "\\|", Char '|')
@@ -77,7 +81,7 @@ tests =
 
   -- anchoring
   , (Both, "^$", Concat [AnchorStart, AnchorEnd])
-  , (Both, "a^", Concat [Char 'a', AnchorStart])
+  , (ERE, "a^", Concat [Char 'a', AnchorStart])
   , (Both, "$a", Concat [AnchorEnd, Char 'a'])
 
   -- counts
@@ -116,6 +120,15 @@ tests =
   -- Not actually in BRE or ERE
   , (Both, "\\s", CClass spaces)
   , (Both, "\\S", CNotClass spaces)
+
+  -- Some BRE oddities and special cases
+  -- * first is a character, not special
+  , (BRE, "*s", Concat [Char '*', Char 's'])
+  -- BRE doesn't have to treat ^ as an anchor unless it's the first character
+  -- of the regular expression. ERE allows ^ and gives it its special meaning
+  -- wherever it appears (even if that means it will never match).
+  , (BRE, "a^", Concat [Char 'a', Char '^'])
+  -- , (BRE, "*\\|s", Or [Char '*', Char 's'])
   ]
 
 -- Test code

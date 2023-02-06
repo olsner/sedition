@@ -73,11 +73,14 @@ escapedChar c = escaped (char c)
 pRegex True = pERE
 pRegex False = pBRE
 
-pBRE = rconcat <$> many breAlternate
+maybePrepend x ys = (++) <$> option [] ((:[]) <$> x) <*> ys
+
+-- TODO Misparses * or ^ followed by \|
+pBRE = rconcat <$> maybePrepend breInitialSpecial (many breAlternate)
 breAlternate = ror <$> sepBy1 breBranch (escapedChar '|')
 breBranch = rconcat <$> some breSimple
 breSimple = flip id <$> breNondupl <*> option id breDuplSym
-breNondupl = choice [breGroup, backRef, anchorStart, anchorEnd, breOneChar]
+breNondupl = choice [breGroup, backRef, anchorEnd, breOneChar]
 
 breOneChar = choice $
   [ breOrdChar
@@ -105,10 +108,12 @@ ereBraces = between (char '{') (char '}')
 breBracedCount = breBraces counts
 ereBracedCount = ereBraces counts
 
-breSpecialChars = "$*.[\\^"
+-- Special cases for the initial character: ^ first is an anchor (otherwise a
+-- literal character), * first is a literal character instead of a *.
+breInitialSpecial = (Char <$> char '*') <|> anchorStart
+breSpecialChars = "$*.[\\"
 breQuotedChar :: Parser Regex
 breQuotedChar = Char <$> escaped (oneOf breSpecialChars)
--- TODO '*' is ordinary when it's the first character in a BRE
 breOrdChar :: Parser Regex
 breOrdChar = Char <$> noneOf breSpecialChars
 breGroup :: Parser Regex

@@ -578,6 +578,8 @@ u2/g' lines1
                   echo "04.~0~20.02~2002~2002" | $SED -n 's/^\(-*\)0*\([0-9.]*[0-9]\)[^~]*/{&}/p'
     mark '8.28' ; echo "aaaa" | $SED -rn 's/a{10}/{&}/p'
                   echo "aaaa" | $SED -rn 's/a{4}/{&}/p'
+    mark '8.29' ; echo "foo*sbar" | $SED -n 's/*s/{&}/p'
+    mark '8.30' ; echo "foo^bar" | $SED -n 's/o^/{&}/p'
 }
 
 test_sedition()
