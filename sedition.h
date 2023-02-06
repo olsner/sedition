@@ -309,13 +309,6 @@ static void tdfa2c_statistics() {
 static void clear_match(match_t* m)
 {
     memset(m, 0, sizeof(*m));
-#if 0
-    // since regexec seems to set all unused matches to -1, do the same for
-    // compare_regexp_matches.
-    // TODO get the number of groups to the compare function to avoid extra
-    // work here...
-    memset(&m->matches, 0xff, sizeof(m->matches));
-#endif
 }
 
 __attribute__((noinline)) static void copy_match(match_t* dst, match_t* src)
