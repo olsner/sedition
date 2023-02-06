@@ -179,28 +179,33 @@ regop_rhs h t = SetReg (fromJust (history h t))
 findState :: TDFAState -> GenTDFA (Maybe StateId)
 findState statePrec = gets (M.lookup statePrec . revStateMap)
 
-type Bijection a = Map a a
+type Bijection a = (Map a a, Map a a)
 
 makeBijection :: Ord a => [(a,a)] -> Maybe (Bijection a)
-makeBijection = go M.empty
+makeBijection = go M.empty M.empty
   where
-    go res []         = Just res
-    go res ((x,y):xs) | x == y = go res xs
-                      | Nothing <- M.lookup x res,
-                        Nothing <- M.lookup y res = go (add x y res) xs
-                      | Just x' <- M.lookup x res, x' == y,
-                        Just y' <- M.lookup y res,  x == y' = go res xs
-                      | otherwise = Nothing
-    add x y = M.insert x y . M.insert y x
+    go fwd rev []         = Just (fwd, rev)
+    go fwd rev ((x,y):xs) | x == y = go fwd rev xs
+                          | Nothing <- M.lookup x fwd,
+                            Nothing <- M.lookup y rev =
+                                go (add x y fwd) (add y x rev) xs
+                          | Just y' <- M.lookup x fwd, y' == y,
+                            Just x' <- M.lookup y rev, x' == x = go fwd rev xs
+                          | otherwise = Nothing
+    add = M.insert
 
 bijectionToList :: Ord a => Bijection a -> [(a,a)]
-bijectionToList = filter (\(x,y) -> x < y) . M.toList
+bijectionToList (fwd, rev) = M.toList fwd
+
+bijectionFwd :: Bijection a -> Map a a
+bijectionFwd (fwd, rev) = fwd
 
 unionsBijection :: Ord a => [Bijection a] -> Maybe (Bijection a)
 unionsBijection = makeBijection . concatMap bijectionToList
 
-bijectionRemove x m | Just y <- M.lookup x m = M.delete x (M.delete y m)
-                    | otherwise              = m
+bijectionRemove x (fwd, rev)
+    | Just y <- M.lookup x fwd = (M.delete x fwd, M.delete y rev)
+    | otherwise                = (fwd, rev)
 
 -- First check if the states are compatible:
 -- 1. same subset of TNFA states
@@ -226,8 +231,8 @@ mapState allTags ops (s,p) (t,q)
         allMappings <- unionsBijection subMappings
         -- trace ("All mapped regs: " ++ show allMappings) $ return ()
         let copyMappings = bijectionToList (foldr bijectionRemove allMappings (map fst ops))
-        let ops' = (topo_sort (copyOps copyMappings ++ adjustOps allMappings))
-        -- trace ("Mapped ops: " ++ show ops ++ "\nto: " ++ show ops') $ return ()
+        let ops' = topo_sort (copyOps copyMappings ++ adjustOps (bijectionFwd allMappings))
+        --trace ("Mapped ops: " ++ show ops ++ " -> " ++ show ops') $ return ()
         return ops'
     | otherwise = Nothing
   where
@@ -248,10 +253,14 @@ mapState allTags ops (s,p) (t,q)
       let Just y = M.lookup t ys
       return (x, y))
 
-    -- TODO i/j order, what's being mapped to what? This seems to work but I'm
-    -- not sure why :D
-    copyOps xs = [(j, CopyReg i) | (i,j) <- xs, i /= j]
-    adjustOps m = [(j, o) | (i, o) <- ops, let Just j = M.lookup i m]
+    -- Copies: any tags that aren't overwritten this time need to be copied
+    -- from whatever register they used to live in, to the registers the
+    -- existing state expects them in. (i,j) means source register i should
+    -- have target register j, so copy j <- i.
+    -- The written regsiters are removed in copyMappings above.
+    copyOps xs = [(j, CopyReg i) | (i,j) <- xs]
+    -- Adjusted ops: tags written here may need to be written in new registers.
+    adjustOps m = [(j, o) | (i, o) <- ops, let j = M.findWithDefault i i m]
 
     -- "sort" probably doesn't work, but neither probably does 'id'. What kind
     -- of topological sort do they mean?
