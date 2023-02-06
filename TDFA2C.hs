@@ -7,7 +7,7 @@ import qualified Data.ByteString.Char8 as C
 
 import qualified CharMap as CM
 -- import CharMap (CharMap)
--- import Data.Map (Map)
+import Data.Map (Map)
 import qualified Data.Map as M
 -- import Data.Set (Set)
 import qualified Data.Set as S
@@ -83,8 +83,8 @@ emitTrans (cs, (s', regops)) =
     "  " <> gostate s' <>
     "}\n"
 
-emitState :: TDFA -> StateId -> Builder
-emitState TDFA{..} s =
+emitState :: TDFA -> Map StateId Int -> StateId -> Builder
+emitState TDFA{..} minLengths s =
     hsep <>
     (if isFallbackState || isFinalState then fallbackRegOps else mempty) <>
     (if isEOLState || isFinalState then eolRegOps else mempty) <>
@@ -92,6 +92,7 @@ emitState TDFA{..} s =
     -- SimulateTDFA does this after incPos for the state we're going to, so
     -- do it first thing in the state block. Should be the same, I hope :)
     maybeSetFallback <>
+    earlyOut <>
     cWhen "YYEOF" (goto eolLabel) <>
     sfun "YYSTATS" ["visited_chars", "1"] <>
     stmt "YYCHAR = YYGET()" <>
@@ -132,6 +133,13 @@ emitState TDFA{..} s =
     maybeSetFallback | isFinalState = setFallback
                      | otherwise    = mempty
 
+    -- Very arbitrarily chosen minimum length where we assume an extra range
+    -- check outweighs the work of useless matching.
+    earlyOut | Just min <- M.lookup s minLengths, min > 3 =
+        cWhen ("YYLIMIT - YYCURSOR < " <> intDec min) $
+           sfun "YYSTATS" ["early_out", "1"] <> goto "fail"
+             | otherwise = mempty
+
 -- Calling convention for matcher functions:
 -- 
 -- static void FUN(match_t* m, string* s, const size_t orig_offset)
@@ -169,7 +177,7 @@ genC tdfa@TDFA{..} =
     foldMap declareReg allRegs <>
     gotoStart <>
     blockComment "States" <>
-    foldMap (emitState tdfa) (tdfaStates tdfa) <>
+    foldMap (emitState tdfa tdfaMinLengths) (tdfaStates tdfa) <>
     blockComment "Successful finish: found match" <>
     label "match" <>
     stmt "YYDEBUG(\"match found\\n\")" <>
@@ -192,7 +200,7 @@ genC tdfa@TDFA{..} =
   where
     allTags = S.union (M.keysSet tdfaFixedTags) (M.keysSet tdfaFinalRegisters)
     allRegs = tdfaRegisters tdfa
-
+    tdfaMinLengths = minLengths tdfa
     gotoStart
       | tdfaStartStateNotBOL /= tdfaStartState =
         cIf "offset > 0" (gostate tdfaStartStateNotBOL) (gostate tdfaStartState)

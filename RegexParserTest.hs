@@ -129,6 +129,8 @@ tests =
   -- wherever it appears (even if that means it will never match).
   , (BRE, "a^", Concat [Char 'a', Char '^'])
   -- , (BRE, "*\\|s", Or [Char '*', Char 's'])
+  -- TODO The special behavior for ^ when not first probably also applies to
+  -- $ when not last. GNU sed test newjis.sh seems to depend on $ matching '$'.
   ]
 
 -- Test code

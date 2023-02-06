@@ -28,6 +28,7 @@ static struct {
     size_t matched_chars, visited_chars;
     size_t regops;
     size_t matched, failed;
+    size_t early_out;
 } yystats;
 
 #define YYSTATS(field, incr) (yystats.field += (incr))
@@ -301,6 +302,7 @@ static void tdfa2c_statistics() {
     fprintf(stderr, "%zu matched chars, %zu visited\n", yystats.matched_chars, yystats.visited_chars);
     fprintf(stderr, "%zu register operations performed\n", yystats.regops);
     fprintf(stderr, "%zu matches, %zu failed matches\n", yystats.matched, yystats.failed);
+    fprintf(stderr, "%zu early outs due to string length\n", yystats.early_out);
 #endif
 }
 

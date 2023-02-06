@@ -11,7 +11,7 @@ import Control.Monad
 
 -- import Data.ByteString.Char8 (ByteString)
 -- import qualified Data.ByteString.Char8 as C
-import Data.List (elemIndex, find, intercalate, nub, sort, sortOn)
+import Data.List (elemIndex, find, intercalate, nub, sort, sortOn, (\\))
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
@@ -301,7 +301,8 @@ addState closure ops = do
     state = tdfaState closure
 
 -- Mainly to prevent runaway
-maxStates = 1000
+-- gnused madding.sed has 5446 states.
+maxStates = 100000
 
 addNewState :: TDFAState -> RegOps -> GenTDFA (StateId, RegOps)
 addNewState state ops = do
@@ -594,13 +595,15 @@ genTDFA :: TNFA -> TDFA
 genTDFA tnfa = evalState (determinize tnfa) (initState tnfa)
 
 tdfaStates :: TDFA -> [StateId]
-tdfaStates TDFA{..} = go S.empty [tdfaStartState, tdfaStartStateNotBOL]
+tdfaStates tdfa@TDFA{..} = go S.empty [tdfaStartState, tdfaStartStateNotBOL]
   where
     go seen (s:ss)
-      | not (S.member s seen) = s : go (S.insert s seen) (ss ++ nextStates s)
+      | not (S.member s seen) = s : go (S.insert s seen) (ss ++ nextStates tdfa s)
       | otherwise = go seen ss
     go _ [] = []
-    nextStates s = map fst (CM.elems (getTrans s))
+
+nextStates TDFA{..} s = map fst (CM.elems (getTrans s))
+  where
     getTrans :: StateId -> TDFATransTable
     getTrans s = M.findWithDefault CM.empty s tdfaTrans
 
@@ -683,6 +686,31 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
 
     showEOLRegOps s | Just o <- M.lookup s tdfaEOL = eolRegOps o
                     | otherwise = ""
+
+-- Minimum length to an accepting state. If there aren't this many characters
+-- left in the string it cannot match from here.
+-- TODO This makes it easy to fast-out if the string is short, but we'd also
+-- like to use it to avoid unnecessary range checks. Evaluate :)
+-- TODO Put in TDFA struct and calculate in construction if really useful.
+minLengths :: TDFA -> Map StateId Int
+minLengths tdfa@TDFA{..} = go ss (M.map (const 0) tdfaFinalFunction) True
+  where
+    -- Iterate until there are no new states added. Any remaining unadded
+    -- states are failed states. (We should have something for that as well...
+    -- No use matching when there are no paths to success.)
+    go []     known False = known
+    go []     known True = go ss known False
+    go (x:xs) known added | x `M.member` known = go xs known added
+                          | done = go xs known' True
+                          | otherwise = go xs known added
+      where
+        ts = nextStates tdfa x
+        done = not (null dists)
+        dists = catMaybes [M.lookup t known | t <- ts]
+        minDist = 1 + minimum dists
+        known' | null dists = known
+               | otherwise  = M.insert x minDist known
+    ss = tdfaStates tdfa
 
 testTDFA :: String -> IO ()
 testTDFA = putStr . prettyStates . genTDFA . genTNFA . testTagRegex
