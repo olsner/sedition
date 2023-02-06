@@ -11,7 +11,7 @@ import Control.Monad
 
 -- import Data.ByteString.Char8 (ByteString)
 -- import qualified Data.ByteString.Char8 as C
-import Data.List (elemIndex, find, intercalate, nub, sort, sortOn, (\\))
+import Data.List (elemIndex, find, intercalate, nub, sort, sortOn)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
@@ -19,7 +19,7 @@ import Data.Set (Set)
 import qualified Data.Set as S
 import Data.Either (partitionEithers)
 
-import Debug.Trace
+-- import Debug.Trace
 
 import qualified CharMap as CM
 import CharMap (CharMap)
@@ -195,10 +195,10 @@ makeBijection = go M.empty M.empty
     add = M.insert
 
 bijectionToList :: Ord a => Bijection a -> [(a,a)]
-bijectionToList (fwd, rev) = M.toList fwd
+bijectionToList (fwd, _) = M.toList fwd
 
 bijectionFwd :: Bijection a -> Map a a
-bijectionFwd (fwd, rev) = fwd
+bijectionFwd (fwd, _) = fwd
 
 unionsBijection :: Ord a => [Bijection a] -> Maybe (Bijection a)
 unionsBijection = makeBijection . concatMap bijectionToList
@@ -427,7 +427,7 @@ visitState tnfa s = do
             -- trace (show s ++ "[EOL] -> " ++ show c' ++ " | " ++ show o) $ return ()
             let fin = tnfaFinalState tnfa
             let Just (_,r,_,l) = find (\(q,_,_,_) -> q == fin) c'
-            fo <- finalRegOps' tnfa r l
+            fo <- finalRegOps' r l
             emitEOLTransition s (o ++ fo)
 
     clearTagRHSMap
@@ -459,10 +459,10 @@ stepOnEOL TNFA{..} prec clos = go (sortByPrec prec clos)
 finalRegOps tnfa s = do
   (state,_) <- getState s
   let Just (_,r,l) = find (\(q,_,_) -> q == tnfaFinalState tnfa) state
-  o <- finalRegOps' tnfa r l
+  o <- finalRegOps' r l
   return (s, o)
 
-finalRegOps' TNFA{..} r l = do
+finalRegOps' r l = do
   outRegs <- gets finalRegisters
   --trace (show r ++ " " ++ show l) $ return ()
   let ts = tagsInHistory l

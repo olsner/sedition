@@ -62,7 +62,8 @@ run-gnused-tests-compiled: sed gnused
 MODULES = Sed Parser AST Bus ParserTest IR \
 	Optimize ConstPred RedundantBranches LivePred \
 	LiveString SameString Compile Interpret \
-	Regex RegexParserTest
+	Regex RegexParserTest \
+	TaggedRegex TNFA TDFA TDFA2C SimulateTNFA SimulateTDFA CharMap GenC
 
 clean:
 	rm -f sed Sed ParserTest
