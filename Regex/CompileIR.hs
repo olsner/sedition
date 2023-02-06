@@ -117,7 +117,6 @@ tdfa2c used = toByteString .
     genTDFA .
     genTNFA .
     fixTags .
-    makeSearchRegex .
     unusedTags .
     tagRegex
   where unusedTags | Just s <- used = selectTags (\(T t) -> t `IS.member` s)

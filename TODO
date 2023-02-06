@@ -27,6 +27,7 @@
   - commented-out test cases in bsd.sh too
   - now that pattern space is exposed to IR, we can use a regexp replace for it
 
+- Proper POSIX semantics for regular expressions
 
 # Testing
 
@@ -76,16 +77,20 @@
   - If regex starts with a literal, use memmem for initial guess/skip
   - In a state where we match something like .*literal or .*char we can skip
     with memchr/memmem
-  - Fancy: something with the start-of-match tag - "abandon" states where the
-    start of match tag is already set but would be moved forward. Prototype in
-    SimulateTNFA, then see if the logic can be ported to the TDFA construction?
-  - Simpler: in cases where we don't emit tags at all the location/length of the
-    match would not be relevant so we can exit with a match on the first final
-    state and can look for e.g. ".*re".
-    This seemed to be a bit slower though. I think because there's no support
-    for non-greedy .* and returning shortest instead of longest match.
 * Do more with memmem - e.g. precalculate tables and constants, check for
-  string search algorithms with more expensive precalculation.
+  better string search algorithms with more expensive precalculation.
+* Incorporate Horspool (or similar) in regex matching?
+  - Start at the minimum length of the pattern
+  - For each character, remember the last position in the pattern that it can
+    appear and skip forward accordingly
+  - Doesn't need to be the end of the pattern - if e.g. looking for "foo." you
+    can try to match 'o' first? The '.' means the last position of the pattern
+    can be anything anywhere, so the relevant thing is finding a position that
+    has a small number of possible characters or the largest average skip?
+  - New primitives (Skip and MatchAtOffset?) are very similar to what e.g.
+    precompiled horspool memmem would need/use.
+    Maybe split up match and get for better orthogonality? (OTOH, matching will
+    never be repeated.)
 
 ### Done
 
@@ -101,9 +106,6 @@
   - anchored at end: first match will contain the end of the string
   - matches any suffix / ends with .*: first match will match all
   - also when matching any prefix
-
-### Abandoned
-
-* Port search with states as in SimulateTNFA to TDFA construction
-  - Turns out this was wrong. Can it even work? Let's just do the other
-    optimizations :)
+* Fix O(n^2) searching:
+  - Instead of brute-force retry, re-add initial NFA state to closure
+    (similar to re -> .*(re) but with correct semantics)

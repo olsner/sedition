@@ -30,7 +30,7 @@ import Regex.CompileIR (genC)
 import Regex.OptimizeIR (optimize)
 import GenC
 
-doSimulateTDFA tdfa s = print (runTDFA True tdfa s)
+doSimulateTDFA tdfa s = print (runTDFA tdfa s)
 
 doSimulateTNFA tnfa s = print (tnfaMatch tnfa s)
 
@@ -76,6 +76,7 @@ reportTime label start end = do
 
 -- TODO Add option to "validate": run TNFA, TDFA *and* C compiled output,
 -- verify that they all give the same results on the set of input strings.
+-- TODO Add option to match by interpreting IR, instead of using the TDFA/TNFA.
 data Options = Options
   { extendedRegexps :: Bool
   , cOutputFile :: FilePath

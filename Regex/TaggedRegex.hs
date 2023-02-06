@@ -202,17 +202,6 @@ fixTags re = (removeFixedTags m re, m)
 removeFixedTags :: FixedTagMap -> TaggedRegex -> TaggedRegex
 removeFixedTags m = selectTags (\t -> not (M.member t m))
 
--- When safe to do so, translate a regex into one that searches for a match
--- anywhere. Seems to be a bit slower than the retry-based search, perhaps due
--- to not having non-greedy matching and due to fallbacks being emitted (which
--- should not be necessary when we have no tags).
-makeSearchRegex :: TaggedRegex -> TaggedRegex
-makeSearchRegex re | True || hasTags re = re
-                   | otherwise  = cat prefix re
-  -- TODO We should use non-greedy match here to avoid pointlessly trying to
-  -- find longer matches after finding a prefix.
-  where prefix = cat (Term BOL) (Repeat 0 Nothing (Term Any))
-
 hasTags (Empty) = False
 hasTags (Term _) = False
 hasTags (TagTerm _) = True

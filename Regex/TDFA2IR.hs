@@ -83,6 +83,7 @@ gostate_check s = gostate (s, Checked)
 yystats :: String -> Int -> Graph Insn O O
 yystats _ _ = emptyGraph
 
+debug :: String -> Graph Insn O O
 debug _ = emptyGraph
 --debug msg = mkMiddle (Trace msg)
 
@@ -164,7 +165,7 @@ emitState TDFA{..} s = mdo
 
     emitEndRegOps opfun = foldMap emitRegOp (M.findWithDefault [] s opfun)
 
-    maybeSetFallback l | isFinalState = mkMiddles [Trace ("setting fallback in " ++ show s), SaveCursor, SetFallback l]
+    maybeSetFallback l | isFinalState = debug ("setting fallback in " ++ show s)H.<*> mkMiddles [SaveCursor, SetFallback l]
                        | otherwise    = debug ("no fallback from " ++ show s)
 
     minLength | Just min <- M.lookup s tdfaMinLengths, min > 1 = min
@@ -187,18 +188,12 @@ emitIR tdfa@TDFA{..} = mdo
   mapM_ (emitState tdfa) (tdfaStates tdfa)
   matchLabel <- labelBlock (mkLast (Match finalTagRegMap))
 
-  let startNotBOL | onlyMatchAtBOL = justFail
+  let startNotBOL | onlyMatchAtBOL = failLabel
                   | otherwise      = startLabelNotBOL
 
   -- We get here if we reach the original fallback, i.e. we reach a state where
   -- it's impossible to match the rest of the string.
-  failLabel <- labelBlock (mkMiddle RestoreCursor H.<*> checkEOF justFail retry)
-  justFail <- labelBlock (mkLast Fail)
-  -- We have a check bounds and restore cursor before this so we know we're not
-  -- at the end of the string and can safely call Next. Then repeat matching
-  -- from the starting not-BOL state.
-  retry <- labelBlock (mkMiddles [Next, Trace "retrying", SaveCursor, SetFallback failLabel]
-                       H.<*> goto startNotBOL)
+  failLabel <- labelBlock (mkLast Fail)
   g <- gets graph
   return (finishProgram entry g)
 
@@ -216,7 +211,7 @@ genIR :: TDFA -> Program
 genIR tdfa = evalState (emitIR tdfa) initState
 
 tdfa2ir :: Maybe IntSet -> Regex -> Program
-tdfa2ir used = genIR . genTDFA . genTNFA . fixTags . makeSearchRegex . unusedTags . tagRegex
+tdfa2ir used = genIR . genTDFA . genTNFA . fixTags . unusedTags . tagRegex
   where unusedTags | Just s <- used = selectTags (\(T t) -> t `IS.member` s)
                    | otherwise = id
 

@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections #-}
+{-# LANGUAGE BangPatterns #-}
 
 -- Based on https://arxiv.org/pdf/2206.01398.pdf, "A Closer Look at TDFA"
 -- Determinization, convert a TNFA to a TDFA state machine.
@@ -11,7 +12,7 @@ import Control.Monad
 
 -- import Data.ByteString.Char8 (ByteString)
 -- import qualified Data.ByteString.Char8 as C
-import Data.List (elemIndex, find, intercalate, nub, sort, sortOn)
+import Data.List (elemIndex, find, intercalate, sort, sortOn)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
@@ -19,7 +20,7 @@ import Data.Set (Set)
 import qualified Data.Set as S
 import Data.Either (partitionEithers)
 
--- import Debug.Trace
+import Debug.Trace
 
 import qualified CharMap as CM
 import CharMap (CharMap)
@@ -61,20 +62,32 @@ data TDFA = TDFA {
     tdfaEOL :: Map StateId RegOps,
     tdfaFixedTags :: FixedTagMap,
     -- For debugging (mostly)
-    tdfaTagRegMap :: Map StateId (Map TNFA.StateId (Map TagId RegId)),
-    tdfaStateMap :: Map StateId (Set TNFA.StateId),
+    tdfaTagRegMap :: Map StateId (Map Prio (Map TagId RegId)),
+    tdfaStateMap :: Map StateId Prec,
     tdfaOriginalFinalState :: TNFA.StateId,
     tdfaMinLengths :: Map StateId Int
   }
   deriving (Show, Ord, Eq)
 
-type Prio = TNFA.StateId
+type Generation = Int
+type Prio = (TNFA.StateId, Generation)
 type Prec = [Prio]
 -- Output or intermediate data of epsilon closure calculation
-type Closure = [(Prio, Map TagId RegId, History, History)]
+data Config = Config {
+  configState :: TNFA.StateId,
+  configGeneration :: Int,
+  configTagMap :: Map TagId RegId,
+  -- TODO Reasonable names for these two.
+  configHistory1 :: History,
+  configHistory2 :: History } deriving (Show,Ord,Eq)
+type Closure = [Config]
 type StateClosure = [(Prio, Map TagId RegId, History)]
 
-type TDFAState = (StateClosure, Prec)
+data TDFAState = TDFAState {
+    tdfaStatePassedFinal :: Bool,
+    tdfaStateClosure :: StateClosure,
+    tdfaStatePrec :: Prec
+  } deriving (Show, Ord, Eq)
 type MapStateKey = (Prec, Set (Prio, History))
 
 -- State for determinization process
@@ -84,8 +97,11 @@ data DetState = DetState {
   stateMap :: Map StateId TDFAState,
   revStateMap :: Map TDFAState StateId,
   mappableStateMap :: Map MapStateKey (Set StateId),
-  transitions :: [(StateId, (Char, (StateId, RegOps)))],
+  -- Use Map for these three... And defaultTransitions can be added directly
+  -- in transitions, I think.
+  transitions :: [(StateId, (Char, TDFATrans))],
   eolTransitions :: [(StateId, RegOps)],
+  defaultTransitions :: [(StateId, TDFATrans)],
   tagRHSMap :: Map (TagId,RegRHS) RegId,
   nextState :: Int,
   nextReg :: Int
@@ -101,6 +117,7 @@ initState tnfa = DetState {
     mappableStateMap = M.empty,
     transitions = [],
     eolTransitions = [],
+    defaultTransitions = [],
     tagRHSMap = M.empty,
     nextState = 0,
     nextReg = succ (S.size tags) }
@@ -115,7 +132,7 @@ newStateId = gets (S . nextState) <*
 newState :: TDFAState -> GenTDFA StateId
 newState state = newStateId >>= \s -> setState s state >> return s
 
-setState :: StateId -> (StateClosure, Prec) -> GenTDFA ()
+setState :: StateId -> TDFAState -> GenTDFA ()
 setState k v =
     modify (\s@DetState{..} -> s {
         stateMap = M.insert k v stateMap,
@@ -123,8 +140,8 @@ setState k v =
         mappableStateMap = M.insertWith S.union (stateMapKey v) (S.singleton k) mappableStateMap })
 
 stateMapKey :: TDFAState -> MapStateKey
-stateMapKey (s,p) = (p, S.fromList (map fst substates))
-  where substates = map (\(q,r,h) -> ((q,h),r)) s
+stateMapKey TDFAState{..} = (tdfaStatePrec, S.fromList (map fst substates))
+  where substates = map (\(q,r,h) -> ((q,h),r)) tdfaStateClosure
 
 getState :: StateId -> GenTDFA TDFAState
 getState k = gets (fromJust . M.lookup k . stateMap)
@@ -149,6 +166,10 @@ emitEOLTransition :: StateId -> RegOps -> GenTDFA ()
 emitEOLTransition q o = do
     modify (\state@DetState{..} -> state{ eolTransitions = (q, o) : eolTransitions })
 
+emitDefaultTransition :: StateId -> StateId -> RegOps -> GenTDFA ()
+emitDefaultTransition q p o = do
+    modify (\state@DetState{..} -> state{ defaultTransitions = (q, (p, o)) : defaultTransitions })
+
 type History = Map TagId RegVal
 
 emptyHistory = M.empty
@@ -167,20 +188,30 @@ appendHistory h (Tag t) = M.insert t Pos h
 appendHistory h (UnTag t) = M.insert t Nil h
 appendHistory h NoTag = h
 
+configPrio :: Config -> Prio
+configPrio Config{..} = (configState, configGeneration)
+
 precedence :: Closure -> Prec
-precedence = map (\(q,_,_,_) -> q)
+precedence = map configPrio
+
+closureStates :: Closure -> [TNFA.StateId]
+closureStates = map configState
 
 stateClosure :: Closure -> StateClosure
-stateClosure = map (\(q,r,_,l) -> (q,r,l))
+stateClosure = map (\c -> (configPrio c, configTagMap c, configHistory2 c))
 
-stateRegMap :: TDFAState -> Map TNFA.StateId (Map TagId RegId)
-stateRegMap = M.fromList . map (\(q,r,_) -> (q,r)) . fst
+stateRegMap :: TDFAState -> Map Prio (Map TagId RegId)
+stateRegMap = M.fromList . map (\(q,r,_) -> (q,r)) . tdfaStateClosure
 stateStateIds :: TDFAState -> Set TNFA.StateId
-stateStateIds (c, _) = tnfaStatesInClosure c
-tnfaStatesInClosure = S.fromList . map (\(q,_,_) -> q)
+stateStateIds = tnfaStatesInClosure . tdfaStateClosure
+tnfaStatesInClosure = S.fromList . map (\((q,_),_,_) -> q)
 
-tdfaState :: Closure -> TDFAState
-tdfaState clos = (stateClosure clos, precedence clos)
+tdfaState :: TNFA -> Bool -> Closure -> TDFAState
+tdfaState TNFA{..} passedFinal clos = TDFAState {
+    tdfaStatePassedFinal = passedFinal || tnfaFinalState `elem` map fst prec,
+    tdfaStateClosure = stateClosure clos,
+    tdfaStatePrec = prec }
+    where prec = precedence clos
 
 regop_rhs :: History -> TagId -> RegRHS
 regop_rhs h t = SetReg (fromJust (history h t))
@@ -231,7 +262,7 @@ bijectionRemove x (fwd, rev)
 -- from 'u' to 't'. 'u' has the same tag/register mappings as before, 's' will
 -- not exist and 't' is not modified.
 mapState :: Set TagId -> RegOps -> TDFAState -> TDFAState -> Maybe RegOps
-mapState allTags ops (s,_) (t,_) = do
+mapState allTags ops (TDFAState _ s _) (TDFAState _ t _) = do
         -- trace ("mappable?\n   " ++ show (s,p) ++ "\n<> " ++ show (t,q)
         --        ++ " | " ++ show ops) $ return ()
         subMappings <- mappedRegs
@@ -252,12 +283,13 @@ mapState allTags ops (s,_) (t,_) = do
     -- i.e. unmodified (here) - tags that are overwritten here can simply be
     -- put in different registers without copying some old value first.
     unsetTags (_, hs) = S.toList (allTags S.\\ M.keysSet hs)
-    mapTags ts xs ys = makeBijection =<< (forM ts $ \t -> do
+    forMaybe ts f = mapMaybe f ts
+    mapTags ts xs ys = makeBijection (forMaybe ts $ \t -> do
       -- All tags must have registers for this to work, even if the registers
       -- are never set before. This is ensured in the initial DetState.
-      let Just x = M.lookup t xs
-      let Just y = M.lookup t ys
-      return (x, y))
+      x <- M.lookup t xs
+      y <- M.lookup t ys
+      Just (x, y))
 
     -- Copies: any tags that aren't overwritten this time need to be copied
     -- from whatever register they used to live in, to the registers the
@@ -298,8 +330,8 @@ findMapState new ops = do
 -- 1. Find exact match and return existing state id
 -- 2. Look through all states to find mappable state
 -- 3. Create new state
-addState :: Closure -> RegOps -> GenTDFA (StateId, RegOps)
-addState closure ops = do
+addState :: TDFAState -> RegOps -> GenTDFA (StateId, RegOps)
+addState state ops = do
   prev <- findState state
   case prev of
     Just p -> return (p, ops)
@@ -308,8 +340,6 @@ addState closure ops = do
       case mapped of
         Just (p, ops') -> return (p, ops')
         Nothing -> addNewState state ops
-  where
-    state = tdfaState closure
 
 -- Mainly to prevent runaway
 -- gnused madding.sed has 5446 states.
@@ -329,24 +359,52 @@ symbolTrans BOL = False
 symbolTrans EOL = True
 symbolTrans _ = True
 
-epsilonClosure :: Bool -> TNFA -> Closure -> Closure
-epsilonClosure bol TNFA{..} = possibleStates . go S.empty []
+epsilonClosure :: Bool -> Bool -> TNFA -> Closure -> Closure
+epsilonClosure reinit bol tnfa@TNFA{..} =
+  finalGeneration . possibleStates . go S.empty [] . addInitState tnfa reinit
   where
     go :: Set TNFA.StateId -> Closure -> Closure -> Closure
     go _     c []               = reverse c
-    go added c (s@(q,r,h,l):xs) = go (S.insert q added) (s:c) (ys ++ xs)
+    go added c (s@(Config q _ _ _ _):xs) = go (S.insert q added) (s:c) (ys ++ xs)
       where
         epst = sort [(prio,t,p) | (Eps prio t,p) <- transFrom q]
-        ys = [ (p,r,h,appendHistory l t) | (_,t,p) <- epst,
-                                           not (S.member p added) ]
-             ++ [ (p,r,h,l) | p <- anchors, not (S.member p added) ]
+        ys = [ s { configState = p,
+                   configHistory2 = appendHistory (configHistory2 s) t }
+               | (_,t,p) <- epst, not (S.member p added) ]
+             ++ [ s { configState = p } | p <- anchors, not (S.member p added) ]
         eol = False -- Should this really be handled here?
         anchors = [p | eol, (EOL,p) <- transFrom q] ++
                   [p | bol, (BOL,p) <- transFrom q]
 
-    possibleStates = filter (\(q,_,_,_) -> q `S.member` tnfaClosedStates)
+    possibleStates = filter (\c -> configState c `S.member` tnfaClosedStates)
     transFrom s = M.findWithDefault [] s tnfaTrans
 
+    -- If we reach a final state, remove all states with a higher generation
+    -- from the closure. We keep lower generation states for potential longer
+    -- matches starting earlier, and same generation states for finding a
+    -- potential longer match starting at the same place.
+    finalGeneration c | Just g <- minFinalGeneration c = filter ((<= g) . configGeneration) c
+                      | otherwise = c
+    minFinalGeneration = maybeMinimum . map configGeneration . filter ((== tnfaFinalState) . configState)
+    maybeMinimum [] = Nothing
+    maybeMinimum xs = Just (minimum xs)
+
+addInitState :: TNFA -> Bool -> Closure -> Closure
+addInitState _    False c = c
+addInitState TNFA{..} _ c
+    | tnfaFinalState `elem` closureStates c = c
+    | tnfaStartState `elem` closureStates c = c
+    | otherwise = c' ++ [Config tnfaStartState (maxGeneration c' + 1) M.empty emptyHistory emptyHistory]
+  where c' = canonGenerations c
+
+-- Compact the range of generation numbers while keeping their ordering. This
+-- should help with making equivalent states equal more often.
+canonGenerations xs = ys
+  where usedGens = S.toList (S.fromList (map configGeneration xs))
+        newGens = M.fromList (zip usedGens [0..])
+        ys = [c { configGeneration = g } | c <- xs, let Just g = M.lookup (configGeneration c) newGens]
+
+maxGeneration xs = maximum (-1 : map configGeneration xs)
 
 forEachTag :: (TagId -> GenTDFA a) -> GenTDFA [a]
 forEachTag f = do
@@ -359,15 +417,12 @@ newRegForEachTag = M.fromList <$> forEachTag (\t -> (t,) <$> newReg)
 generateInitialState :: TNFA.StateId -> GenTDFA Closure
 generateInitialState q0 = do
   regs <- newRegForEachTag
-  return [(q0, regs, emptyHistory, emptyHistory)]
+  return [Config q0 0 regs emptyHistory emptyHistory]
 
-concatMapM :: Monad m => (a -> m [b]) -> [a] -> m [b]
-concatMapM f xs = concat <$> mapM f xs
-
-visitStates :: TNFA -> [StateId] -> GenTDFA ()
-visitStates _    [] = return ()
-visitStates tnfa ss = do
-  newStates <- concatMapM (visitState tnfa) ss
+visitStates :: TNFA -> Set StateId -> GenTDFA ()
+visitStates tnfa ss | S.null ss = return ()
+                    | otherwise = do
+  newStates <- S.unions <$> mapM (visitState tnfa) (S.toList ss)
   visitStates tnfa newStates
 
 nextSymbols :: TNFA -> [TNFA.StateId] -> [Char]
@@ -379,9 +434,11 @@ collectSymbols ts = S.toList . S.unions $ map chars ts
   where
     allChars = S.fromList ['\0'..'\255']
     chars :: TNFATrans -> Set Char
-    chars Any = allChars
+    -- Handled by stepOnAny instead.
+    chars Any = S.empty
     chars (Symbol c) = S.singleton c
     chars (CClass cs) = S.fromList cs
+    -- TODO Could be more efficiently handled in stepOnAny?
     chars (CNotClass cs) = allChars S.\\ S.fromList cs
     chars EOL = S.empty
     chars BOL = S.empty
@@ -389,14 +446,14 @@ collectSymbols ts = S.toList . S.unions $ map chars ts
 
 transitionRegRHSes :: Closure -> [(TagId, RegRHS)]
 transitionRegRHSes = S.toList . S.fromList . concatMap stateRegOps
-  where stateRegOps (_,_,h,_) =
+  where stateRegOps Config { configHistory1 = h } =
           map (\t -> (t, regop_rhs h t)) (tagsInHistory h)
 
 updateTagMap :: Closure -> GenTDFA Closure
-updateTagMap = mapM $ \(q,r,h,l) -> do
+updateTagMap = mapM $ \c@(Config _ _ r h _) -> do
     let o = map (\t -> (t, regop_rhs h t)) (tagsInHistory h)
     r' <- forM o $ \(t,rhs) -> gets ((t,) <$> fromJust . M.lookup (t,rhs) . tagRHSMap)
-    return (q,M.union (M.fromList r') r,h,l)
+    return (c { configTagMap = M.union (M.fromList r') r })
 
 assignReg :: (TagId, RegRHS) -> GenTDFA RegOp
 assignReg (tag, rhs) = do
@@ -408,45 +465,60 @@ assignReg (tag, rhs) = do
       addTagRHS tag rhs r
       return (r, rhs)
 
-addStateForReach :: TNFA -> Closure -> GenTDFA (Closure, RegOps)
-addStateForReach tnfa b = do
-    let c = epsilonClosure False tnfa b
+addStateForReach :: Bool -> TNFA -> Closure -> GenTDFA (Closure, RegOps)
+addStateForReach reinit tnfa b = do
+    let c = epsilonClosure reinit False tnfa b
     let rhses = transitionRegRHSes c
     o <- mapM assignReg rhses
     c' <- updateTagMap c
     return (c', o)
 
-visitState :: TNFA -> StateId -> GenTDFA [StateId]
+visitState :: TNFA -> StateId -> GenTDFA (Set StateId)
 visitState tnfa s = do
-    -- trace ("visitState " ++ show s) $ return ()
-    (clos, prec) <- getState s
+    TDFAState passedFinal clos prec <- getState s
+    let reinit = not passedFinal
+    -- traceM ("visitState " ++ show s ++ ": " ++ show prec ++ " reinit=" ++ show reinit)
+    let as = nextSymbols tnfa [q | ((q,_),_,_) <- clos]
     prevStates <- gets (M.keysSet . stateMap)
-    let as = nextSymbols tnfa [q | (q,_,_) <- clos]
-    ss <- forM as $ \a -> do
-        (c', o) <- addStateForReach tnfa (stepOnSymbol tnfa prec a clos)
-        (s', o) <- addState c' o
+    ss <- (S.fromList <$>) . forM as $ \a -> do
+        (c', o) <- addStateForReach reinit tnfa (stepOnSymbol tnfa prec a clos)
+        (s', o) <- addState (tdfaState tnfa passedFinal c') o
         -- trace (show s ++ "[" ++ show a ++ "] -> " ++ show s' ++ ": "  ++
-        --        show c' ++ " | " ++ show o) $ return ()
+        --        show (precedence c') ++ " | " ++ show o) $ return ()
         emitTransition s a s' o
         return s'
+
+    -- traceM (show s ++ " -> " ++ show (S.toList ss))
+
+    let anyReach = stepOnAny tnfa prec clos
+    ds <- if not reinit && null anyReach then return S.empty else do
+        (c', o) <- addStateForReach reinit tnfa anyReach
+        (s', o) <- addState (tdfaState tnfa passedFinal c') o
+        -- traceM (show s ++ "[Any] -> " ++ show s' ++ ": "  ++
+        --         show (precedence c') ++ " | " ++ show o)
+        emitDefaultTransition s s' o
+        return (S.singleton s')
+
+    -- traceM (show s ++ " -> " ++ show (S.toList ds))
 
     -- Annoyingly complicated and duplicatey. stepOnSymbol only looks for
     -- character transitions, and treating EOL as a character is ugly?
     do
-        (c', o) <- addStateForReach tnfa (stepOnEOL tnfa prec clos)
+        (c', o) <- addStateForReach reinit tnfa (stepOnEOL tnfa prec clos)
         when (containsFinalState tnfa c') $ do
-            -- trace (show s ++ "[EOL] -> " ++ show c' ++ " | " ++ show o) $ return ()
+            -- traceM (show s ++ "[EOL] -> " ++ show (precedence c') ++ " | " ++ show o)
             let fin = tnfaFinalState tnfa
-            let Just (_,r,_,l) = find (\(q,_,_,_) -> q == fin) c'
-            fo <- finalRegOps' r l
+            let Just c = find (\c -> configState c == fin) c'
+            -- Magic 'seq' fixes bug(?) in Data.Map(?)
+            fo <- c `seq` finalRegOps' (configTagMap c) (configHistory2 c)
             emitEOLTransition s (o ++ fo)
 
     clearTagRHSMap
 
     -- Deduplicate and remove any reused existing states
-    return (S.toList (S.fromList ss S.\\ prevStates))
+    return (S.union ss ds S.\\ prevStates)
 
-containsFinalState TNFA{..} = or . map (\(q,_,_,_) -> q == tnfaFinalState)
+containsFinalState TNFA{..} = any (\c -> configState c == tnfaFinalState)
 
 sortByPrec :: Prec -> StateClosure -> StateClosure
 sortByPrec prec = sortOn (\(x,_,_) -> x `elemIndex` prec)
@@ -455,22 +527,31 @@ stepOnSymbol :: TNFA -> Prec -> Char -> StateClosure -> Closure
 stepOnSymbol TNFA{..} prec c clos = go (sortByPrec prec clos)
   where
     go [] = []
-    go ((q,r,l):xs) = [(p,r,l,emptyHistory) | (_,p) <- transitions q] ++ go xs
+    go (((q,g),r,l):xs) = [Config p g r l emptyHistory | (_,p) <- transitions q] ++ go xs
     transitions q = filter isTransition (M.findWithDefault [] q tnfaTrans)
     isTransition (t, _) = matchTerm t c
+
+stepOnAny :: TNFA -> Prec -> StateClosure -> Closure
+stepOnAny TNFA{..} prec clos = go (sortByPrec prec clos)
+  where
+    go [] = []
+    go (((q,g),r,l):xs) = [Config p g r l emptyHistory | (_,p) <- transitions q] ++ go xs
+    transitions q = filter isTransition (M.findWithDefault [] q tnfaTrans)
+    isTransition (Any, _) = True
+    isTransition _ = False
 
 stepOnEOL :: TNFA -> Prec -> StateClosure -> Closure
 stepOnEOL TNFA{..} prec clos = go (sortByPrec prec clos)
   where
     go [] = []
-    go ((q,r,l):xs) = [(p,r,l,emptyHistory) | (_,p) <- transitions q] ++ go xs
+    go (((q,g),r,l):xs) = [Config p g r l emptyHistory | (_,p) <- transitions q] ++ go xs
     transitions q = filter isTransition (M.findWithDefault [] q tnfaTrans)
     isTransition (EOL, _) = True
     isTransition _ = False
 
 finalRegOps tnfa s = do
-  (state,_) <- getState s
-  let Just (_,r,l) = find (\(q,_,_) -> q == tnfaFinalState tnfa) state
+  TDFAState { tdfaStateClosure = state } <- getState s
+  let Just (_,r,l) = find (\((q,_),_,_) -> q == tnfaFinalState tnfa) state
   o <- finalRegOps' r l
   return (s, o)
 
@@ -531,21 +612,21 @@ fallbackStates finalStates s = defaultable
 -- redundant register operations on outgoing edges from final states. Which
 -- can be significant if there are many possibly-final states to pass through
 -- before reaching the last one.
-fallbackRegOps :: RegOps -> Map StateId (Set RegId) -> StateId -> GenTDFA ((StateId, RegOps), Map (StateId, StateId) RegOps)
-fallbackRegOps finRegOps clobbered s = do
-  let clobberedRegs = M.findWithDefault S.empty s clobbered
-  -- TODO Looks like it doesn't need to be in the monad
-  fallBackups <- forM finRegOps $ \(i,o) -> do
-    case o of
-      CopyReg j | j `S.member` clobberedRegs -> return (Right (i, o))
-      _ -> return (Left (i, o))
-  let (fallback, backup) = partitionEithers (fallBackups)
-  ts <- gets transitions
-  let additionalOps
+fallbackRegOps :: Map StateId RegOps -> Map StateId (Set RegId) -> Map StateId TDFATransTable -> StateId -> ((StateId, RegOps), Map (StateId, StateId) RegOps)
+fallbackRegOps finRegOpsMap clobbered ts s = ((s, fallback), M.fromList additionalOps)
+  where
+    clobberedRegs = M.findWithDefault S.empty s clobbered
+    finRegOps = M.findWithDefault [] s finRegOpsMap
+    fallBackups = flip map finRegOps $ \(i,o) ->
+      case o of
+        CopyReg j | j `S.member` clobberedRegs -> (Right (i, o))
+        _ -> (Left (i, o))
+    (fallback, backup) = partitionEithers fallBackups
+    additionalOps
        | null backup = []
-       | otherwise = [((s, s'), backup) | (q,(_,(s',_))) <- ts,
-                                          q == s, M.member s' clobbered]
-  return ((s, fallback), M.fromList additionalOps)
+       | otherwise = [((s, s'), backup)
+                      | (s',_) <- CM.elems $ M.findWithDefault CM.empty s ts,
+                        M.member s' clobbered]
 
 insertRegOps :: Map (StateId, StateId) RegOps -> [(StateId, (Char, (StateId, RegOps)))] -> [(StateId, (Char, (StateId, RegOps)))]
 insertRegOps m = map $ \(s, (c, (s', o))) -> (s, (c, (s', added s s' ++ o)))
@@ -554,20 +635,19 @@ insertRegOps m = map $ \(s, (c, (s', o))) -> (s, (c, (s', added s s' ++ o)))
 
 determinize :: TNFA -> GenTDFA TDFA
 determinize tnfa@TNFA{..} = do
-  state0 <- generateInitialState tnfaStartState
-  (s0, _) <- addState (epsilonClosure True tnfa state0) []
-  -- TODO Check if the BOL=False state can accept anything, if not we should
-  -- short circuit this to "fail".
-  -- And/or we should have this on a higher level and e.g. skip generating the
-  -- code for further matches if the regexp is anchored anyway.
-  (s1, _) <- addState (epsilonClosure False tnfa state0) []
-  -- s0 and s1 could be the same if there are no edges on BOL
-  visitStates tnfa (nub [s0, s1])
+  clos0 <- generateInitialState tnfaStartState
+  let state0 = tdfaState tnfa False (epsilonClosure False True tnfa clos0)
+  let state1 = tdfaState tnfa False (epsilonClosure False False tnfa clos0)
+  (s0, _) <- addState state0 []
+  (s1, _) <- addState state1 []
+  visitStates tnfa (S.fromList [s0, s1])
 
   ts <- gets transitions
   ets <- gets eolTransitions
+  dts <- gets (M.map CM.const . M.fromList . defaultTransitions)
   tagRegMap <- gets (M.map stateRegMap . stateMap)
   stateIdMap <- gets (M.map stateStateIds . stateMap)
+  statePrecMap <- gets (M.map tdfaStatePrec . stateMap)
   let hasFinalState (s,m) | S.member tnfaFinalState m = Just s
                           | otherwise                 = Nothing
       finalStates = mapMaybe hasFinalState (M.toList stateIdMap)
@@ -575,28 +655,31 @@ determinize tnfa@TNFA{..} = do
   finRegOps <- M.fromList <$> forM finalStates (finalRegOps tnfa)
   finRegs <- gets finalRegisters
   defaultableStates <- gets (fallbackStates finalStateSet)
-  let fallbackStates = M.restrictKeys defaultableStates finalStateSet
-  (fb, backups) <- unzip <$> (forM (M.keys fallbackStates) $ \s ->
-    fallbackRegOps (M.findWithDefault [] s finRegOps) defaultableStates s)
-  let mergedBackups = foldr (M.unionWith (<>)) M.empty backups
-  let ts' = insertRegOps mergedBackups ts
-  -- trace ("fallbacks: " ++ show fb) (pure ())
-  -- trace ("all backup operations: " ++ show mergedBackups) (pure ())
+  let !fallbackStates = M.restrictKeys defaultableStates finalStateSet
+  let !trans = M.unionWith CM.union (M.map CM.fromList (multiMapFromList ts)) dts
+  let (fb, backups) = unzip $ map (fallbackRegOps finRegOps defaultableStates trans) (M.keys fallbackStates)
+  let !mergedBackups = M.unionsWith (<>) backups
+  -- TODO let this produce trans' from trans instead. default transitions
+  -- should be included.
+  let !ts' = insertRegOps mergedBackups ts
+  let !trans' = M.map CM.fromList (multiMapFromList ts')
+  let !trans'' = M.unionWith CM.union trans' dts
   let tdfa = TDFA {
     tdfaStartState = s0,
     tdfaStartStateNotBOL = s1,
     tdfaFinalRegisters = finRegs,
     tdfaFinalFunction = finRegOps,
     tdfaFallbackFunction = M.fromList fb,
-    tdfaTrans = M.map CM.fromList (multiMapFromList ts'),
+    tdfaTrans = trans'',
     tdfaEOL = M.fromList ets,
     tdfaFixedTags = tnfaTagMap,
     -- Debugging stuff:
     tdfaTagRegMap = tagRegMap,
-    tdfaStateMap = stateIdMap,
+    tdfaStateMap = statePrecMap,
     tdfaOriginalFinalState = tnfaFinalState,
     tdfaMinLengths = minLengths tdfa
-    } in return tdfa
+    }
+  return tdfa
 
 multiMapFromList :: Ord a => [(a,b)] -> Map a [b]
 multiMapFromList ts = foldr prepend M.empty ts
@@ -671,8 +754,9 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
     showPrefix prefix xs = concat [ prefix ++ show x | x <- xs ]
     prefix p xs = concat [p ++ x | x <- xs ]
 
-    showStateIds s = intercalate ", " . map showStateId . S.toList . fromJust $ M.lookup s tdfaStateMap
+    showStateIds s = intercalate ", " . map showPrio . fromJust $ M.lookup s tdfaStateMap
       where 
+        showPrio (s,g) = showStateId s ++ "_" ++ show g
         showStateId s | s == tdfaOriginalFinalState = "[" ++ show s ++ "]"
                       | otherwise               = show s
 

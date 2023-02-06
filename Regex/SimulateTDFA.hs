@@ -19,22 +19,17 @@ import Regex.SimulateTNFA (testTNFASimulation, testTNFASimulationFind)
 import Regex.TDFA hiding (initState)
 
 regexFind :: String -> String -> Maybe TagMap
-regexFind = runTDFA True . genTDFA . genTNFA . testTagRegex
-
-regexMatch :: String -> String -> Maybe TagMap
-regexMatch = runTDFA False . genTDFA . genTNFA . testTagRegex
+regexFind = runTDFA . genTDFA . genTNFA . testTagRegex
 
 type RegMap = Map RegId Int
 
 data RunState = RunState {
     sFallback :: Maybe (Int, StateId),
     sPos :: Int,
-    sRegs :: RegMap,
-    sRetryPos :: Int,
-    sRetryString :: String
+    sRegs :: RegMap
   } deriving (Show, Ord, Eq)
 
-initState p s = RunState { sFallback = Nothing, sPos = p, sRegs = M.empty, sRetryPos = p, sRetryString = s }
+initState p s = RunState { sFallback = Nothing, sPos = p, sRegs = M.empty }
 
 getPos = gets sPos
 incPos = modify $ \s@RunState{..} -> s { sPos = succ sPos }
@@ -47,8 +42,8 @@ setFallback fs = modify $ \s@RunState{..} ->
 
 type RunTDFA a = State RunState a
 
-runTDFA :: Bool -> TDFA -> String -> Maybe TagMap
-runTDFA search TDFA{..} xs =
+runTDFA :: TDFA -> String -> Maybe TagMap
+runTDFA tdfa@TDFA{..} xs =
   evalState (go' tdfaStartState xs) (initState 0 xs)
   where
     go :: StateId -> String -> RunTDFA (Maybe TagMap)
@@ -64,15 +59,6 @@ runTDFA search TDFA{..} xs =
       regs <- getRegs
       when debug (trace (unwords ["go", show pos, show xs, show s, show (M.toList regs)]) (return ()))
       go s xs
-
-    retry = do
-      pos <- gets sRetryPos
-      str <- gets sRetryString
-      if null str
-        then return Nothing
-        else do
-          put (initState (succ pos) (tail str))
-          go' tdfaStartState (tail str)
 
     next :: StateId -> Char -> Maybe (StateId, RegOps)
     next s x = CM.lookup x (M.findWithDefault CM.empty s tdfaTrans)
@@ -90,7 +76,6 @@ runTDFA search TDFA{..} xs =
         _ | M.member s tdfaFinalFunction -> trace ("at final state " ++ show s ++ ", pos=" ++ show pos) outTags s tdfaFinalFunction
         _ | eol && M.member s tdfaEOL    -> trace "at EOL-only final state" outTags s tdfaEOL
         Just (pos, fs) -> trace ("falling back to " ++ show fs ++ " @" ++ show pos) (setPos pos) >> outTags fs (tdfaFallbackFunction `M.union` tdfaFinalFunction)
-        _ | search -> trace "no match, retry" retry
         _ | eol -> trace "non-accepting state at end" (return Nothing)
         _ -> trace "non-accepting state in middle" (return Nothing)
 

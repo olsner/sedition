@@ -58,9 +58,6 @@ data TNFA = TNFA {
     tnfaStartState :: StateId,
     tnfaFinalState :: StateId,
     tnfaTrans :: Map StateId [(TNFATrans, StateId)],
-    -- TODO This is just attached after construction. We want to bundle it for
-    -- following steps, but maybe that means the construction should stop using
-    -- the same data type?
     tnfaTagMap :: FixedTagMap,
     -- States that are allowed to remain after epsilon closure, i.e. that have
     -- any outgoing non-epsilon transitions or are the final state.
