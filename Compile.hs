@@ -213,7 +213,9 @@ resolveStringIndex s ix = case ix of
 
 testCompare = False
 
-needRegcomp (s, ere) =
+forceRegcomp = False
+
+needRegcomp (s, ere) = forceRegcomp ||
     testCompare || not (TDFA2C.isCompatible (Regex.parseString ere s))
 
 compileRE (r, (s, ere)) = wrapper body
@@ -222,14 +224,14 @@ compileRE (r, (s, ere)) = wrapper body
          | testCompare = match_for_compare <> tdfa2c r re <> compare_matches
          | otherwise   = tdfa2c r re
     re = Regex.parseString ere s
-    needRegexec = not (TDFA2C.isCompatible re)
+    needRegexec = forceRegcomp || not (TDFA2C.isCompatible re)
     res = C.pack $ Regex.reString re
     wrapper b = "static void " <> regexfun r <> "(match_t* m, string* s, const size_t orig_offset) {\n" <> comment description <> b <> "}\n"
     match m = sfun "match_regexp" [m, "s", "orig_offset", regex r, regexfun r]
     -- regcomp is run at start of main so we just need to forward the arguments.
     regexec = match "m"
     match_for_compare = stmt "match_t m2" <> match "&m2"
-    compare_matches = sfun "compare_regexp_matches" ["&m2", "m", "s", "orig_offset", "__PRETTY_FUNCTION__", cstring s]
+    compare_matches = sfun "compare_regexp_matches" ["&m2", "m", "s", "orig_offset", "__PRETTY_FUNCTION__", cstring res]
 
     description =
         (if ere then "ERE: "  else "BRE: ") <> cstring s <>

@@ -287,10 +287,10 @@ static void compare_regexp_matches(match_t* ref, match_t* m, string* s, size_t o
         }
     }
     if (diff) {
-        fprintf(stderr, "%s: diff on input \"%.*s\"\n",
+        fprintf(stderr, "%s: diff for regexp \"%s\"\n", function, original_re);
+        fprintf(stderr, "%s: on input \"%.*s\"\n",
                 function,
                 (int)(s->len - offset), s->buf + offset);
-        fprintf(stderr, "%s: for regexp \"%s\"\n", function, original_re);
     }
     assert(!diff);
 }
