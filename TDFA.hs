@@ -617,7 +617,7 @@ prettyStates :: TDFA -> String
 prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
   where
     ss = tdfaStates tdfa
-    showState s = statePrefix s <> showState' s <> showTrans s <> showTagMap s <> showEOLRegOps s <> showFinalRegOps s <> showFallbackRegOps s
+    showState s = statePrefix s <> showState' s <> showTrans s <> showTagMap s <> showEOLRegOps s <> showFinalRegOps s <> showFallbackRegOps s <> showMinLength s
     statePrefix s = concat
         [ if s == tdfaStartState then "START " else ""
         , if s == tdfaStartStateNotBOL then "MID " else ""
@@ -684,13 +684,17 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
     showEOLRegOps s | Just o <- M.lookup s tdfaEOL = eolRegOps o
                     | otherwise = ""
 
+    tdfaMinLengths = minLengths tdfa
+    showMinLength s | Just dist <- M.lookup s tdfaMinLengths = "  Min length: " ++ show dist ++ "\n"
+                    | otherwise = "  [failed state]\n"
+
 -- Minimum length to an accepting state. If there aren't this many characters
 -- left in the string it cannot match from here.
 -- TODO This makes it easy to fast-out if the string is short, but we'd also
 -- like to use it to avoid unnecessary range checks. Evaluate :)
 -- TODO Put in TDFA struct and calculate in construction if really useful.
 minLengths :: TDFA -> Map StateId Int
-minLengths tdfa@TDFA{..} = go ss (M.map (const 0) tdfaFinalFunction) True
+minLengths tdfa@TDFA{..} = go ss (M.map (const 0) (tdfaFinalFunction `M.union` tdfaEOL `M.union` tdfaFallbackFunction)) True
   where
     -- Iterate until there are no new states added. Any remaining unadded
     -- states are failed states. (We should have something for that as well...

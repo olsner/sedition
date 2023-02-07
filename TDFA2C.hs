@@ -92,7 +92,7 @@ emitState TDFA{..} minLengths s =
     -- SimulateTDFA does this after incPos for the state we're going to, so
     -- do it first thing in the state block. Should be the same, I hope :)
     maybeSetFallback <>
-    earlyOut <>
+    checkMinLength <>
     cWhen "YYEOF" (goto eolLabel) <>
     sfun "YYSTATS" ["visited_chars", "1"] <>
     stmt "YYCHAR = YYGET()" <>
@@ -135,10 +135,9 @@ emitState TDFA{..} minLengths s =
 
     -- Very arbitrarily chosen minimum length where we assume an extra range
     -- check outweighs the work of useless matching.
-    earlyOut | Just min <- M.lookup s minLengths, min > 3 =
-        cWhen ("YYLIMIT - YYCURSOR < " <> intDec min) $
-           sfun "YYSTATS" ["early_out", "1"] <> goto "fail"
-             | otherwise = mempty
+    checkMinLength | Just min <- M.lookup s minLengths, min > 3 =
+        cWhen ("YYLIMIT - YYCURSOR < " <> intDec min) (earlyOut "fail")
+                   | otherwise = mempty
 
 -- Calling convention for matcher functions:
 -- 
@@ -165,6 +164,7 @@ genC tdfa@TDFA{..} =
     sfun "YYSTATS" ["matched_chars", "s->len - orig_offset"] <>
     "#define YYPOS (YYCURSOR - YYBEGIN)\n" <>
     "#define YYEOF (YYCURSOR >= YYLIMIT)\n" <>
+    "#define YYREMAINING (YYLIMIT - YYCURSOR)\n" <>
     "#define YYGET() (*YYCURSOR)\n" <>
     "#define YYNEXT() (YYCURSOR++)\n" <>
     "for (size_t offset = orig_offset; offset <= s->len; offset++) {\n" <>
@@ -175,6 +175,7 @@ genC tdfa@TDFA{..} =
     stmt ("const char *fallback_cursor = NULL") <>
     foldMap declareTagVar (S.toList allTags) <>
     foldMap declareReg allRegs <>
+    gotoStartNotBOL <>
     gotoStart <>
     blockComment "States" <>
     foldMap (emitState tdfa tdfaMinLengths) (tdfaStates tdfa) <>
@@ -201,10 +202,18 @@ genC tdfa@TDFA{..} =
     allTags = S.union (M.keysSet tdfaFixedTags) (M.keysSet tdfaFinalRegisters)
     allRegs = tdfaRegisters tdfa
     tdfaMinLengths = minLengths tdfa
+    onlyMatchAtBOL = not (M.member tdfaStartStateNotBOL tdfaMinLengths)
+    gotoStartNotBOL
+      | onlyMatchAtBOL = cWhen "offset > 0" (earlyOut "end")
+      | tdfaStartStateNotBOL /= tdfaStartState = cWhen "offset > 0" (gostate tdfaStartStateNotBOL)
+      | otherwise = mempty -- no special BOL state, fall through to normal range check and goto start
     gotoStart
-      | tdfaStartStateNotBOL /= tdfaStartState =
-        cIf "offset > 0" (gostate tdfaStartStateNotBOL) (gostate tdfaStartState)
-      | otherwise = gostate tdfaStartState
+      | Just dist <- M.lookup tdfaStartState tdfaMinLengths =
+        cWhen ("s->len - offset < " <> intDec dist) (earlyOut "end") <>
+        gostate tdfaStartState
+      | otherwise = earlyOut "end"
+
+earlyOut l = sfun "YYSTATS" ["early_out", "1"] <> goto l
 
 tdfa2c :: Regex -> C.ByteString
 tdfa2c = toByteString .
