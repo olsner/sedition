@@ -26,9 +26,8 @@ Optimize out concatenation of empty strings
 
 ## Regex
 
-* Skip retry if the regex is anchored at the start
 * Finish minLength optimization:
-  - Split up state entry point to have one without EOF
+  - Split up state entry point to have one without range check
   - When transitioning to a state with a lower minLength, skip check
   - Precalculate minLength and store in TDFA
 * Strip out failed states
@@ -37,6 +36,10 @@ Optimize out concatenation of empty strings
   3. Remove failed states themselves (unless that happens automatically when
      they are not mentioned and have no transitions?)
 * TDFA minimization - combine equivalent states
+
+### Done
+
+* Skip retry if the regex is anchored at the start
 
 ### Abandoned
 
