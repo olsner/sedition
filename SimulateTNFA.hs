@@ -72,12 +72,6 @@ matchTerm (CNotClass xs) y = not (y `elem` xs)
 matchTerm BOL _ = False
 matchTerm EOL _ = False
 
-symbolTrans :: TNFATrans -> Bool
-symbolTrans (Eps _ _) = False
-symbolTrans BOL = False
-symbolTrans EOL = False
-symbolTrans _ = True
-
 stepOnSymbol :: TNFA -> ConfigMap -> Char -> ConfigMap
 stepOnSymbol tnfa c x = [(p, m) | (s,m) <- c,
                                   (q,a,p) <- tnfaTrans tnfa,
@@ -87,17 +81,14 @@ stepOnSymbol tnfa c x = [(p, m) | (s,m) <- c,
 -- this is because of priority - we visit the highest-priority states first and
 -- keep the first reached copy of each NFA state.
 epsilonClosure :: TNFA -> ConfigMap -> Int -> Bool -> ConfigMap
-epsilonClosure tnfa c k eol = go c S.empty []
+epsilonClosure TNFA{..} c k eol = go c S.empty []
   where
     bol = k == 0
-    fin = tnfaFinalState tnfa
-    ts = tnfaTrans tnfa
     go :: ConfigMap -> Set StateId -> ConfigMap -> ConfigMap
     go [] _ c = possibleStates c
     go ((q,m):xs) added c = go (ys ++ xs) (S.insert q added) (c ++ [(q,m)])
       where
-        ts = tnfaTrans tnfa
-        epsts = sort [(prio,t,p) | (s,Eps prio t,p) <- ts, s == q]
+        epsts = sort [(prio,t,p) | (s,Eps prio t,p) <- tnfaTrans, s == q]
         ys = [ (p,m') | (_,t,p) <- epsts,
                         not (S.member p added),
                         let !m' = updateTag t m ] ++
@@ -105,15 +96,9 @@ epsilonClosure tnfa c k eol = go c S.empty []
         updateTag (Tag t) m = M.insert t k m
         updateTag (UnTag t) m = M.delete t m
         updateTag NoTag m = m
-        anchors = [p | eol, (s,EOL,p) <- ts, s == q] ++
-                  [p | bol, (s,BOL,p) <- ts, s == q]
-    -- TODO Better name for this, and then cache it in TNFA
-    -- Something about "proper" states - any non-matching states are states
-    -- where we should have continued epsilonClosure, effectively leaving those
-    -- states and moving on, so they should not appear or should not be useful
-    -- in the output.
-    possibleStates c = [y | y@(q,_) <- c, q == fin || possibleState q]
-    possibleState q = or [symbolTrans t | (s,t,_) <- ts, s == q]
+        anchors = [p | eol, (s,EOL,p) <- tnfaTrans, s == q] ++
+                  [p | bol, (s,BOL,p) <- tnfaTrans, s == q]
+    possibleStates = filter ((`S.member` tnfaClosedStates) . fst)
 
 finalState :: TNFA -> Int -> ConfigMap -> FinalState
 finalState TNFA{..} k = ((k,) <$> snd <$>) . find (\(q,_) -> q == tnfaFinalState)

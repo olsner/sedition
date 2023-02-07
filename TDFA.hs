@@ -332,10 +332,7 @@ epsilonClosure bol TNFA{..} = possibleStates . go S.empty []
         eol = False -- Should this really be handled here?
         anchors = [p | eol, (s,EOL,p) <- tnfaTrans, s == q] ++
                   [p | bol, (s,BOL,p) <- tnfaTrans, s == q]
-    fin = tnfaFinalState
-    -- TODO Same TODO as in SimulateTNFA
-    possibleStates c = [y | y@(q,_,_,_) <- c, q == fin || possibleState q]
-    possibleState q = or [symbolTrans t | (s,t,_) <- tnfaTrans, s == q]
+    possibleStates = filter (\(q,_,_,_) -> q `S.member` tnfaClosedStates)
 
 
 forEachTag :: (TagId -> GenTDFA a) -> GenTDFA [a]
