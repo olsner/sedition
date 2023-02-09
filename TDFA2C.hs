@@ -9,7 +9,7 @@ import qualified CharMap as CM
 -- import CharMap (CharMap)
 import Data.Map (Map)
 import qualified Data.Map as M
--- import Data.Set (Set)
+import Data.Set (Set)
 import qualified Data.Set as S
 
 -- import Data.List
@@ -26,7 +26,12 @@ import TNFA (genTNFA)
 import TDFA
 
 decstate s = label (show s)
+decstate_nocheck s = label ("nocheck_" ++ show s)
 gostate s = goto (show s)
+gostate_nocheck s = yystats "goto_nocheck" "1" <> goto ("nocheck_" ++ show s)
+
+yystats name inc = sfun "YYSTATS" [name, inc]
+yydebug fmt args = sfun "YYDEBUG" (fmt : args)
 
 fixedTag (t, f) = stmt (showB t <> " = " <> g f)
   where
@@ -49,7 +54,7 @@ matchFromTag t | possibleTag t =
   stmt ("m->matches[" <> matchix t <> "]." <> matchfld t <> " = " <> showB t)
                | otherwise = trace "found an unoptimized tag that can't be used by match" mempty -- skip all impossible tags
 
-debugTag t = stmt ("YYDEBUG(\"match[" <> matchix t <> "]." <> matchfld t <> " = %d\\n\", "  <> showB t <> ")")
+debugTag t = yydebug ("\"match[" <> matchix t <> "]." <> matchfld t <> " = %d\\n\"") [showB t]
 
 setTagFromReg :: (TagId, RegId) -> Builder
 setTagFromReg (t, r) = stmt (showB t <> " = " <>
@@ -68,20 +73,21 @@ emitCase (lb,ub)
 emitRegOp :: RegOp -> Builder
 emitRegOp (r,val) = stmt ("  " <> showB r <> " = " <> g val) <>
     stmt ("YYDEBUG(\"" <> showB r <> " <- " <> showB val <> " == %td\\n\", " <> showB r <> " - YYBEGIN)") <>
-    sfun "YYSTATS" ["regops", intDec 1]
+    yystats "regops" (intDec 1)
   where
     g (SetReg Pos) = "YYCURSOR"
     g (SetReg Nil) = "NULL"
     g (CopyReg r2) = showB r2
 
-emitTrans :: ([(Char,Char)], TDFATrans) -> Builder
-emitTrans (cs, (s', regops)) =
+emitTrans :: Set StateId -> ([(Char,Char)], TDFATrans) -> Builder
+emitTrans nocheckStates (cs, (s', regops)) =
     foldMap emitCase cs <> "{\n" <>
     (if not (null regops) then stmt ("YYDEBUG(\" -> " <> showB s' <> " at %zd\\n\", YYPOS)") else mempty) <>
     foldMap emitRegOp regops <>
     stmt "YYNEXT()" <>
-    "  " <> gostate s' <>
+    "  " <> (if skipCheck then gostate_nocheck s' else gostate s') <>
     "}\n"
+    where skipCheck = S.member s' nocheckStates
 
 emitState :: TDFA -> Map StateId Int -> StateId -> Builder
 emitState TDFA{..} minLengths s =
@@ -94,11 +100,14 @@ emitState TDFA{..} minLengths s =
     maybeSetFallback <>
     checkMinLength <>
     cWhen "YYEOF" (goto eolLabel) <>
-    sfun "YYSTATS" ["visited_chars", "1"] <>
+    -- TODO if fallback is not set, skip the "if (false)" wrapper to produce
+    -- nicer-looking output
+    cWhen "false" (decstate_nocheck s <> maybeSetFallback) <>
+    yystats "visited_chars" "1" <>
     stmt "YYCHAR = YYGET()" <>
     stmt ("YYDEBUG(\"" <> showB s <> ": YYCHAR=%x at %zu\\n\", YYCHAR, YYPOS)") <>
     "switch (YYCHAR) {\n" <>
-    foldMap emitTrans (CM.toRanges trans) <>
+    foldMap (emitTrans nocheckStates) (CM.toRanges trans) <>
     (if not (CM.isComplete trans)
         then (" default:\n" <>
               if isFinalState then finalRegOps else goto "fail")
@@ -133,11 +142,16 @@ emitState TDFA{..} minLengths s =
     maybeSetFallback | isFinalState = setFallback
                      | otherwise    = mempty
 
-    -- Very arbitrarily chosen minimum length where we assume an extra range
-    -- check outweighs the work of useless matching.
-    checkMinLength | Just min <- M.lookup s minLengths, min > 3 =
-        cWhen ("YYLIMIT - YYCURSOR < " <> intDec min) (earlyOut "fail")
+    minLength | Just min <- M.lookup s minLengths, min > 1 = min
+              | otherwise = 0
+
+    checkMinLength | minLength > 1 =
+        cWhen ("YYLIMIT - YYCURSOR < " <> intDec minLength) (earlyOut "fail")
                    | otherwise = mempty
+
+    nocheckStates
+      | minLength > 0 = M.keysSet (M.filter (< minLength) minLengths)
+      | otherwise = S.empty
 
 -- Calling convention for matcher functions:
 -- 

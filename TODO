@@ -1,3 +1,7 @@
+# Cosmetic
+
+- Generate properly indented C code
+
 # Functionality/bugs
 
 - Implement case conversions, \L\l\u\U - at least one is used by synsedizer
@@ -11,24 +15,24 @@
 
 ## "Advanced"
 
-* Track matched regexes until pattern space changes, check for equivalent
-  regexes as well as impossible matches.
-* Combine multiple regexes into a "switch" thing whenever there are multiple
-  branches on matches.
 * Track used groups in matches, feed back to regex compiler
 * Use knowledge of regex to eliminate useless next-match calls
   - anchored at start: can't match again
   - anchored at end: first match will contain the end of the string
+* Track matched regexes until pattern space changes, check for equivalent
+  regexes as well as impossible matches.
+* Combine multiple regexes into a "switch" thing whenever there are multiple
+  branches on matches.
 
-## Operations
+## Operational
 
-Optimize out concatenation of empty strings
+- Optimize out concatenation of empty strings
+- Return bool from match functions, remove `match_t::result`
+- Dead variable stuff for matches (should fall out of used-tag tracking though)
 
 ## Regex
 
 * Finish minLength optimization:
-  - Split up state entry point to have one without range check
-  - When transitioning to a state with a lower minLength, skip check
   - Precalculate minLength and store in TDFA
 * Strip out failed states
   1. Identify failed states using minLength
@@ -40,6 +44,9 @@ Optimize out concatenation of empty strings
 ### Done
 
 * Skip retry if the regex is anchored at the start
+* Parts of minLength optimization:
+  - Split up state entry point to have one without range check
+  - When transitioning to a state with a lower minLength, skip check
 
 ### Abandoned
 
