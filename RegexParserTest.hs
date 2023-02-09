@@ -81,8 +81,9 @@ tests =
 
   -- anchoring
   , (Both, "^$", Concat [AnchorStart, AnchorEnd])
+  -- ERE treats these as special anywhere, BRE only at start/end
   , (ERE, "a^", Concat [Char 'a', AnchorStart])
-  , (Both, "$a", Concat [AnchorEnd, Char 'a'])
+  , (ERE, "$a", Concat [AnchorEnd, Char 'a'])
 
   -- counts
   , (BRE, "a*", star (Char 'a'))
@@ -122,15 +123,22 @@ tests =
   , (Both, "\\S", CNotClass spaces)
 
   -- Some BRE oddities and special cases
-  -- * first is a character, not special
-  , (BRE, "*s", Concat [Char '*', Char 's'])
-  -- BRE doesn't have to treat ^ as an anchor unless it's the first character
-  -- of the regular expression. ERE allows ^ and gives it its special meaning
-  -- wherever it appears (even if that means it will never match).
+  -- * first is a character, not special (not handled yet)
+  --, (BRE, "*s", Concat [Char '*', Char 's'])
+  --, (BRE, "*\\|s", Or [Char '*', Char 's'])
+  --, (BRE, "*\\|^", Or [Char '*', Char '^'])
+
+  -- BRE doesn't have to treat ^ and $ as anchors unless they are at the
+  -- start/end of the regular expression.
+  -- ERE gives ^ and $ their special meanings wherever they appear (even if
+  -- that means they will never match).
   , (BRE, "a^", Concat [Char 'a', Char '^'])
-  -- , (BRE, "*\\|s", Or [Char '*', Char 's'])
-  -- TODO The special behavior for ^ when not first probably also applies to
-  -- $ when not last. GNU sed test newjis.sh seems to depend on $ matching '$'.
+  -- , (BRE, "**", star (Char '*'))
+  , (BRE, "a^*", Concat [Char 'a', star (Char '^')])
+  , (BRE, "$a", Concat [Char '$', Char 'a'])
+  , (BRE, "$\\|a", Or [Char '$', Char 'a'])
+  , (BRE, "$\\{1,3\\}", Repeat 1 (Just 3) (Char '$'))
+  , (BRE, "$*", star (Char '$'))
   ]
 
 -- Test code
@@ -140,7 +148,7 @@ doTest (Both, input, result) = do
     b <- doTest (ERE, input, result)
     return (a && b)
 doTest (dialect, input, result) =
-  case parseOnly (pRegex (dialect == ERE)) input of
+  case parseOnly (dialect == ERE) input of
    Success p | p == result -> return True -- putStrLn ("pass: " ++ input_str ++ " parsed to " ++ show p) >> return True
              | otherwise   -> putStrLn ("fail: " ++ input_str ++ " did not parse to " ++ show result ++ " but " ++ show p) >> return False
    Failure e -> putStrLn ("fail: " ++ input_str ++ " failed to parse:\n" ++ show e) >> return False
@@ -153,7 +161,7 @@ doTests = mapM doTest
 -- can be a bit different from the input (e.g. variations of {n,m} that are
 -- equivalent to *, + or ?).
 doTestString input = do
-  case parseOnly (pRegex True) (C.pack $ reString input) of
+  case parseOnly True (C.pack $ reString input) of
    Success p | p == input -> return True -- putStrLn ("pass: " ++ show input ++ " round-tripped to " ++ show p) >> return True
              | otherwise   -> putStrLn ("fail: " ++ show input ++ " did not roundtrip to itself but " ++ show p) >> return False
    Failure e -> putStrLn ("fail: " ++ show input ++ " failed to roundtrip parse:\n" ++ show e) >> return False

@@ -2,7 +2,6 @@
 
 module Regex (
     parseString, parseOnly,
-    pRegex,
     Regex(..),
     reString,
     tdfa2cCompatible
@@ -18,7 +17,6 @@ import qualified Data.Set as S
 -- 'brackets' and a few similar combinators are "smart" and ignore whitespace
 -- and such. Don't get confused :)
 import Text.Trifecta hiding (parseString, brackets)
-import Text.Trifecta.Delta
 
 data Regex
   = Any
@@ -35,6 +33,14 @@ data Regex
   | Or [Regex]
   | BackRef Int
   deriving (Show,Ord,Eq)
+
+instance Semigroup Regex where
+  Empty     <> y         = y
+  x         <> Empty     = x
+  Concat xs <> Concat ys = Concat (xs ++ ys)
+  Concat xs <> y         = Concat (xs ++ [y])
+  x         <> Concat ys = Concat (x:ys)
+  x         <> y         = Concat [x, y]
 
 -- Assumes that Concat is never used elsewhere (i.e. this is a smart constructor
 -- for Concat), so there can't be nested concatenations to process here.
@@ -70,17 +76,11 @@ int = fromInteger <$> decimal
 escaped p = try (char '\\' *> p)
 escapedChar c = escaped (char c)
 
-pRegex True = pERE
-pRegex False = pBRE
-
-maybePrepend x ys = (++) <$> option [] ((:[]) <$> x) <*> ys
-
--- TODO Misparses * or ^ followed by \|
-pBRE = rconcat <$> maybePrepend breInitialSpecial (many breAlternate)
+pBRE = rconcat <$> many breAlternate
 breAlternate = ror <$> sepBy1 breBranch (escapedChar '|')
 breBranch = rconcat <$> some breSimple
 breSimple = flip id <$> breNondupl <*> option id breDuplSym
-breNondupl = choice [breGroup, backRef, anchorEnd, breOneChar]
+breNondupl = choice [breGroup, backRef, breOneChar]
 
 breOneChar = choice $
   [ breOrdChar
@@ -108,10 +108,7 @@ ereBraces = between (char '{') (char '}')
 breBracedCount = breBraces counts
 ereBracedCount = ereBraces counts
 
--- Special cases for the initial character: ^ first is an anchor (otherwise a
--- literal character), * first is a literal character instead of a *.
-breInitialSpecial = (Char <$> char '*') <|> anchorStart
-breSpecialChars = "$*.[\\"
+breSpecialChars = "*.[\\"
 breQuotedChar :: Parser Regex
 breQuotedChar = Char <$> escaped (oneOf breSpecialChars)
 breOrdChar :: Parser Regex
@@ -214,9 +211,23 @@ hasBackrefs _               = False
 
 tdfa2cCompatible re = not (hasBackrefs re)
 
+-- Special case since special-casing the parsing of $ at the end in BREs is
+-- cumbersome. TODO Only on BREs?
+eatAnchors :: Applicative f => (C.ByteString -> f Regex) -> C.ByteString -> f Regex
+eatAnchors f s = go
+  where
+    go | C.null s = pure Empty
+       | C.head s == '^' = (AnchorStart <>) <$> go2 (C.tail s)
+       | otherwise       = go2 s
+    go2 s | C.null s = pure Empty
+          | C.last s == '$' = (<> AnchorEnd) <$> f (C.init s)
+          | otherwise       = f s
+
 parseString :: Bool -> C.ByteString -> Regex
-parseString ere input = case parseOnly (pRegex ere) input of
+parseString ere input = case parseOnly ere input of
     Success p -> p
     Failure e -> error (show e)
 
-parseOnly p = parseByteString p (Lines 0 0 0 0)
+parseOnly :: Bool -> C.ByteString -> Result Regex
+parseOnly False = eatAnchors (parseByteString pBRE mempty)
+parseOnly True  = parseByteString pERE mempty
