@@ -373,7 +373,6 @@ evalStringExpr (IR.SVarRef svar) = getString svar
 evalStringExpr (IR.SRandomString) = liftIO randomString
 evalStringExpr (IR.STrans from to str) =
     trans from to <$> getString str
--- TODO Should this do something special if 'a' is empty?
 evalStringExpr (IR.SAppendNL a b) = do
     a <- getString a
     b <- getString b

@@ -47,9 +47,8 @@ data StringExpr
   -- from to string
   | STrans S S SVar
   -- TODO Replace with more appends and perhaps a predefined svar that contains
-  -- a newline. Also investigate if it's always adding the newline or only when
-  -- the strings are empty, then more code will need to be generated to use
-  -- SAppend.
+  -- a newline.
+  -- e.g. a ++ "\n" ++ b
   | SAppendNL SVar SVar
   | SAppend SVar SVar
   | SSubstring SVar SIndex SIndex
