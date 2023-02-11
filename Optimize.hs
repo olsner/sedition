@@ -6,7 +6,7 @@ import Compiler.Hoopl as H hiding ((<*>))
 
 --import Data.Map (Map)
 --import qualified Data.Map as M
---import Debug.Trace
+import Debug.Trace
 
 import IR
 
@@ -21,13 +21,40 @@ import RedundantBranches (redundantBranchesPass)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
 --debugBwd = id
 
+doTrace = False
+
+traceFuel :: FuelMonad m => Int -> m ()
+traceFuel oldFuel = do
+  fuel <- fuelRemaining
+  trace (show (oldFuel - fuel) ++ " fuel consumed") (return ())
+
+tracePass name pass | doTrace = do
+  oldFuel <- fuelRemaining
+  (program,_,_) <- trace ("Optimizing program: " ++ show name ++ "...") pass
+  traceFuel oldFuel
+  trace (show (setSize (labelsDefined program)) ++ " labels defined, " ++
+         show (setSize (labelsUsed program)) ++ " labels used") $ return ()
+  trace (show (length (show program))) $ return ()
+  return program
+                    | otherwise = do
+  (program,_,_) <- pass
+  return program
+
 optimizeOnce :: (CheckpointMonad m, FuelMonad m) => Label -> Graph Insn C C -> m (Graph Insn C C)
 optimizeOnce entry program = do
   let entries = JustC [entry]
-  (program,_,_) <- analyzeAndRewriteBwd livePredPass entries program mapEmpty
-  (program,_,_) <- analyzeAndRewriteFwd constPredPass entries program mapEmpty
-  (program,_,_) <- analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
-  (program,_,_) <- analyzeAndRewriteBwd liveStringPass entries program mapEmpty
+  -- If this can eliminate something, constPred should have fewer predicates to
+  -- worry about.
+  program <- tracePass "livePred" $
+    analyzeAndRewriteBwd livePredPass entries program mapEmpty
+  program <- tracePass "constPred" $
+    analyzeAndRewriteFwd constPredPass entries program mapEmpty
+  program <- tracePass "livePred" $
+    analyzeAndRewriteBwd livePredPass entries program mapEmpty
+  program <- tracePass "redundantBranches" $
+    analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
+  program <- tracePass "liveString" $
+    analyzeAndRewriteBwd liveStringPass entries program mapEmpty
   -- This doesn't seem to do much for runtime, so skip it. Should be more
   -- relevant when we try to analyze the contents of strings though.
   --(program,_,_) <- analyzeAndRewriteFwd sameStringPass entries program mapEmpty
@@ -39,10 +66,11 @@ optToFix f original = do
   -- nothing, which we'll consider a fixpoint since oldFuel == newFuel == 0.
   optimized <- f original
   newFuel <- fuelRemaining
-  --trace ("optToFix: " ++ show (oldFuel - newFuel) ++ " fuel consumed") $ return ()
-  -- Ugly workaround, but compare the optimized text program to see if optimization changed something.
-  -- Looks like we have optimizations that toggle and consume fuel to produce the same output.
-  if oldFuel == newFuel || show original == show optimized
+  -- Ugly workaround, but compare the optimized text program to see if
+  -- optimization changed something.
+  -- Hoopl passes may consume fuel on speculative rewrites that won't stick
+  -- around in the final output.
+  if oldFuel == newFuel || newFuel == 0 || show original == show optimized
     then return optimized
     else optToFix f optimized
 
