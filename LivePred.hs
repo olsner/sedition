@@ -27,8 +27,12 @@ kill (SetP p _) f = S.delete p f
 kill _         f = f
 
 gen :: Insn e x -> LivePredFact -> LivePredFact
-gen (If p _ _) f = S.insert p f
-gen _          f = f
+gen (If c _ _) = genC c
+gen (SetP _ c) = genC c
+gen _          = id
+
+genC (PRef p) = S.insert p
+genC _ = id
 
 livePredTransfer :: BwdTransfer Insn LivePredFact
 livePredTransfer = mkBTransfer3 first middle last

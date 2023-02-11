@@ -114,6 +114,7 @@ compileCond cond = case cond of
   IR.AtEOF 0 -> fun "is_all_eof" ["&" <> infd 0, "argc", "argv"]
   IR.AtEOF i -> fun "is_eof" [infd i]
   IR.PendingIPC -> hasPendingIPC
+  IR.PRef p -> pred p
 
 compileMatch m (IR.Match svar re) = fun (regexfun re) [matchref m, string svar, "0"]
 compileMatch m (IR.MatchLastRE svar) = fun lastRegex [matchref m, string svar, "0"]
@@ -129,7 +130,7 @@ compileInsn (IR.SetP p cond) = stmt (pred p <> " = " <> compileCond cond)
 compileInsn (IR.SetS s expr) = stmt (setString s expr)
 compileInsn (IR.SetM m expr) = stmt (compileMatch m expr)
 compileInsn (IR.AppendS s s2) = sfun "concat_inplace" [string s, string s2]
-compileInsn (IR.If p t f) = cIf (pred p) (gotoL t) (gotoL f)
+compileInsn (IR.If c t f) = cIf (compileCond c) (gotoL t) (gotoL f)
 compileInsn (IR.Listen i maybeHost port) =
   sfun "sock_listen" [infd i, chost maybeHost, intDec port]
   where

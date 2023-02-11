@@ -38,9 +38,10 @@ constPredTransfer = mkFTransfer3 first middle last
     -- O C
     last :: Insn O C -> ConstPredFact -> FactBase ConstPredFact
     last (Branch l) f = mapSingleton l f
-    last (If p tl fl) f = mkFactBase constLattice
+    last (If (PRef p) tl fl) f = mkFactBase constLattice
            [(tl, mapInsert p (PElem True)  f),
             (fl, mapInsert p (PElem False) f)]
+    last (If _ tl fl) f = boringFactBase f [tl,fl]
     last (Quit _) _ = mapEmpty
     -- Is this correct? We probably reset some of these in forkState
     last (Fork a b) f = boringFactBase f [a,b]
@@ -51,7 +52,7 @@ constPred :: FuelMonad m => FwdRewrite m Insn ConstPredFact
 constPred = deepFwdRw rw
   where
     rw :: FuelMonad m => Insn e x -> ConstPredFact -> m (Maybe (Graph Insn e x))
-    rw (If p tl fl) f =
+    rw (If (PRef p) tl fl) f =
       case mapLookup p f of
         Just (PElem b) | let dest = if b then tl else fl ->
             {-trace (show p ++ " = " ++ show b ++ " -> " ++ show dest) $-}
