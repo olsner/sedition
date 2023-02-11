@@ -30,16 +30,17 @@ kill :: Insn e x -> LiveStringFact -> LiveStringFact
 kill (SetS s _) = S.delete s
 kill (GetMessage s) = S.delete s
 kill (Read s _) = S.delete s
+kill (ReadFile s _) = S.delete s
 kill _ = id
 
 -- Operations that read from a string variable 'gen' it.
 gen :: Insn e x -> LiveStringFact -> LiveStringFact
 gen (SetS _ expr) = genS expr
-gen (AppendS _ s) = S.insert s
+gen (SetM _ expr) = genM expr
+gen (AppendS s1 s2) = S.insert s1 . S.insert s2
 gen (Print _ s) = S.insert s
 gen (Message s) = S.insert s
 gen (ShellExec s) = S.insert s
-gen (SetM _ expr) = genM expr
 gen _ = id
 
 genM (Match s _) = S.insert s
@@ -68,11 +69,11 @@ liveStringTransfer = mkBTransfer3 first middle last
     last :: Insn O C -> FactBase LiveStringFact -> LiveStringFact
     last insn = gen insn . kill insn . facts (successors insn)
 
-    fact f l = fromMaybe S.empty (mapLookup l f)
+    fact f l = mapFindWithDefault S.empty l f
     facts ls f = S.unions (map (fact f) ls)
 
 liveString :: FuelMonad m => BwdRewrite m Insn LiveStringFact
-liveString = mkBRewrite3 norw rw norw
+liveString = deepBwdRw rw
   where
     remove :: FuelMonad m => m (Maybe (Graph Insn O O))
     remove = return (Just emptyGraph)
@@ -80,12 +81,10 @@ liveString = mkBRewrite3 norw rw norw
     replace new = return (Just (mkMiddles new))
     dead s f = not (S.member s f)
 
-    norw :: FuelMonad m => Insn e x -> Fact x LiveStringFact -> m (Maybe (Graph Insn e x))
-    norw _ _ = return Nothing
-    rw :: FuelMonad m => Insn O O -> Fact O LiveStringFact -> m (Maybe (Graph Insn O O))
-    rw (SetS s _) f | dead s f = remove
+    rw :: FuelMonad m => Insn e x -> Fact x LiveStringFact -> m (Maybe (Graph Insn e x))
+    rw i@(SetS s _) f | dead s f = remove
     rw (SetS s (SAppend s1 s2)) f
-                    | dead s1 f = replace [AppendS s1 s2, SetS s (SVarRef s1)]
+                      | dead s1 f = replace [SetS s (SVarRef s1), AppendS s s2]
     rw (AppendS s _) f | dead s f = remove
     -- Read and GetMessage both have side effects, so don't remove those even
     -- if the result is unused.
