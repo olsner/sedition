@@ -141,7 +141,7 @@ do_main args = do
     exitSuccess
 
   tStartGenerateIR <- timestamp
-  let (entryLabel, program) = toIR autoprint extendedRegexps seds
+  let (entryLabel, program) = toIR autoprint extendedRegexps enableIPC seds
   tEndGenerateIR <- program `seq` timestamp
 
   when (dumpOriginalIR) $

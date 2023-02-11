@@ -166,6 +166,7 @@ data IRState = State
   { firstFreeUnique :: Unique
   , autoprint :: Bool
   , extendedRegexps :: Bool
+  , ipcEnabled :: Bool
   , sourceLabels :: Map S Label
   , holdSpaces :: Map S SVar
   , externalFiles :: Map (S, Bool) FD
@@ -181,10 +182,11 @@ instance Show (Graph Insn e x) where
 
 invalidLabel :: String -> Label
 invalidLabel s = error ("Invalid label: " ++ s)
-startState autoprint ere = State
+startState autoprint ere ipc = State
   { firstFreeUnique = firstNormalPred
   , autoprint = autoprint
   , extendedRegexps = ere
+  , ipcEnabled = ipc
   , sourceLabels = M.empty
   , holdSpaces = M.empty
   , externalFiles = M.empty
@@ -350,8 +352,8 @@ ifCheck c tx fx = do
 
 type IRM = State IRState
 
-toIR :: Bool -> Bool -> [Sed] -> (Label, Graph Insn C C)
-toIR autoprint ere seds = evalState go (startState autoprint ere)
+toIR :: Bool -> Bool -> Bool -> [Sed] -> (Label, Graph Insn C C)
+toIR autoprint ere ipc seds = evalState go (startState autoprint ere ipc)
   where
    go = do
     entry <- newLabel
@@ -376,9 +378,15 @@ tProgram seds = mdo
 
   modify $ \state -> state { nextCycleLabels = (newCyclePrint, newCycleNoPrint) }
 
+  -- Initialize all preset predicates. In particular to prevent optimizations
+  -- from deciding that a predicate that only gets set to true will thus also
+  -- be true on entry to the program.
   emit (SetP pIntr cFalse)
   emit (SetP pPreFirst cTrue)
   emit (SetP pRunNormal cFalse)
+  emit (SetP pLastSubst cFalse)
+  emit (SetP pHasQueuedOutput cFalse)
+  emit (SetP pHasPattern cFalse)
 
   start <- emitBranch' openUsedFiles
 
@@ -398,9 +406,11 @@ tProgram seds = mdo
   -- of the main program with the appropriate predicates set.
   emit (Wait 0)
   -- This pIntr predicate also controls control flow around matching interrupts,
-  -- so to keep other things working we should maintain the flag correctly.
-  emit (SetP pIntr PendingIPC)
-  lineOrEOF <- finishBlock' (If (PRef pIntr) intr lineOrEOF)
+  -- so to keep other things working we should maintain the flag correctly even
+  -- if ipc is disabled.
+  ipc <- gets ipcEnabled
+  emit (SetP pIntr (if ipc then PendingIPC else cFalse))
+  when ipc (tWhenP pIntr (() <$ emitBranch' intr))
 
   line <- finishBlock' (If (AtEOF 0) exit line)
 
@@ -523,7 +533,7 @@ tSed (Sed cond@(At (AST.Line 0)) x) = withCond cond $ do
   -- to false. Or assign a fresh predicate to push/copy the value into?
   emit (SetP pRunNormal cFalse)
 tSed (Sed cond@(At AST.IRQ) x) = withCond cond $ do
-  -- See comment/fixme for saving/restrogin pRunNormal above
+  -- See comment/fixme for saving/restoring pRunNormal above
   emit (SetP pRunNormal cTrue)
   tCmd x
   emit (SetP pRunNormal cFalse)
