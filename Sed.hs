@@ -45,6 +45,7 @@ data Options = Options
   , runIt :: Bool
   , compileIt :: Bool
   , fuel :: Int
+  , defines :: [String]
   } deriving (Show, Eq)
 defaultOptions = Options
     { extendedRegexps = False
@@ -59,12 +60,14 @@ defaultOptions = Options
     , timeIt = False
     , runIt = True
     , compileIt = False
-    , fuel = 1000000 }
+    , fuel = 1000000
+    , defines = [] }
 addScript s o = o { scripts = Left (C.pack s) : scripts o }
 addScriptFile f o = o { scripts = Right f : scripts o }
-setOutputFile f o = o { cOutputFile = f }
+setCOutputFile f o = o { cOutputFile = f }
 setExeOutputFile f o = o { exeOutputFile = f }
 setFuel f o = o { fuel = f }
+addDefine f o = o { defines = f : defines o }
 
 sedOptions =
   [ Option ['r', 'E'] ["regexp-extended"] (NoArg $ \o -> o { extendedRegexps = True }) "Use extended regexps"
@@ -80,10 +83,11 @@ sedOptions =
   -- Not implemented!
   -- , Option [] ["sandbox"] (NoArg Sandbox) "operate in sandbox mode (unimplemented GNU sed feature)"
   , Option ['t'] ["time"] (NoArg $ \o -> o { timeIt = True }) "Time optimization and execution of the program"
-  , Option ['c'] ["compile"] (NoArg $ \o -> o { runIt = False, compileIt = True }) "Don't run the program, compile it to C instead."
-  , Option [] ["run"] (NoArg $ \o -> o { runIt = True }) "Compile, compile and then run."
-  , Option ['o'] [] (ReqArg setOutputFile "OUTPUT_FILE") "Path to compiled output file."
+  , Option ['c'] ["compile"] (NoArg $ \o -> o { runIt = False, compileIt = True }) "Don't run the program, compile it to C code instead."
+  , Option [] ["run"] (NoArg $ \o -> o { runIt = True }) "Compile and run."
+  , Option ['o'] ["c-output"] (ReqArg setCOutputFile "C_FILE") "Path to compiled C output file."
   , Option [] ["exe"] (ReqArg setExeOutputFile "EXEC_FILE") "Path to compiled executable."
+  , Option ['D'] [] (ReqArg addDefine "MACRO") "Add macro to C compilation"
   ]
 
 -- TODO Include source file/line info here, thread through to the parser...
@@ -102,10 +106,12 @@ getScript options inputs = case scripts options of
 
 compileProgram :: Bool -> (H.Label, Program) -> FilePath -> IO ()
 compileProgram ipc (label, program) ofile = do
-    let compiled = compileIR ipc label program
+    let compiled = compileIR ofile ipc label program
     C.writeFile ofile compiled
 
-compileC cFile exeFile = rawSystem "cc" ["-g", "-Og", cFile, "-o", exeFile]
+-- TODO Add flags to control gcc optimization/debug settings.
+compileC cFile exeFile defines =
+    rawSystem "cc" (["-O2", cFile, "-o", exeFile] ++ map ("-D"++) defines)
 
 -- TODO Use some realPath function instead of ./, in case a full path is used.
 runExecutable exe inputs = rawSystem ("./" ++ exe) (map C.unpack inputs)
@@ -136,7 +142,7 @@ do_main args = do
     exitSuccess
 
   tStartGenerateIR <- timestamp
-  let (entryLabel, program) = toIR autoprint extendedRegexps seds
+  let (entryLabel, program) = toIR autoprint extendedRegexps enableIPC seds
   tEndGenerateIR <- program `seq` timestamp
 
   when (dumpOriginalIR) $
@@ -174,7 +180,7 @@ do_main args = do
     -- one pass without an extra file inbetween.
     when (compileIt && runIt) $ do
       tCompileStart <- timestamp
-      status <- compileC cOutputFile exeOutputFile
+      status <- compileC cOutputFile exeOutputFile defines
       tCompileEnd <- timestamp
 
       when timeIt $ do

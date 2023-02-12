@@ -6,13 +6,13 @@ import Control.Applicative
 
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BS
+import qualified Data.ByteString.UTF8 as UTF8
 import Data.Char (digitToInt)
 import Data.Maybe
 
 import System.Exit
 
 import Text.Trifecta hiding (parseString)
-import Text.Trifecta.Delta
 
 import AST
 
@@ -54,6 +54,7 @@ unescape 'r' = '\r'
 unescape c   = c
 
 hexUnescape _ d1 d2 = toEnum (read ['0','x',d1,d2])
+hexUnescape1 _ d1 = toEnum (read ['0','x',d1])
 
 list p1 p2 = (:) <$> p1 <*> p2
 
@@ -137,7 +138,8 @@ pReplacement term = combineLiterals <$> many (choice ps) <* char term
        , charLit <$> noneOf [term,'\n','\\']
        , char '\\' >> choice escaped ]
   escaped = [ charLit . unescape <$> oneOf "rn"
-            , charLit <$> (hexUnescape <$> char 'x' <*> hexDigit <*> hexDigit)
+            , try (charLit <$> (hexUnescape <$> char 'x' <*> hexDigit <*> hexDigit))
+            , charLit <$> (hexUnescape1 <$> char 'x' <*> hexDigit)
             , BackReference . digitToInt <$> digit
             , SetCaseConv Lower <$ char 'L'
             , SetCaseConv LowerChar <$ char 'l'
@@ -249,12 +251,14 @@ charSwitch cps = charSwitchM [(c, pure p) | (c,p) <- cps]
 intToExit 0 = ExitSuccess
 intToExit n = ExitFailure n
 
+toUTF8 = UTF8.fromString . BS.unpack
+
 parseString :: ByteString -> [Sed]
-parseString input = case parseOnly pFile input of
+parseString input = case parseOnly pFile (toUTF8 input) of
     Success p -> p
     Failure e -> error (show e)
 
 -- TODO: Include a parseFile here so we can get diagnostics with nice and
 -- proper file/line messaages.
 
-parseOnly p = parseByteString p (Lines 0 0 0 0)
+parseOnly p = parseByteString p mempty . toUTF8

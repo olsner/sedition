@@ -15,19 +15,44 @@
 #include <string.h>
 #include <sys/random.h>
 
+// TODO Rename to YYTRACE use YYDEBUG for e.g. statistics collection.
+#if ENABLE_YYDEBUG
+#define YYDEBUG(fmt,...) fprintf(stderr, "%s: " fmt, __PRETTY_FUNCTION__, ## __VA_ARGS__)
+#else
+#define YYDEBUG(...) (void)0
+#endif
+
+#if ENABLE_YYSTATS
+static struct {
+    size_t retries;
+    size_t matched_chars, visited_chars;
+    size_t regops;
+    size_t matched, failed;
+    size_t early_out;
+    size_t goto_nocheck;
+} yystats;
+
+#define YYSTATS(field, incr) (yystats.field += (incr))
+#else
+#define YYSTATS(field, incr) (void)0
+#endif
+
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
 
+struct match_t;
+typedef struct match_t match_t;
+
+typedef void regex_match_fun_t(match_t*, string*, size_t);
 typedef regex_t re_t;
 
 #define MAXGROUP 9
 struct match_t {
-    re_t *regex;
+    regex_match_fun_t *fun;
 
     bool result;
     regmatch_t matches[MAXGROUP + 1];
 };
-typedef struct match_t match_t;
 
 static int lineNumber;
 static int inputFileIndex;
@@ -38,8 +63,8 @@ static int inputFileIndex;
 
 static size_t grow(size_t prev, size_t min)
 {
-    const size_t plus10 = prev + prev / 10;
-    // Grow 10% or directly to the given size
+    const size_t plus10 = prev + prev / 8;
+    // Grow 12.5% or directly to the given size
     return min > plus10 ? min : plus10;
 }
 
@@ -86,6 +111,11 @@ static void free_string(string* s)
     }
     s->alloc = s->len = 0;
     s->buf = 0;
+}
+
+static void clear_string(string* s)
+{
+    s->len = 0;
 }
 
 static void set_str_const(string* dst, const char* src, size_t n)
@@ -146,10 +176,18 @@ static void concat_inplace(string* dst, string* b)
     append_str(dst, b->buf, b->len);
 }
 
-static void substring(string* dst, string* src, size_t i1, size_t i2)
+static void substring(string* dst, string* src, ptrdiff_t i1, ptrdiff_t i2)
 {
-    assert(i1 <= src->len && i2 <= src->len);
+    if (i1 < 0 && i2 < 0) {
+        clear_string(dst);
+        return;
+    }
+    assert(0 <= i1);
+    assert(0 <= i2);
+    assert(i1 <= src->len);
+    assert(i2 <= src->len);
     assert(i1 <= i2);
+
     const size_t n = i2 - i1;
     ensure_len_discard(dst, n);
     memcpy(dst->buf, src->buf + i1, n);
@@ -189,7 +227,6 @@ static void format_literal(string* dst, int width, string* s)
     dst->len = 0;
     for (size_t i = 0; i < s->len; i++) {
         uint8_t c = s->buf[i];
-        size_t prev = dst->len;
         if (c == '\n') {
             append_str(dst, "$\n", 2);
             col = 0;
@@ -203,7 +240,7 @@ static void format_literal(string* dst, int width, string* s)
             snprintf(dst->buf + dst->len - 3, 4, "%03o", c);
             col += 4;
         } else {
-            append_str(dst, &c, 1);
+            append_str(dst, (const char *)&c, 1);
             col++;
         }
         // TODO Should be breaking before output? I think the haskell also gets
@@ -241,9 +278,61 @@ static void free_regexp(regex_t* re)
     regfree(re);
 }
 
-static void match_regexp(match_t* m, string* s, re_t* regex, size_t offset)
+static void compare_regexp_matches(match_t* ref, match_t* m, string* s, size_t offset, const char *function, const char *original_re)
+{
+    bool diff = false;
+    if (ref->result != m->result) {
+        fprintf(stderr, "%s: should %s, but did %s\n",
+                function,
+                ref->result ? "match" : "not match",
+                m->result ? "match" : "not");
+        diff = true;
+    } else if (ref->result) {  // Only compare groups on match
+        for (int i = 0; i <= MAXGROUP; i++) {
+            if (ref->matches[i].rm_so != m->matches[i].rm_so ||
+                    ref->matches[i].rm_eo != m->matches[i].rm_eo) {
+                fprintf(stderr, "%s: group %d should be %d..%d, not %d..%d\n",
+                        function, i,
+                        ref->matches[i].rm_so, ref->matches[i].rm_eo,
+                        m->matches[i].rm_so, m->matches[i].rm_eo);
+                diff = true;
+            }
+        }
+    }
+    if (diff) {
+        fprintf(stderr, "%s: diff for regexp \"%s\"\n", function, original_re);
+        fprintf(stderr, "%s: on input \"%.*s\"\n",
+                function,
+                (int)(s->len - offset), s->buf + offset);
+    }
+    assert(!diff);
+}
+
+static void tdfa2c_statistics() {
+#if ENABLE_YYSTATS
+    fprintf(stderr, "%zu retried matches\n", yystats.retries);
+    fprintf(stderr, "%zu matched chars, %zu visited\n", yystats.matched_chars, yystats.visited_chars);
+    fprintf(stderr, "%zu register operations performed\n", yystats.regops);
+    fprintf(stderr, "%zu matches, %zu failed matches\n", yystats.matched, yystats.failed);
+    fprintf(stderr, "%zu early outs due to string length\n", yystats.early_out);
+    fprintf(stderr, "%zu EOF checks skipped thanks to minLength\n", yystats.goto_nocheck);
+#endif
+}
+
+static void clear_match(match_t* m)
 {
     memset(m, 0, sizeof(*m));
+}
+
+__attribute__((noinline)) static void copy_match(match_t* dst, match_t* src)
+{
+    memcpy(dst, src, sizeof(match_t));
+}
+
+static void match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
+                         regex_match_fun_t* fun)
+{
+    clear_match(m);
 
     // Stop matching when we've consumed the whole string, but allow a zero
     // length match if it comes first?
@@ -251,7 +340,7 @@ static void match_regexp(match_t* m, string* s, re_t* regex, size_t offset)
         return;
     }
 
-    m->regex = regex;
+    m->fun = fun;
     m->matches[0].rm_so = offset;
     m->matches[0].rm_eo = s->len;
     // REG_STARTEND with non-zero offset seems to imply REG_NOTBOL in glibc.
@@ -264,14 +353,15 @@ static void match_regexp(match_t* m, string* s, re_t* regex, size_t offset)
     m->result = (res == 0);
 }
 
-static void copy_match(match_t* dst, match_t* src)
-{
-    memcpy(dst, src, sizeof(match_t));
-}
-
 static void next_match(match_t* dst, match_t* src, string* s)
 {
-    match_regexp(dst, s, src->regex, src->matches[0].rm_eo);
+    size_t offset = src->matches[0].rm_eo;
+    // Try to handle regexpes that match the empty string. We should try every
+    // position and also try at the end of the string.
+    if (src->matches[0].rm_so == offset && offset < s->len) {
+        offset++;
+    }
+    src->fun(dst, s, offset);
 }
 
 //

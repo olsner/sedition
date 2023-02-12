@@ -556,13 +556,32 @@ u2/g' lines1
 		echo 'BSD sed does not handle branch defined REs'
 	else
 		echo 'eeefff' | $SED -e 'p' -e 's/e/X/p' -e ':x' \
-		    -e 's//Y/p' -e '/f/bx'
+		    -e 's//Y/p' -e '/f/bx' | head -100
 	fi
 	# Check that all 9 back references work.
 	mark '8.17' ; echo '123456789' | $SED -e 's/\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)\(.\)/\9\8\7\6\5\4\3\2\1/g'
 	# Actually works fine without setting REG_NOTBOL properly. Seems to be
 	# implied when REG_STARTEND is used with a positive offset.
 	mark '8.18' ; echo 'aaa' | $SED -e 's/^a/b/g'
+	mark '8.19' ; echo | $SED -e 's/a?/b/g'
+	mark '8.20' ; echo foo | $SED -e 's/a?/b/g'
+	mark '8.21' ; echo foo foo | $SED -e 's/foo$/bar/'
+    # Mainly regexp tests. TODO Add a separate testsuite for that.
+	mark '8.22' ; $SED -e 's/^x*/y/' lines1
+	mark '8.23' ; $SED -e 's/^l*/m/' lines1
+	mark '8.24' ; $SED -e 's/.*/&/' lines1
+    # . should match \n in sed
+    mark '8.25' ; $SED -n '1N; s/./f/gp' lines1
+    # from dc.sed, regression test(s)
+    mark '8.26' ; echo "2002~|P|K0|I10|O10|?~" | $SED -n 's/^[^A-F~]*~.*|I10|/{&}/p'
+    mark '8.27' ; echo "2002~|P|K0|I10|O10|?~" | $SED -n 's/^\(-*\)0*\([0-9.]*[0-9]\)[^~]*/{&}/p'
+                  echo "04.~0~20.02~2002~2002" | $SED -n 's/^\(-*\)0*\([0-9.]*[0-9]\)[^~]*/{&}/p'
+    mark '8.28' ; echo "aaaa" | $SED -rn 's/a{10}/{&}/p'
+                  echo "aaaa" | $SED -rn 's/a{4}/{&}/p'
+    mark '8.29' ; echo "foo^bar" | $SED -n 's/o^/{&}/p'
+    # Test extraction of empty subexpressions in compiled output (substring
+    # would not accept -1..-1 as a valid empty offset)
+    mark '8.30' ; $SED -r 's/((l)|(_))/;\2;\3;/g' lines1
 }
 
 test_sedition()

@@ -2,11 +2,11 @@ N = 12
 
 OUTDIR = out
 WARNINGS = -Widentities -Wcompat -Wall -Wno-name-shadowing -Wno-missing-signatures
-GHCPACKAGES = random regex-base regex-posix trifecta network file-embed
+GHCPACKAGES = random regex-base regex-posix trifecta network file-embed utf8-string
 GHCFLAGS = -j$(N) -odir $(OUTDIR) -hidir $(OUTDIR) -O2 -threaded -rtsopts $(WARNINGS) -dynamic $(addprefix -package , $(GHCPACKAGES))
 GHC ?= ghc
 
-all: sed run-parsertest README.html
+all: sed run-parsertests README.html
 
 %.html: %.md
 	markdown $< >$@
@@ -23,12 +23,21 @@ ParserTest: force sed
 	@mkdir -p $(OUTDIR)
 	$(GHC) $(GHCFLAGS) --make -main-is ParserTest $@
 
-check: run-parsertest run-bsdtests run-gnused-tests compiler-tests
+RegexParserTest: force sed
+	@mkdir -p $(OUTDIR)
+	$(GHC) $(GHCFLAGS) --make -main-is RegexParserTest $@
+
+check: run-parsertests run-bsdtests run-gnused-tests compiler-tests
 test: check
 compiler-tests: run-bsdtests-compiled run-gnused-tests-compiled
 
 run-parsertest: ParserTest
 	./ParserTest
+
+run-regexparsertest: RegexParserTest
+	./RegexParserTest
+
+run-parsertests: run-parsertest run-regexparsertest
 
 # There are a handful of failing BSD tests still, so ignore failures so we get
 # to the other test suites.
@@ -38,25 +47,23 @@ run-bsdtests: sed
 run-bsdtests-compiled: sed
 	cd tests && ./bsd.sh ../runsed
 
-run-gnused-tests: sed
-	@if test -d gnused; \
-		then \
-			echo "Running GNU tests on interpreter..."; \
-			./run-gnused-tests.sh gnused; \
-		else echo "Check out GNU sed into a directory called gnused"; \
-	fi
+gnused:
+	@test -d gnused || echo "Check out GNU sed into a directory called gnused"
+	@test -d gnused
 
-run-gnused-tests-compiled: sed
-	@if test -d gnused; \
-		then \
-			echo "Running GNU tests on compiler..."; \
-			SED=`pwd`/runsed ./run-gnused-tests.sh gnused; \
-		else echo "Check out GNU sed into a directory called gnused"; \
-	fi
+run-gnused-tests: sed gnused
+	@echo "Running GNU tests on interpreter..."
+	./run-gnused-tests.sh gnused
+
+run-gnused-tests-compiled: sed gnused
+	@echo "Running GNU tests on compiler..."
+	SED=`pwd`/runsed ./run-gnused-tests.sh gnused
 
 MODULES = Sed Parser AST Bus ParserTest IR \
-	Optimize ConstPred RedundantBranches LivePred \
-	LiveString SameString Compile Interpret
+	Optimize ConstPred RedundantBranches LivePred Collections \
+	LiveString SameString Compile Interpret \
+	Regex RegexParserTest \
+	TaggedRegex TNFA TDFA TDFA2C SimulateTNFA SimulateTDFA CharMap GenC
 
 clean:
 	rm -f sed Sed ParserTest

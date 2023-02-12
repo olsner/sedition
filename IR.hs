@@ -34,6 +34,7 @@ data Cond
   | EndLine Int
   | Bool Bool
   | IsMatch MVar
+  | PRef Pred
   deriving (Show,Eq)
 cTrue = Bool True
 cFalse = Bool False
@@ -46,9 +47,8 @@ data StringExpr
   -- from to string
   | STrans S S SVar
   -- TODO Replace with more appends and perhaps a predefined svar that contains
-  -- a newline. Also investigate if it's always adding the newline or only when
-  -- the strings are empty, then more code will need to be generated to use
-  -- SAppend.
+  -- a newline.
+  -- e.g. a ++ "\n" ++ b
   | SAppendNL SVar SVar
   | SAppend SVar SVar
   | SSubstring SVar SIndex SIndex
@@ -102,7 +102,9 @@ data Insn e x where
   Label         :: Label                    -> Insn C O
 
   Branch        :: Label                    -> Insn O C
-  If            :: Pred -> Label -> Label   -> Insn O C
+  -- TODO Consider if 'If' should have a Cond instead of Pred, and add a Pred
+  -- expression to Cond. Check which SetP would remain.
+  If            :: Cond -> Label -> Label   -> Insn O C
   Fork          :: Label -> Label           -> Insn O C
   Quit          :: ExitCode                 -> Insn O C
 
@@ -114,6 +116,8 @@ data Insn e x where
 
   SetP          :: Pred -> Cond             -> Insn O O
   SetS          :: SVar -> StringExpr       -> Insn O O
+  -- TODO Unnecessary, can just as well recognize "s <- s ++ s2" (and optimize
+  -- to prefer in-place appends?).
   AppendS       :: SVar -> SVar             -> Insn O O
   SetM          :: MVar -> MatchExpr        -> Insn O O
   -- for n/N (which can never accept interrupts), and R
@@ -121,7 +125,7 @@ data Insn e x where
   Print         :: FD -> SVar               -> Insn O O
   Message       :: SVar                     -> Insn O O
 
-  CompileRE     :: RE -> S -> Bool        -> Insn O O
+  CompileRE     :: RE -> S -> Bool          -> Insn O O
   SetLastRE     :: RE                       -> Insn O O
 
   ShellExec     :: SVar                     -> Insn O O
@@ -130,10 +134,11 @@ data Insn e x where
   Redirect      :: FD -> FD                 -> Insn O O
   Comment       :: String                   -> Insn O O
 
-  OpenFile      :: FD -> Bool -> S         -> Insn O O
+  OpenFile      :: FD -> Bool -> S          -> Insn O O
   -- Reads a whole file at once, where normal Read just reads the next line.
   ReadFile      :: SVar -> FD               -> Insn O O
   CloseFile     :: FD                       -> Insn O O
+
 
 deriving instance Show (Insn e x)
 deriving instance Eq (Insn e x)
@@ -154,10 +159,13 @@ instance HooplNode Insn where
 
 type Program = Graph IR.Insn C C
 
+-- TODO remove freshUnique (unless Hoopl uses it internally?), then add
+-- separate counters for strings, regexps and matches.
 data IRState = State
   { firstFreeUnique :: Unique
   , autoprint :: Bool
   , extendedRegexps :: Bool
+  , ipcEnabled :: Bool
   , sourceLabels :: Map S Label
   , holdSpaces :: Map S SVar
   , externalFiles :: Map (S, Bool) FD
@@ -173,10 +181,11 @@ instance Show (Graph Insn e x) where
 
 invalidLabel :: String -> Label
 invalidLabel s = error ("Invalid label: " ++ s)
-startState autoprint ere = State
+startState autoprint ere ipc = State
   { firstFreeUnique = firstNormalPred
   , autoprint = autoprint
   , extendedRegexps = ere
+  , ipcEnabled = ipc
   , sourceLabels = M.empty
   , holdSpaces = M.empty
   , externalFiles = M.empty
@@ -320,11 +329,14 @@ label = withNewLabel emitLabel
 
 printIfAuto = do
     ap <- gets autoprint
-    when ap (tWhen pHasPattern (emit (Print 0 sPattern)))
+    when ap (tWhenP pHasPattern (emit (Print 0 sPattern)))
 
-tIf :: Pred -> IRM a -> IRM b -> IRM ()
-tIf p tx fx = mdo
-    t <- finishBlock' (If p t f)
+tIfP :: Pred -> IRM a -> IRM b -> IRM ()
+tIfP p = tIf (PRef p)
+
+tIf :: Cond -> IRM a -> IRM b -> IRM ()
+tIf c tx fx = mdo
+    t <- finishBlock' (If c t f)
     comment "tIf/true"
     _ <- tx
     f <- emitBranch' e
@@ -334,13 +346,13 @@ tIf p tx fx = mdo
     comment "tIf/end"
 
 ifCheck c tx fx = do
-  p <- tCheck c
-  tIf p tx fx
+  cond <- tCheck c
+  tIf cond tx fx
 
 type IRM = State IRState
 
-toIR :: Bool -> Bool -> [Sed] -> (Label, Graph Insn C C)
-toIR autoprint ere seds = evalState go (startState autoprint ere)
+toIR :: Bool -> Bool -> Bool -> [Sed] -> (Label, Graph Insn C C)
+toIR autoprint ere ipc seds = evalState go (startState autoprint ere ipc)
   where
    go = do
     entry <- newLabel
@@ -349,7 +361,7 @@ toIR autoprint ere seds = evalState go (startState autoprint ere)
     return (entry, mkFirst (Label entry) H.<*> program outState H.<*> mkLast (Quit ExitSuccess))
 
 checkQueuedOutput =
-  tWhen pHasQueuedOutput $ do
+  tWhenP pHasQueuedOutput $ do
     emit (Print 0 sOutputQueue)
     setString sOutputQueue =<< emitString emptyS
     emit (SetP pHasQueuedOutput cFalse)
@@ -365,9 +377,15 @@ tProgram seds = mdo
 
   modify $ \state -> state { nextCycleLabels = (newCyclePrint, newCycleNoPrint) }
 
+  -- Initialize all preset predicates. In particular to prevent optimizations
+  -- from deciding that a predicate that only gets set to true will thus also
+  -- be true on entry to the program.
   emit (SetP pIntr cFalse)
   emit (SetP pPreFirst cTrue)
   emit (SetP pRunNormal cFalse)
+  emit (SetP pLastSubst cFalse)
+  emit (SetP pHasQueuedOutput cFalse)
+  emit (SetP pHasPattern cFalse)
 
   start <- emitBranch' openUsedFiles
 
@@ -386,11 +404,14 @@ tProgram seds = mdo
   -- New cycle handling: wait for IPC or input, check for EOF, then run a copy
   -- of the main program with the appropriate predicates set.
   emit (Wait 0)
-  emit (SetP pIntr PendingIPC)
-  lineOrEOF <- finishBlock' (If pIntr intr lineOrEOF)
+  -- This pIntr predicate also controls control flow around matching interrupts,
+  -- so to keep other things working we should maintain the flag correctly even
+  -- if ipc is disabled.
+  ipc <- gets ipcEnabled
+  emit (SetP pIntr (if ipc then PendingIPC else cFalse))
+  when ipc (tWhenP pIntr (() <$ emitBranch' intr))
 
-  pAtEOF <- emitNewPred (AtEOF 0)
-  line <- finishBlock' (If pAtEOF exit line)
+  line <- finishBlock' (If (AtEOF 0) exit line)
 
   do
     line <- newString
@@ -422,22 +443,24 @@ tProgram seds = mdo
 
 tSeds = mapM_ tSed
 
-tWhenNot p x = mdo
-  f <- finishBlock' (If p t f)
+tWhenP p x = tWhen (PRef p) x
+
+tWhenNot c x = mdo
+  f <- finishBlock' (If c t f)
   r <- x
   t <- label
   return r
 
-tWhen p x = mdo
-  t <- finishBlock' (If p t f)
+tWhen c x = mdo
+  t <- finishBlock' (If c t f)
   res <- x
   f <- label
   return res
 
 withCond' Always whenTrue _ = whenTrue
 withCond' (At c) whenTrue whenFalse = do
-  p <- tCheck c
-  tIf p whenTrue whenFalse
+  cond <- tCheck c
+  tIf cond whenTrue whenFalse
 withCond' (Between start end) whenTrue whenFalse = mdo
   pActive <- newPred
 
@@ -454,16 +477,15 @@ withCond' (Between start end) whenTrue whenFalse = mdo
 -- 12,13p should print for lines 12 and 13. 12,3p should only print for 12
 -- since the condition is false before reaching the end.
   let checkEnd | (AST.Line n) <- end =  do
-                  p <- emitNewPred (EndLine n)
-                  tIf p (clear >> skip) run
+                  tIf (EndLine n) (clear >> skip) run
                | otherwise = ifCheck end (clear >> run) run
 
   -- If the end address is a line that's <= the current line, clear the flag
   -- immediately and skip the block.
-  tIf pActive (do comment "between/active"
-                  checkEnd)
-              (do comment "between/inactive"
-                  ifCheck start (comment "between/first" >> setP >> run) skip)
+  tIfP pActive (do comment "between/active"
+                   checkEnd)
+               (do comment "between/inactive"
+                   ifCheck start (comment "between/first" >> setP >> run) skip)
 
   t <- label
   _ <- whenTrue
@@ -476,27 +498,22 @@ withCond' (NotAddr addr) whenTrue whenFalse = withCond' addr whenFalse whenTrue
 
 withCond addr x = withCond' addr x (return ())
 
-withNewPred f = newPred >>= \p -> f p >> return p
-emitNewPred cond = withNewPred $ \p -> emit (SetP p cond) >> return p
-
 withMatch f = newMatch >>= \m -> f m >> return m
 emitMatch match = withMatch $ \m -> emit (SetM m match) >> return m
 
-tCheck (AST.Line 0) = return pPreFirst
-tCheck (AST.Line n) = emitNewPred (Line n)
-tCheck (AST.Match mre) = fst <$> (tCheckMatch =<< compileRE mre)
-tCheck (AST.IRQ) = return pIntr
-tCheck (AST.EOF) = emitNewPred (AtEOF 0)
+tCheck (AST.Line 0) = return (PRef pPreFirst)
+tCheck (AST.Line n) = return (Line n)
+tCheck (AST.Match mre) = do
+    m <- tCheckMatch =<< compileRE mre
+    return (IsMatch m)
+tCheck (AST.IRQ) = return (PRef pIntr)
+tCheck (AST.EOF) = return (AtEOF 0)
 
 tCheckMatch (Just re) = do
     m <- emitMatch (Match sPattern re)
-    p <- emitNewPred (IsMatch m)
     emit (SetLastRE re)
-    return (p, m)
-tCheckMatch Nothing = do
-    m <- emitMatch (MatchLastRE sPattern)
-    p <- emitNewPred (IsMatch m)
-    return (p, m)
+    return m
+tCheckMatch Nothing = emitMatch (MatchLastRE sPattern)
 
 tSed :: Sed -> IRM ()
 tSed (Sed Always (AST.Block xs)) = tSeds xs
@@ -510,7 +527,7 @@ tSed (Sed cond@(At (AST.Line 0)) x) = withCond cond $ do
   -- to false. Or assign a fresh predicate to push/copy the value into?
   emit (SetP pRunNormal cFalse)
 tSed (Sed cond@(At AST.IRQ) x) = withCond cond $ do
-  -- See comment/fixme for saving/restrogin pRunNormal above
+  -- See comment/fixme for saving/restoring pRunNormal above
   emit (SetP pRunNormal cTrue)
   tCmd x
   emit (SetP pRunNormal cFalse)
@@ -519,7 +536,7 @@ tSed (Sed cond@(At AST.IRQ) x) = withCond cond $ do
 tSed (Sed (Between start end) (AST.Change repl)) = do
     tSed (Sed (At end) (AST.Insert repl))
     tSed (Sed (Between start end) AST.Delete)
-tSed (Sed cond x) = tWhen pRunNormal $ withCond cond $ tCmd x
+tSed (Sed cond x) = tWhenP pRunNormal $ withCond cond $ tCmd x
 
 readString :: Int -> IRM SVar
 readString fd = do
@@ -529,14 +546,14 @@ readString fd = do
 
 tCmd :: AST.Cmd -> IRM ()
 tCmd (AST.Block xs) = tSeds xs
-tCmd (AST.Print fd) = tWhen pHasPattern $ emit (Print fd sPattern)
+tCmd (AST.Print fd) = tWhenP pHasPattern $ emit (Print fd sPattern)
 tCmd (AST.PrintLineNumber fd) = do
     s <- emitString SGetLineNumber
     emit (Print fd s)
-tCmd (AST.PrintLiteral width) = tWhen pHasPattern $ do
+tCmd (AST.PrintLiteral width) = tWhenP pHasPattern $ do
     s <- emitString (SFormatLiteral width sPattern)
     emit (Print 0 s)
-tCmd (AST.Message Nothing) = tWhen pHasPattern $ emit (Message sPattern)
+tCmd (AST.Message Nothing) = tWhenP pHasPattern $ emit (Message sPattern)
 tCmd (AST.Message (Just s)) = do
     tmp <- emitCString s
     emit (Message tmp)
@@ -553,7 +570,7 @@ tCmd (AST.NextA fd) = do
     setLastSubst False
     line <- readString fd
     tmp <- emitString (SAppendNL sPattern line)
-    tIf pHasPattern (setPattern tmp) (setPattern line)
+    tIfP pHasPattern (setPattern tmp) (setPattern line)
 tCmd (AST.Listen fd host port) = emit (Listen fd host port)
 tCmd (AST.Accept sfd fd) = emit (Accept sfd fd)
 tCmd (AST.Label name) = do
@@ -588,8 +605,8 @@ tCmd (AST.Delete) = branchNextCycleNoPrint
 tCmd (AST.Redirect dst (Just src)) = emit (Redirect dst src)
 tCmd (AST.Redirect dst Nothing) = emit (CloseFile dst)
 tCmd (AST.Subst mre sub flags actions) = do
-  (p, m) <- tCheckMatch =<< compileRE mre
-  tWhen p $ do
+  m <- tCheckMatch =<< compileRE mre
+  tWhen (IsMatch m) $ do
     setLastSubst True
     s <- tSubst m sPattern sub flags
     setPattern s
@@ -627,8 +644,7 @@ tCmd (AST.Insert s) = emitCString s >>= \s -> emit (Print 0 s)
 tCmd (AST.Append s) = tAppendOutputQueue =<< emitCString s
 tCmd (AST.ReadFile path) = do
     fd <- getExternalFD path False
-    p <- emitNewPred (AtEOF fd)
-    tWhenNot p $ do
+    tWhenNot (AtEOF fd) $ do
         s <- newString
         emit (ReadFile s fd)
         tAppendOutputQueue s
@@ -642,7 +658,7 @@ tCmd (AST.Quit print status) = () <$ do
   finishBlock' (Quit status)
 tCmd cmd = error ("tCmd: Unmatched case " ++ show cmd)
 
-tAppendOutputQueue s = tIf pHasQueuedOutput ifTrue ifFalse
+tAppendOutputQueue s = tIfP pHasQueuedOutput ifTrue ifFalse
   where
     -- already set to true, so no need to update predicate. Just append to
     -- the queue.
@@ -665,6 +681,15 @@ tSub m s sub = case sub of
   WholeMatch -> emitString (SSubstring s (SIMatchStart m) (SIMatchEnd m))
   BackReference i ->
     emitString (SSubstring s (SIGroupStart m i) (SIGroupEnd m i))
+  -- add some statefulness for case conversions.
+  -- noconv/lower/upper can be tracked statically - convert whole strings to
+  -- the current conversion. When entering lower/upper char, add a predicate
+  -- and update it when emitting a non-empty string. Case conversion itself
+  -- will have primitives for uppercasing the whole string or the first char.
+  -- Note that \U..\l.. reverts back to \U after lowercasing one character.
+  -- e.g. echo foobar | sed -r 's/(foo)(bar)/\U\1\l\2/' -> FOObAR
+  -- Note also that literals in the string are affected (this can be done at
+  -- compile time and may remove some of those first-char conversions).
   SetCaseConv _ -> comment "UNIMPL: case conversion" >> emitString emptyS
   -- _ -> error (show sub)
 
@@ -695,12 +720,11 @@ tSubst m s sub flags = case flags of
     loop <- label
 
     mnext <- emitMatch (NextMatch m' s)
-    p <- emitNewPred (IsMatch mnext)
 
     ss <- mapM (tSub m' s) sub
     s1 <- tConcat (sres:ss)
 
-    hasNextMatch <- finishBlock' (If p hasNextMatch lastMatch)
+    hasNextMatch <- finishBlock' (If (IsMatch mnext) hasNextMatch lastMatch)
 
     mid <- emitString (SSubstring s (SIMatchEnd m') (SIMatchStart mnext))
     emit (SetS sres (SAppend s1 mid))
@@ -721,7 +745,7 @@ tTest ifTrue maybeTarget = mdo
   let (t,f) | ifTrue    = (target, l)
             | otherwise = (l, target)
   let clear = setLastSubst False
-  tIf pLastSubst (clear >> emitBranch' t) (clear >> emitBranch' f)
+  tIfP pLastSubst (clear >> emitBranch' t) (clear >> emitBranch' f)
   l <- label
   return ()
 
@@ -750,9 +774,12 @@ usedFiles (SetP _ c) = condUsedFiles c
 usedFiles _ = S.empty
 
 usedPredicates :: Insn e x -> Set Pred
-usedPredicates (SetP p _) = S.singleton p
-usedPredicates (If p _ _) = S.singleton p
+usedPredicates (SetP p c) = S.insert p (condUsedPredicates c)
+usedPredicates (If c _ _) = condUsedPredicates c
 usedPredicates _ = S.empty
+
+condUsedPredicates (PRef p) = S.singleton p
+condUsedPredicates _ = S.empty
 
 usedStrings :: Insn e x -> Set SVar
 usedStrings (Print _ s) = S.singleton s

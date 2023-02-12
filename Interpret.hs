@@ -271,13 +271,7 @@ runIR_debug i = do
 runIR :: IR.Insn e x -> SedM ()
 runIR (IR.Label _) = return ()
 runIR (IR.Branch l) = runIRLabel l
-runIR (IR.SetP p cond) = setPred p =<< case cond of
-  IR.Bool b -> return b
-  IR.Line l -> gets ((l ==) . lineNumber)
-  IR.EndLine l -> gets ((l <) . lineNumber)
-  IR.AtEOF fd -> liftIO . fileIsEOF =<< gets (fromJust . M.lookup fd . files)
-  IR.PendingIPC -> hasPendingIPC =<< gets ipcState
-  IR.IsMatch m -> not . null <$> getMatch m
+runIR (IR.SetP p cond) = setPred p =<< evalCond cond
 runIR (IR.SetS s expr) = setString s =<< evalStringExpr expr
 runIR (IR.SetM m expr) = setMatch m =<< case expr of
   IR.Match svar re -> checkRE svar =<< getRegex re
@@ -288,8 +282,8 @@ runIR (IR.AppendS s s2) = do
   a <- getString s
   b <- getString s2
   setString s (a <> b)
-runIR (IR.If p t f) = do
-  b <- getPred p
+runIR (IR.If c t f) = do
+  b <- evalCond c
   runIRLabel (if b then t else f)
 runIR (IR.Listen i maybeHost port) = doListen i maybeHost port
 runIR (IR.Accept s c) = doAccept s c
@@ -337,6 +331,15 @@ runIR (IR.ShellExec svar) = do
 
 --runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
 
+evalCond cond = case cond of
+  IR.Bool b -> return b
+  IR.Line l -> gets ((l ==) . lineNumber)
+  IR.EndLine l -> gets ((l <) . lineNumber)
+  IR.AtEOF fd -> liftIO . fileIsEOF =<< gets (fromJust . M.lookup fd . files)
+  IR.PendingIPC -> hasPendingIPC =<< gets ipcState
+  IR.IsMatch m -> not . null <$> getMatch m
+  IR.PRef p -> getPred p
+
 setRegex :: IR.RE -> RE -> SedM ()
 setRegex (IR.RE n) re = modify $ \s -> s { regexps = f (regexps s) }
   -- TODO Map probably has one of these insert-but-don't-replace functions...
@@ -370,7 +373,6 @@ evalStringExpr (IR.SVarRef svar) = getString svar
 evalStringExpr (IR.SRandomString) = liftIO randomString
 evalStringExpr (IR.STrans from to str) =
     trans from to <$> getString str
--- TODO Should this do something special if 'a' is empty?
 evalStringExpr (IR.SAppendNL a b) = do
     a <- getString a
     b <- getString b
