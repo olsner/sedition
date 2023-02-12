@@ -244,7 +244,7 @@ tdfa2c r re =
     sfun "clear_match" ["m"] <>
     -- Since regexec seems to set all unused matches to -1, do the same for
     -- compare_regexp_matches.
-    if testCompare then stmt "memset(&m->matches, 0xff, sizeof(m->matches))" else mempty <>
+    (if testCompare then stmt "memset(&m->matches, 0xff, sizeof(m->matches))" else mempty) <>
     stmt ("m->fun = " <> regexfun r)  <>
     byteString (TDFA2C.tdfa2c re)
   where
