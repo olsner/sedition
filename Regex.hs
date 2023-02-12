@@ -79,7 +79,8 @@ escapedChar c = escaped (char c)
 pBRE = rconcat <$> many breAlternate
 breAlternate = ror <$> sepBy1 breBranch (escapedChar '|')
 breBranch = rconcat <$> some breSimple
-breSimple = flip id <$> breNondupl <*> option id breDuplSym
+breSimple = choice [ flip id <$> breNondupl <*> option id breDuplSym
+                   , Char <$> char '*' ]
 breNondupl = choice [breGroup, backRef, breOneChar]
 
 breOneChar = choice $

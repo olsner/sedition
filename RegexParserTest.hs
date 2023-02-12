@@ -123,17 +123,18 @@ tests =
   , (Both, "\\S", CNotClass spaces)
 
   -- Some BRE oddities and special cases
-  -- * first is a character, not special (not handled yet)
-  --, (BRE, "*s", Concat [Char '*', Char 's'])
-  --, (BRE, "*\\|s", Or [Char '*', Char 's'])
-  --, (BRE, "*\\|^", Or [Char '*', Char '^'])
+  -- * first is a character, not special
+  , (BRE, "*s", Concat [Char '*', Char 's'])
+  , (BRE, "*\\|s", Or [Char '*', Char 's'])
+  , (BRE, "*\\|^", Or [Char '*', Char '^'])
+  , (BRE, "^*", Concat [AnchorStart, Char '*'])
+  -- , (BRE, "**", star (Char '*'))
 
   -- BRE doesn't have to treat ^ and $ as anchors unless they are at the
   -- start/end of the regular expression.
   -- ERE gives ^ and $ their special meanings wherever they appear (even if
   -- that means they will never match).
   , (BRE, "a^", Concat [Char 'a', Char '^'])
-  -- , (BRE, "**", star (Char '*'))
   , (BRE, "a^*", Concat [Char 'a', star (Char '^')])
   , (BRE, "$a", Concat [Char '$', Char 'a'])
   , (BRE, "$\\|a", Or [Char '$', Char 'a'])
