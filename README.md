@@ -8,7 +8,7 @@ This is a dialect of sed, extended with some useful features:
   run in a new thread
 * Inter-thread communications
 * Extended hold space, a key/value store extending the normal single hold space
-* Built-in optimizer and compiler
+* Optimizing compiler
 
 This tries to be compatible with GNU sed, so it implements some GNU extensions
 and none of the added sedition features should interfere with GNU ones.
@@ -31,18 +31,18 @@ not all of them are implemented yet.)
 ## Compiling sed programs
 
 The compiler outputs C code that in turn needs to be compiled to an executable.
-(Integrating the C compilation into sedition is still TODO.)
 
     ./sed -c [sed flags] -f foo.sed -o foo.c
     cc -o foo foo.c
 
 The compiled output currently requires the POSIX regexp API with support for
-the `REG_STARTEND` flag (a BSD extension, also supported by glibc). Eventually
-the regular expressions will be compiled into the C code with re2c or an
-internal regular expression compiler.
+the `REG_STARTEND` flag (a BSD extension, also supported by glibc). This will
+only be used if any regular expressions contain back references which are not
+yet supported by the internal regular expression compiler.
 
 Most sedition-specific features are still unimplemented in the compiler, e.g.
-IPC, forks and networking. Use the `-I` flag to sedition to disable IPC.
+IPC, forks and networking. Use the `-I` flag to sedition to disable IPC, which
+may remove some unnecessary code and generate more efficient programs.
 
 To compile and run in one command, you can use the `runsed` wrapper script.
 
