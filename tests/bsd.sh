@@ -578,7 +578,10 @@ u2/g' lines1
                   echo "04.~0~20.02~2002~2002" | $SED -n 's/^\(-*\)0*\([0-9.]*[0-9]\)[^~]*/{&}/p'
     mark '8.28' ; echo "aaaa" | $SED -rn 's/a{10}/{&}/p'
                   echo "aaaa" | $SED -rn 's/a{4}/{&}/p'
-    mark '8.30' ; echo "foo^bar" | $SED -n 's/o^/{&}/p'
+    mark '8.29' ; echo "foo^bar" | $SED -n 's/o^/{&}/p'
+    # Test extraction of empty subexpressions in compiled output (substring
+    # would not accept -1..-1 as a valid empty offset)
+    mark '8.30' ; $SED -r 's/((l)|(_))/;\2;\3;/g' lines1
 }
 
 test_sedition()

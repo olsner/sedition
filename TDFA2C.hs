@@ -36,7 +36,7 @@ yydebug fmt args = sfun "YYDEBUG" (fmt : args)
 fixedTag (t, f) = stmt (showB t <> " = " <> g f)
   where
     g (EndOfMatch dist) = "YYPOS - " <> showB dist
-    g (FixedTag t2 dist) = showB t2 <> " - " <> showB dist
+    g (FixedTag t2 dist) = showB t2 <> " >= 0 ?" <> showB t2 <> " - " <> showB dist <> ": -1"
 
 matchix (T t) = showB (t `div` 2)
 matchfld (T t) | even t = "rm_so"
@@ -61,7 +61,7 @@ setTagFromReg (t, r) = stmt (showB t <> " = " <>
     showB r <> " ? " <> showB r <> " - s->buf : -1")
 
 declareTagVar :: TagId -> Builder
-declareTagVar t = stmt ("regoff_t " <> showB t <> " = -1")
+declareTagVar t = stmt ("ptrdiff_t " <> showB t <> " = -1")
 declareReg :: RegId -> Builder
 declareReg r = stmt ("const char* " <> showB r <> " = NULL")
 

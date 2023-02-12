@@ -113,6 +113,11 @@ static void free_string(string* s)
     s->buf = 0;
 }
 
+static void clear_string(string* s)
+{
+    s->len = 0;
+}
+
 static void set_str_const(string* dst, const char* src, size_t n)
 {
     if (dst->alloc) {
@@ -171,8 +176,14 @@ static void concat_inplace(string* dst, string* b)
     append_str(dst, b->buf, b->len);
 }
 
-static void substring(string* dst, string* src, size_t i1, size_t i2)
+static void substring(string* dst, string* src, ptrdiff_t i1, ptrdiff_t i2)
 {
+    if (i1 < 0 && i2 < 0) {
+        clear_string(dst);
+        return;
+    }
+    assert(0 <= i1);
+    assert(0 <= i2);
     assert(i1 <= src->len);
     assert(i2 <= src->len);
     assert(i1 <= i2);

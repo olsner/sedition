@@ -109,6 +109,7 @@ compileProgram ipc (label, program) ofile = do
     let compiled = compileIR ofile ipc label program
     C.writeFile ofile compiled
 
+-- TODO Add flags to control gcc optimization/debug settings.
 compileC cFile exeFile defines =
     rawSystem "cc" (["-O2", cFile, "-o", exeFile] ++ map ("-D"++) defines)
 
