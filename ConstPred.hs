@@ -7,7 +7,7 @@ import Compiler.Hoopl as H hiding (joinMaps)
 import Debug.Trace
 
 import IR
-import PredMap
+import Collections
 
 type ConstPredFact = PredMap (WithTop Bool)
 

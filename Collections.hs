@@ -1,16 +1,15 @@
 {-# LANGUAGE TypeFamilies,GeneralizedNewtypeDeriving,DeriveTraversable #-}
 
-module PredMap where
+module Collections where
 
 import Compiler.Hoopl as H hiding (joinMaps)
 
+import qualified Data.IntSet as S
 import qualified Data.IntMap as M
-import Data.Foldable (Foldable)
-import Data.Traversable (Traversable)
+import Data.Foldable ()
+import Data.Traversable ()
 
-import IR (Pred(..))
-
-predId (Pred i) = i
+import IR (Pred(..), SVar(..))
 
 newtype PredMap a = PM (M.IntMap a)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
@@ -57,3 +56,51 @@ joinMaps eltJoin l (OldFact old) (NewFact new) = mapFoldWithKey add (NoChange, o
         Just old_v -> case eltJoin l (OldFact old_v) (NewFact new_v) of
                         (SomeChange, v') -> (SomeChange, mapInsert k v' joinmap)
                         (NoChange,   _)  -> (ch, joinmap)
+
+newtype SVarSet = SVS S.IntSet
+
+instance IsSet SVarSet where
+  type ElemOf SVarSet = SVar
+
+  setNull (SVS s) = S.null s
+  setSize (SVS s) = S.size s
+  setMember (SVar k) (SVS s) = S.member k s
+
+  setEmpty = SVS S.empty
+  setSingleton (SVar k) = SVS (S.singleton k)
+  setInsert (SVar k) (SVS s) = SVS (S.insert k s)
+  setDelete (SVar k) (SVS s) = SVS (S.delete k s)
+
+  setUnion (SVS x) (SVS y) = SVS (S.union x y)
+  setDifference (SVS x) (SVS y) = SVS (S.difference x y)
+  setIntersection (SVS x) (SVS y) = SVS (S.intersection x y)
+  setIsSubsetOf (SVS x) (SVS y) = S.isSubsetOf x y
+
+  setFold k z (SVS s) = S.foldr (k . SVar) z s
+
+  setElems (SVS s) = map SVar (S.elems s)
+  setFromList ks = SVS (S.fromList [k | SVar k <- ks])
+
+newtype PredSet = PS S.IntSet
+
+instance IsSet PredSet where
+  type ElemOf PredSet = Pred
+
+  setNull (PS s) = S.null s
+  setSize (PS s) = S.size s
+  setMember (Pred k) (PS s) = S.member k s
+
+  setEmpty = PS S.empty
+  setSingleton (Pred k) = PS (S.singleton k)
+  setInsert (Pred k) (PS s) = PS (S.insert k s)
+  setDelete (Pred k) (PS s) = PS (S.delete k s)
+
+  setUnion (PS x) (PS y) = PS (S.union x y)
+  setDifference (PS x) (PS y) = PS (S.difference x y)
+  setIntersection (PS x) (PS y) = PS (S.intersection x y)
+  setIsSubsetOf (PS x) (PS y) = S.isSubsetOf x y
+
+  setFold k z (PS s) = S.foldr (k . Pred) z s
+
+  setElems (PS s) = map Pred (S.elems s)
+  setFromList ks = PS (S.fromList [k | Pred k <- ks])

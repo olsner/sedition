@@ -4,8 +4,6 @@ module Optimize (optimize) where
 
 import Compiler.Hoopl as H hiding ((<*>))
 
---import Data.Map (Map)
---import qualified Data.Map as M
 import Debug.Trace
 
 import IR

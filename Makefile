@@ -60,7 +60,7 @@ run-gnused-tests-compiled: sed gnused
 	SED=`pwd`/runsed ./run-gnused-tests.sh gnused
 
 MODULES = Sed Parser AST Bus ParserTest IR \
-	Optimize ConstPred RedundantBranches LivePred \
+	Optimize ConstPred RedundantBranches LivePred Collections \
 	LiveString SameString Compile Interpret \
 	Regex RegexParserTest \
 	TaggedRegex TNFA TDFA TDFA2C SimulateTNFA SimulateTDFA CharMap GenC
