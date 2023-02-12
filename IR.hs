@@ -346,8 +346,8 @@ tIf c tx fx = mdo
     comment "tIf/end"
 
 ifCheck c tx fx = do
-  p <- tCheck c
-  tIf (PRef p) tx fx
+  cond <- tCheck c
+  tIf cond tx fx
 
 type IRM = State IRState
 
@@ -443,7 +443,6 @@ tProgram seds = mdo
 
 tSeds = mapM_ tSed
 
-tWhenNotP p x = tWhenNot (PRef p) x
 tWhenP p x = tWhen (PRef p) x
 
 tWhenNot c x = mdo
@@ -460,8 +459,8 @@ tWhen c x = mdo
 
 withCond' Always whenTrue _ = whenTrue
 withCond' (At c) whenTrue whenFalse = do
-  p <- tCheck c
-  tIf (PRef p) whenTrue whenFalse
+  cond <- tCheck c
+  tIf cond whenTrue whenFalse
 withCond' (Between start end) whenTrue whenFalse = mdo
   pActive <- newPred
 
@@ -499,20 +498,16 @@ withCond' (NotAddr addr) whenTrue whenFalse = withCond' addr whenFalse whenTrue
 
 withCond addr x = withCond' addr x (return ())
 
-withNewPred f = newPred >>= \p -> f p >> return p
-emitNewPred cond = withNewPred $ \p -> emit (SetP p cond) >> return p
-
 withMatch f = newMatch >>= \m -> f m >> return m
 emitMatch match = withMatch $ \m -> emit (SetM m match) >> return m
 
--- TODO emit a condition instead of a predicate from this
-tCheck (AST.Line 0) = return pPreFirst
-tCheck (AST.Line n) = emitNewPred (Line n)
+tCheck (AST.Line 0) = return (PRef pPreFirst)
+tCheck (AST.Line n) = return (Line n)
 tCheck (AST.Match mre) = do
     m <- tCheckMatch =<< compileRE mre
-    emitNewPred (IsMatch m)
-tCheck (AST.IRQ) = return pIntr
-tCheck (AST.EOF) = emitNewPred (AtEOF 0)
+    return (IsMatch m)
+tCheck (AST.IRQ) = return (PRef pIntr)
+tCheck (AST.EOF) = return (AtEOF 0)
 
 tCheckMatch (Just re) = do
     m <- emitMatch (Match sPattern re)
