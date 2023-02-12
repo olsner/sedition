@@ -36,19 +36,12 @@ rewrite :: FuelMonad m => BwdRewrite m Insn RBFact
 rewrite = deepBwdRw rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x RBFact -> m (Maybe (Graph Insn e x))
-    -- Replaces a branch to any control-flow with a copy of the control-flow
-    rw old@(Branch t) f
-        | Just t' <- label t f = rwLast (Branch t')
-    -- Replaces only branch-to-branch with a branch to the target.
-    -- Redundant usually, unless rwLast rejected the rewrite above.
-    rw old@(Branch t) f
-        | Just t' <- label t f = rwLast (Branch t')
-    rw old@(If p tl fl) f
-        | Just tl' <- label tl f = rwLast (If p tl' fl)
-        | Just fl' <- label fl f = rwLast (If p tl fl')
-    rw old@(Fork l1 l2) f
-        | Just l1' <- label l1 f = rwLast (Fork l1' l2)
-        | Just l2' <- label l2 f = rwLast (Fork l1 l2')
+    rw (Branch t) f   | Just t' <- label t f   = rwLast (Branch t')
+    -- Do just one change at a time so that optimization fuel applies.
+    rw (If p tl fl) f | Just tl' <- label tl f = rwLast (If p tl' fl)
+                      | Just fl' <- label fl f = rwLast (If p tl fl')
+    rw (Fork l1 l2) f | Just l1' <- label l1 f = rwLast (Fork l1' l2)
+                      | Just l2' <- label l2 f = rwLast (Fork l1 l2')
     rw _ _ = return Nothing
 
     rwLast :: FuelMonad m => Insn O C -> m (Maybe (Graph Insn O C))
