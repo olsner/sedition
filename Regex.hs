@@ -85,11 +85,12 @@ breNondupl = choice [breGroup, backRef, breOneChar]
 
 breOneChar = choice $
   [ breOrdChar
-  , breQuotedChar
-  , breAny
-  , bracketExpression
   , spaceClass <$ escapedChar 's'
-  , notSpaceClass <$ escapedChar 'S']
+  , notSpaceClass <$ escapedChar 'S'
+  , breQuotedChar
+  , Char <$> try (char '\\' <* eof)
+  , breAny
+  , bracketExpression ]
 breDuplSym :: Parser (Regex -> Regex)
 breDuplSym = choice [star, breBracedCount, escaped plus, escaped question]
 
@@ -111,7 +112,9 @@ ereBracedCount = ereBraces counts
 
 breSpecialChars = "*.[\\"
 breQuotedChar :: Parser Regex
-breQuotedChar = Char <$> escaped (oneOf breSpecialChars)
+-- Don't include characters that get special meaning with backslash, this is
+-- all characters that keep (or get) non-special meaning when escaped.
+breQuotedChar = Char <$> escaped (noneOf "|()")
 breOrdChar :: Parser Regex
 breOrdChar = Char <$> noneOf breSpecialChars
 breGroup :: Parser Regex
@@ -230,5 +233,5 @@ parseString ere input = case parseOnly ere input of
     Failure e -> error (show e)
 
 parseOnly :: Bool -> C.ByteString -> Result Regex
-parseOnly False = eatAnchors (parseByteString pBRE mempty)
-parseOnly True  = parseByteString pERE mempty
+parseOnly False = eatAnchors (parseByteString (pBRE <* eof) mempty)
+parseOnly True  = parseByteString (pERE <* eof) mempty

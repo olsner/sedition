@@ -140,6 +140,9 @@ tests =
   , (BRE, "$\\|a", Or [Char '$', Char 'a'])
   , (BRE, "$\\{1,3\\}", Repeat 1 (Just 3) (Char '$'))
   , (BRE, "$*", star (Char '$'))
+
+  , (BRE, "^\\]", Concat [AnchorStart, Char ']'])
+  , (BRE, "^\\", Concat [AnchorStart, Char '\\'])
   ]
 
 -- Test code

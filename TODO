@@ -11,6 +11,8 @@
 - Add mode for bsd.sh that compares interpreted to compiled
   - Or just record known-good outputs for every test...
 - ConstPred pass is too slow, why?
+- Improved correctness: use TDFA simulator in non-compiled mode instead of
+  regex-posix?
 
 # Optimizations
 
