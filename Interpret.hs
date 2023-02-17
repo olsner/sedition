@@ -278,10 +278,6 @@ runIR (IR.SetM m expr) = setMatch m =<< case expr of
   IR.MatchLastRE svar -> checkRE svar =<< getLastRegex
   IR.NextMatch m2 _ -> tail <$> getMatch m2
   IR.MVarRef m2 -> getMatch m2
-runIR (IR.AppendS s s2) = do
-  a <- getString s
-  b <- getString s2
-  setString s (a <> b)
 runIR (IR.If c t f) = do
   b <- evalCond c
   runIRLabel (if b then t else f)

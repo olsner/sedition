@@ -144,6 +144,7 @@ static void append_str(string* dst, const char *str, size_t n)
 
 static void copy(string* dst, string* src)
 {
+    assert(dst != src);
     ensure_len_discard(dst, src->len);
     memcpy(dst->buf, src->buf, src->len);
     dst->len = src->len;
@@ -151,6 +152,7 @@ static void copy(string* dst, string* src)
 
 static void concat_newline(string* dst, string* a, string* b)
 {
+    assert(dst != a && dst != b);
     const size_t n = a->len + 1 + b->len;
     ensure_len_discard(dst, n);
 
@@ -162,6 +164,7 @@ static void concat_newline(string* dst, string* a, string* b)
 
 static void concat(string* dst, string* a, string* b)
 {
+    assert(dst != a && dst != b);
     const size_t n = a->len + b->len;
     ensure_len_discard(dst, n);
 

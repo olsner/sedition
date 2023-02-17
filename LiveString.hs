@@ -35,7 +35,6 @@ kill _ = id
 gen :: Insn e x -> LiveStringFact -> LiveStringFact
 gen (SetS _ expr) = genS expr
 gen (SetM _ expr) = genM expr
-gen (AppendS s1 s2) = setInsert s1 . setInsert s2
 gen (Print _ s) = setInsert s
 gen (Message s) = setInsert s
 gen (ShellExec s) = setInsert s
@@ -81,9 +80,6 @@ liveString = deepBwdRw rw
 
     rw :: FuelMonad m => Insn e x -> Fact x LiveStringFact -> m (Maybe (Graph Insn e x))
     rw i@(SetS s _) f | dead s f = remove
-    rw (SetS s (SAppend s1 s2)) f
-                      | dead s1 f = replace [SetS s (SVarRef s1), AppendS s s2]
-    rw (AppendS s _) f | dead s f = remove
     -- Read and GetMessage both have side effects, so don't remove those even
     -- if the result is unused.
     rw _ _ = return Nothing

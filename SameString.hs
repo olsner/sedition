@@ -52,7 +52,6 @@ sameStringTransfer = mkFTransfer3 first middle last
     middle :: Insn O O -> SameStringFact -> SameStringFact
     middle (SetS s (SVarRef s2)) = changeString s (PElem s2)
     middle (SetS s _)            = changeString s Top
-    middle (AppendS s _)         = changeString s Top
     middle (GetMessage s)        = changeString s Top
     middle (Read s _)            = changeString s Top
     middle (ReadFile s _)        = changeString s Top
@@ -75,7 +74,6 @@ sameString = deepFwdRw rw
     rw (SetP p cond)   f = return (mkMiddle . SetP p <$> rwC cond f)
     rw (SetM m expr)   f = return (mkMiddle . SetM m <$> rwM expr f)
     rw (Print fd s)    f = return (mkMiddle <$> var1 (Print fd) s f)
-    rw (AppendS s1 s2) f = return (mkMiddle <$> var1 (AppendS s1) s2 f)
     rw (Message s)     f = return (mkMiddle <$> var1 Message s f)
     rw (ShellExec s)   f = return (mkMiddle <$> var1 ShellExec s f)
     rw _ _ = return Nothing

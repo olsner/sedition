@@ -116,9 +116,6 @@ data Insn e x where
 
   SetP          :: Pred -> Cond             -> Insn O O
   SetS          :: SVar -> StringExpr       -> Insn O O
-  -- TODO Unnecessary, can just as well recognize "s <- s ++ s2" (and optimize
-  -- to prefer in-place appends?).
-  AppendS       :: SVar -> SVar             -> Insn O O
   SetM          :: MVar -> MatchExpr        -> Insn O O
   -- for n/N (which can never accept interrupts), and R
   Read          :: SVar -> FD               -> Insn O O
@@ -697,7 +694,7 @@ tConcat [x] = return x
 tConcat xs  = emitString emptyS >>= go xs
   where
     go []     acc = return acc
-    go (x:xs) acc = emit (AppendS acc x) >> go xs acc
+    go (x:xs) acc = emit (SetS acc (SAppend acc x)) >> go xs acc
 
 tSubs m s subs = tConcat =<< mapM (tSub m s) subs
 

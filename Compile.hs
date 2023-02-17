@@ -129,7 +129,6 @@ compileInsn (IR.Branch l) = gotoL l
 compileInsn (IR.SetP p cond) = stmt (pred p <> " = " <> compileCond cond)
 compileInsn (IR.SetS s expr) = stmt (setString s expr)
 compileInsn (IR.SetM m expr) = stmt (compileMatch m expr)
-compileInsn (IR.AppendS s s2) = sfun "concat_inplace" [string s, string s2]
 compileInsn (IR.If c t f) = cIf (compileCond c) (gotoL t) (gotoL f)
 compileInsn (IR.Listen i maybeHost port) =
   sfun "sock_listen" [infd i, chost maybeHost, intDec port]
@@ -190,7 +189,9 @@ setString t (IR.STrans from to s) =
   -- statefulness to cache them and to output functions outside of main though.
   fun "trans" [string t, cstring from, cstring to, string s]
 setString t (IR.SAppendNL a b) = fun "concat_newline" (map string [t, a, b])
-setString t (IR.SAppend a b) = fun "concat" (map string [t, a, b])
+setString t (IR.SAppend a b)
+    | t == a    = fun "concat_inplace" (map string [t, b])
+    | otherwise = fun "concat" (map string [t, a, b])
 setString t (IR.SSubstring s start end) =
   fun "substring" [string t, string s, startix, endix]
   where
