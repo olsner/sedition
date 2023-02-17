@@ -9,7 +9,7 @@ import qualified Data.IntMap as M
 import Data.Foldable ()
 import Data.Traversable ()
 
-import IR (Pred(..), SVar(..))
+import IR (Pred(..), SVar(..), MVar(..))
 
 newtype PredMap a = PM (M.IntMap a)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
@@ -104,3 +104,64 @@ instance IsSet PredSet where
 
   setElems (PS s) = map Pred (S.elems s)
   setFromList ks = PS (S.fromList [k | Pred k <- ks])
+
+newtype MVarSet = MVS S.IntSet
+
+instance IsSet MVarSet where
+  type ElemOf MVarSet = MVar
+
+  setNull (MVS s) = S.null s
+  setSize (MVS s) = S.size s
+  setMember (MVar k) (MVS s) = S.member k s
+
+  setEmpty = MVS S.empty
+  setSingleton (MVar k) = MVS (S.singleton k)
+  setInsert (MVar k) (MVS s) = MVS (S.insert k s)
+  setDelete (MVar k) (MVS s) = MVS (S.delete k s)
+
+  setUnion (MVS x) (MVS y) = MVS (S.union x y)
+  setDifference (MVS x) (MVS y) = MVS (S.difference x y)
+  setIntersection (MVS x) (MVS y) = MVS (S.intersection x y)
+  setIsSubsetOf (MVS x) (MVS y) = S.isSubsetOf x y
+
+  setFold k z (MVS s) = S.foldr (k . MVar) z s
+
+  setElems (MVS s) = map MVar (S.elems s)
+  setFromList ks = MVS (S.fromList [k | MVar k <- ks])
+
+newtype MVarMap a = MVM (M.IntMap a)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+instance IsMap MVarMap where
+  type KeyOf MVarMap = MVar
+
+  mapNull (MVM m) = M.null m
+  mapSize (MVM m) = M.size m
+  mapMember (MVar k) (MVM m) = M.member k m
+  mapLookup (MVar k) (MVM m) = M.lookup k m
+  mapFindWithDefault def (MVar k) (MVM m) = M.findWithDefault def k m
+
+  mapEmpty = MVM M.empty
+  mapSingleton (MVar k) v = MVM (M.singleton k v)
+  mapInsert (MVar k) v (MVM m) = MVM (M.insert k v m)
+  mapInsertWith f (MVar k) v (MVM m) = MVM (M.insertWith f k v m)
+  mapDelete (MVar k) (MVM m) = MVM (M.delete k m)
+
+  mapUnion (MVM x) (MVM y) = MVM (M.union x y)
+  mapUnionWithKey f (MVM x) (MVM y) = MVM (M.unionWithKey (f . MVar) x y)
+  mapDifference (MVM x) (MVM y) = MVM (M.difference x y)
+  mapIntersection (MVM x) (MVM y) = MVM (M.intersection x y)
+  mapIsSubmapOf (MVM x) (MVM y) = M.isSubmapOf x y
+
+  mapMap f (MVM m) = MVM (M.map f m)
+  mapMapWithKey f (MVM m) = MVM (M.mapWithKey (f . MVar) m)
+  mapFold k z (MVM m) = M.foldr k z m
+  mapFoldWithKey k z (MVM m) = M.foldrWithKey (k . MVar) z m
+  mapFilter f (MVM m) = MVM (M.filter f m)
+
+  mapElems (MVM m) = M.elems m
+  mapKeys (MVM m) = map MVar (M.keys m)
+  mapToList (MVM m) = [(MVar k, v) | (k,v) <- M.toList m]
+  mapFromList assocs = MVM (M.fromList [(k, v) | (MVar k, v) <- assocs])
+  mapFromListWith f assocs = MVM (M.fromListWith f [(k, v) | (MVar k, v) <- assocs])
+

@@ -13,7 +13,7 @@ import LivePred (livePredPass)
 import LiveString (liveStringPass)
 --import SameString (sameStringPass)
 import RedundantBranches (redundantBranchesPass)
--- TODO Add liveness pass for match registers
+import LiveMatch (liveMatchPass, canApplyLiveMatch)
 import LiveLastRegex (liveLastRegexPass, constLastRegexPass)
 
 --debugBwd = debugBwdJoins trace (const True)
@@ -58,6 +58,11 @@ optimizeOnce entry program = do
     analyzeAndRewriteFwd constLastRegexPass entries program mapEmpty
   program <- tracePass "liveLastRegex" $
     analyzeAndRewriteBwd liveLastRegexPass entries program mapEmpty
+  program <-
+    if canApplyLiveMatch program
+      then tracePass "liveMatch" $
+            analyzeAndRewriteBwd liveMatchPass entries program mapEmpty
+      else pure program
   -- This doesn't seem to do much for runtime, so skip it. Should be more
   -- relevant when we try to analyze the contents of strings though.
   --(program,_,_) <- analyzeAndRewriteFwd sameStringPass entries program mapEmpty

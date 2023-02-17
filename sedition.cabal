@@ -44,7 +44,7 @@ executable sedition
 
     other-modules:    Parser AST Bus IR
                       Optimize ConstPred RedundantBranches LivePred
-                      Collections LiveString SameString LiveLastRegex
+                      Collections LiveString SameString LiveMatch LiveLastRegex
                       Compile Interpret
                       Regex
                       TaggedRegex TNFA TDFA TDFA2C SimulateTNFA SimulateTDFA
