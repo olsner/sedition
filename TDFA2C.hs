@@ -155,9 +155,9 @@ emitState TDFA{..} minLengths s =
 
 -- Calling convention for matcher functions:
 -- 
--- static void FUN(match_t* m, string* s, const size_t orig_offset)
+-- static bool FUN(match_t* m, string* s, const size_t orig_offset)
 -- struct string { char* buf; size_t len; size_t alloc; };
--- struct match_t { bool result; regmatch_t matches[]; }
+-- struct match_t { regmatch_t matches[]; }
 -- where regmatch_t has rm_so and rm_eo, corresponding to the even/odd tag
 -- offset is > 0 when repeating a match for a global replace
 --
@@ -166,6 +166,9 @@ emitState TDFA{..} minLengths s =
 -- Although it complicates things a bit in here (more goto spaghetti!), never
 -- return directly but goto the end of the block, where the caller may have put
 -- some before-return debugging code.
+--
+-- The variable 'bool result' should be set to the success (true = match) of
+-- the regexp search.
 genC :: TDFA -> Builder
 genC tdfa@TDFA{..} =
     cWhen "orig_offset && orig_offset >= s->len" (
@@ -196,7 +199,7 @@ genC tdfa@TDFA{..} =
     blockComment "Successful finish: found match" <>
     label "match" <>
     stmt "YYDEBUG(\"match found\\n\")" <>
-    stmt "m->result = true" <>
+    stmt "result = true" <>
     foldMap setTagFromReg (M.toList tdfaFinalRegisters) <>
     foldMap fixedTag (M.toList tdfaFixedTags) <>
     foldMap matchFromTag (S.toList allTags) <>
@@ -210,8 +213,8 @@ genC tdfa@TDFA{..} =
     "}\n" <>
     stmt "YYDEBUG(\"match failed\\n\")" <>
     label "end" <>
-    sfun "YYSTATS" ["matched", "m->result"] <>
-    sfun "YYSTATS" ["failed", "!m->result"]
+    sfun "YYSTATS" ["matched", "result"] <>
+    sfun "YYSTATS" ["failed", "!result"]
   where
     allTags = S.union (M.keysSet tdfaFixedTags) (M.keysSet tdfaFinalRegisters)
     allRegs = tdfaRegisters tdfa

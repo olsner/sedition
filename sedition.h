@@ -44,14 +44,12 @@ typedef struct string string;
 struct match_t;
 typedef struct match_t match_t;
 
-typedef void regex_match_fun_t(match_t*, string*, size_t);
+typedef bool regex_match_fun_t(match_t*, string*, size_t);
 typedef regex_t re_t;
 
 #define MAXGROUP 9
 struct match_t {
     regex_match_fun_t *fun;
-
-    bool result;
     struct {
         ptrdiff_t rm_so, rm_eo;
     } matches[MAXGROUP + 1];
@@ -285,16 +283,20 @@ static void free_regexp(regex_t* re)
     regfree(re);
 }
 
-static void compare_regexp_matches(match_t* ref, match_t* m, string* s, size_t offset, const char *function, const char *original_re)
+static void compare_regexp_matches(
+        bool ref_match, match_t* ref,
+        bool match, match_t* m,
+        string* s, size_t offset,
+        const char *function, const char *original_re)
 {
     bool diff = false;
-    if (ref->result != m->result) {
+    if (ref_match != match) {
         fprintf(stderr, "%s: should %s, but did %s\n",
                 function,
-                ref->result ? "match" : "not match",
-                m->result ? "match" : "not");
+                ref_match ? "match" : "not match",
+                match ? "match" : "not");
         diff = true;
-    } else if (ref->result) {  // Only compare groups on match
+    } else if (ref_match) {  // Only compare groups on match
         for (int i = 0; i <= MAXGROUP; i++) {
             if (ref->matches[i].rm_so != m->matches[i].rm_so ||
                     ref->matches[i].rm_eo != m->matches[i].rm_eo) {
@@ -331,12 +333,13 @@ static void clear_match(match_t* m)
     memset(m, 0, sizeof(*m));
 }
 
-__attribute__((noinline)) static void copy_match(match_t* dst, match_t* src)
+__attribute__((noinline)) static bool copy_match(match_t* dst, match_t* src, bool src_result)
 {
     memcpy(dst, src, sizeof(match_t));
+    return src_result;
 }
 
-static void match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
+static bool match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
                          regex_match_fun_t* fun)
 {
     clear_match(m);
@@ -344,7 +347,7 @@ static void match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
     // Stop matching when we've consumed the whole string, but allow a zero
     // length match if it comes first?
     if (offset && offset >= s->len) {
-        return;
+        return false;
     }
     if (sizeof(regoff_t) < sizeof(ptrdiff_t)) {
         assert(s->len <= INT_MAX);
@@ -366,10 +369,10 @@ static void match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
         m->matches[i].rm_so = tmp_matches[i].rm_so;
         m->matches[i].rm_eo = tmp_matches[i].rm_eo;
     }
-    m->result = (res == 0);
+    return res == 0;
 }
 
-static void next_match(match_t* dst, match_t* src, string* s)
+static bool next_match(match_t* dst, match_t* src, string* s)
 {
     size_t offset = src->matches[0].rm_eo;
     // Try to handle regexpes that match the empty string. We should try every
@@ -377,7 +380,7 @@ static void next_match(match_t* dst, match_t* src, string* s)
     if (src->matches[0].rm_so == offset && offset < s->len) {
         offset++;
     }
-    src->fun(dst, s, offset);
+    return src->fun(dst, s, offset);
 }
 
 //

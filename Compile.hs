@@ -33,14 +33,15 @@ programHeader ofile program =
     \static bool hasPendingIPC = false;\n\
     \static int exit_status = EXIT_SUCCESS;\n\
     \static regex_match_fun_t* lastRegex = NULL;\n" <>
+    foldMap (declare "re_t" regexvar) regexpvars <>
+    foldMap compileRE (M.assocs allRegexps) <>
+    "int main(int argc, const char *argv[]) {\n" <>
     foldMap (declare "bool" pred) preds <>
     foldMap (declare "string" stringvar) strings <>
     foldMap (declare "FILE*" infd) files <>
     foldMap (declare "FILE*" outfd) files <>
     foldMap (declare "match_t" match) matches <>
-    foldMap (declare "re_t" regexvar) regexpvars <>
-    foldMap compileRE (M.assocs allRegexps) <>
-    "int main(int argc, const char *argv[]) {\n" <>
+    foldMap (declare "bool" mpred) matches <>
     foldMap initRegexp (M.assocs regexps) <>
     infd 0 <> " = next_input(argc, argv);\n" <>
     outfd 0 <> " = stdout;\n"
@@ -95,6 +96,7 @@ stringvar (IR.SVar s) = "S" <> intDec s
 pred (IR.Pred p) = "P" <> intDec p
 match (IR.MVar m) = "M" <> intDec m
 matchref (IR.MVar m) = "&M" <> intDec m
+mpred (IR.MVar m) = "MP" <> intDec m
 infd i = "inF" <> idIntDec i
 outfd i = "outF" <> idIntDec i
 
@@ -110,7 +112,7 @@ compileCond cond = case cond of
   IR.Bool b -> bool b
   IR.Line l -> intDec l <> " == " <> lineNumber
   IR.EndLine l -> intDec l <> " < " <> lineNumber
-  IR.IsMatch mvar -> match mvar <> ".result"
+  IR.IsMatch mvar -> mpred mvar
   IR.AtEOF 0 -> fun "is_all_eof" ["&" <> infd 0, "argc", "argv"]
   IR.AtEOF i -> fun "is_eof" [infd i]
   IR.PendingIPC -> hasPendingIPC
@@ -119,7 +121,7 @@ compileCond cond = case cond of
 compileMatch m (IR.Match svar re) = fun (regexfun re) [matchref m, string svar, "0"]
 compileMatch m (IR.MatchLastRE svar) = fun lastRegex [matchref m, string svar, "0"]
 compileMatch m (IR.NextMatch m2 s) = fun "next_match" [matchref m, matchref m2, string s]
-compileMatch m (IR.MVarRef m2) = fun "copy_match" [matchref m, matchref m2]
+compileMatch m (IR.MVarRef m2) = fun "copy_match" [matchref m, matchref m2, mpred m2]
 
 closeFile i = sfun "close_file" [infd i] <> sfun "close_file" [outfd i]
 
@@ -128,7 +130,7 @@ compileInsn (IR.Label lbl) = label (show lbl)
 compileInsn (IR.Branch l) = gotoL l
 compileInsn (IR.SetP p cond) = stmt (pred p <> " = " <> compileCond cond)
 compileInsn (IR.SetS s expr) = stmt (setString s expr)
-compileInsn (IR.SetM m expr) = stmt (compileMatch m expr)
+compileInsn (IR.SetM m expr) = stmt (mpred m <> "  = " <> compileMatch m expr)
 compileInsn (IR.If c t f) = cIf (compileCond c) (gotoL t) (gotoL f)
 compileInsn (IR.Listen i maybeHost port) =
   sfun "sock_listen" [infd i, chost maybeHost, intDec port]
@@ -228,12 +230,14 @@ compileRE (r, (s, ere)) = wrapper body
     re = Regex.parseString ere s
     needRegexec = forceRegcomp || not (TDFA2C.isCompatible re)
     res = C.pack $ Regex.reString re
-    wrapper b = "static void " <> regexfun r <> "(match_t* m, string* s, const size_t orig_offset) {\n" <> comment description <> b <> "}\n"
-    match m = sfun "match_regexp" [m, "s", "orig_offset", regex r, regexfun r]
+    wrapper b = "static bool " <> regexfun r <> "(match_t* m, string* s, const size_t orig_offset) {\n" <> comment description <> "bool result = false;\n" <> b <> "return result;\n}\n"
+    match m = fun "match_regexp" [m, "s", "orig_offset", regex r, regexfun r]
     -- regcomp is run at start of main so we just need to forward the arguments.
-    regexec = match "m"
-    match_for_compare = stmt "match_t m2" <> match "&m2"
-    compare_matches = sfun "compare_regexp_matches" ["&m2", "m", "s", "orig_offset", "__PRETTY_FUNCTION__", cstring res]
+    regexec = stmt ("result = " <> match "m")
+    match_for_compare =
+        stmt "match_t m2" <>
+        stmt ("const bool result2 = " <> match "&m2")
+    compare_matches = sfun "compare_regexp_matches" ["result2", "&m2", "result", "m", "s", "orig_offset", "__PRETTY_FUNCTION__", cstring res]
 
     description =
         (if ere then "ERE: "  else "BRE: ") <> cstring s <>
