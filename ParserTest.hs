@@ -36,6 +36,10 @@ tests =
   , ("D;d", [Sed Always DeleteFirstLine, Sed Always Delete])
 
   , ("i text", [Sed Always (Insert "text")])
+  , ("i\\\ntext", [Sed Always (Insert "text")])
+  , ("i\\\n\\x41", [Sed Always (Insert "A")])
+  , ("i\\\n\\c[", [Sed Always (Insert "\x1b")])
+  , ("i\\\n\\ ", [Sed Always (Insert " ")])
 
   , ("l", [Sed Always (PrintLiteral 70)])
   , ("l 123", [Sed Always (PrintLiteral 123)])
@@ -111,10 +115,9 @@ tests =
   -- literal number.
   , ("s/.*/\\38\\37\\30/", [Sed Always (subst' ".*" [BackReference 3, Literal "8", BackReference 3, Literal "7", BackReference 3, Literal "0"])])
   , ("s/./(&)/", [Sed Always (subst' "." [Literal "(", WholeMatch, Literal ")"])])
-  -- TODO: fails parsing because of the \xc4. Is it not matched by anyChar or
-  -- something? (Note, this isn't a hex escape, it's a byte C4 in the input.)
   , ("s/foo/\xc4/", [Sed Always (subst' "foo" [Literal "\xc4"])])
   , ("s/foo/\x80/", [Sed Always (subst' "foo" [Literal "\x80"])])
+  , ("s/foo/\\c[/", [Sed Always (subst' "foo" [Literal "\x1b"])])
 
   , ("s/.*/\\L&/", [Sed Always (subst' ".*" [SetCaseConv Lower, WholeMatch])])
   , ("s//\\L\\l\\U\\u\\E/", [Sed Always (subst' "" [

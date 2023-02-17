@@ -4,10 +4,11 @@ module Parser (parseString, parseOnly, pFile) where
 
 import Control.Applicative
 
+import Data.Bits
 import Data.ByteString.Char8 (ByteString)
 import qualified Data.ByteString.Char8 as BS
 import qualified Data.ByteString.UTF8 as UTF8
-import Data.Char (digitToInt)
+import Data.Char (digitToInt, toUpper)
 import Data.Maybe
 
 import System.Exit
@@ -55,6 +56,7 @@ unescape c   = c
 
 hexUnescape _ d1 d2 = toEnum (read ['0','x',d1,d2])
 hexUnescape1 _ d1 = toEnum (read ['0','x',d1])
+controlChar c = toEnum (fromEnum (toUpper c) `xor` 0x40)
 
 list p1 p2 = (:) <$> p1 <*> p2
 
@@ -75,8 +77,7 @@ pTextArgument = BS.pack <$> (line0 <|> wsThen line1)
     -- multiline text.
     line0 = char '\\' *> char '\n' *> line1
     line1 = choice $
-      [ char '\\' *> (list (char '\n') line1
-                      <|> list (unescape <$> noneOf "\n") line1)
+      [ list (char '\\' *> (pEscaped <|> anyChar)) line1
       , [] <$ char '\n'
       , [] <$ eof
       , list anyChar line1]
@@ -129,6 +130,11 @@ stringTerm term = slashWith False term
 pRegexp :: Char -> Parser (Maybe S)
 pRegexp term = re <$> slashWith True term
 
+pEscaped = choice [ unescape <$> oneOf "rn"
+                  , try (hexUnescape <$> char 'x' <*> hexDigit <*> hexDigit)
+                  , hexUnescape1 <$> char 'x' <*> hexDigit
+                  , char 'c' *> (controlChar <$> anyChar)]
+
 -- Parse a replacement and the closing terminator. \ escapes the terminator and
 -- starts a back reference. & is a reference to the whole pattern.
 pReplacement :: Char -> Parser Replacement
@@ -137,9 +143,7 @@ pReplacement term = combineLiterals <$> many (choice ps) <* char term
   ps = [ WholeMatch <$ char '&'
        , charLit <$> noneOf [term,'\n','\\']
        , char '\\' >> choice escaped ]
-  escaped = [ charLit . unescape <$> oneOf "rn"
-            , try (charLit <$> (hexUnescape <$> char 'x' <*> hexDigit <*> hexDigit))
-            , charLit <$> (hexUnescape1 <$> char 'x' <*> hexDigit)
+  escaped = [ charLit <$> pEscaped
             , BackReference . digitToInt <$> digit
             , SetCaseConv Lower <$ char 'L'
             , SetCaseConv LowerChar <$ char 'l'

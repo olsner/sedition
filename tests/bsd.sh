@@ -340,6 +340,10 @@ a\
 append
 2n
 ' lines1
+    mark '4.15' ; $SED '
+i\
+\c[
+' lines1
 }
 
 test_branch()
