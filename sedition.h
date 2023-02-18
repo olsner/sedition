@@ -298,7 +298,7 @@ static void compare_regexp_matches(match_t* ref, match_t* m, string* s, size_t o
         for (int i = 0; i <= MAXGROUP; i++) {
             if (ref->matches[i].rm_so != m->matches[i].rm_so ||
                     ref->matches[i].rm_eo != m->matches[i].rm_eo) {
-                fprintf(stderr, "%s: group %d should be %d..%d, not %d..%d\n",
+                fprintf(stderr, "%s: group %d should be %td..%td, not %td..%td\n",
                         function, i,
                         ref->matches[i].rm_so, ref->matches[i].rm_eo,
                         m->matches[i].rm_so, m->matches[i].rm_eo);
