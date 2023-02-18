@@ -5,6 +5,7 @@
 
 #include <assert.h>
 #include <ctype.h>
+#include <limits.h>
 #include <malloc.h>
 #include <regex.h>
 #include <stdarg.h>
@@ -51,7 +52,9 @@ struct match_t {
     regex_match_fun_t *fun;
 
     bool result;
-    regmatch_t matches[MAXGROUP + 1];
+    struct {
+        ptrdiff_t rm_so, rm_eo;
+    } matches[MAXGROUP + 1];
 };
 
 static int lineNumber;
@@ -343,16 +346,25 @@ static void match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
     if (offset && offset >= s->len) {
         return;
     }
+    if (sizeof(regoff_t) < sizeof(ptrdiff_t)) {
+        assert(s->len <= INT_MAX);
+    }
 
+    // May need to convert since glibc is dumb and uses 'int' for regoff_t...
+    regmatch_t tmp_matches[MAXGROUP + 1];
     m->fun = fun;
-    m->matches[0].rm_so = offset;
-    m->matches[0].rm_eo = s->len;
+    tmp_matches[0].rm_so = offset;
+    tmp_matches[0].rm_eo = s->len;
     // REG_STARTEND with non-zero offset seems to imply REG_NOTBOL in glibc.
     const int flags = REG_STARTEND | (offset ? REG_NOTBOL : 0);
-    int res = regexec(regex, s->buf, MAXGROUP + 1, m->matches, flags);
+    int res = regexec(regex, s->buf, MAXGROUP + 1, tmp_matches, flags);
     if (res != 0 && res != REG_NOMATCH) {
         fprintf(stderr, "regexec: error %d\n", res);
         abort();
+    }
+    for (int i = 0; i <= MAXGROUP; i++) {
+        m->matches[i].rm_so = tmp_matches[i].rm_so;
+        m->matches[i].rm_eo = tmp_matches[i].rm_eo;
     }
     m->result = (res == 0);
 }

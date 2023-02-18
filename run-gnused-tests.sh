@@ -59,9 +59,8 @@ bad=(
     binary
     # Index out of range when using s with explicit nth match
     bug32271-1
-    # Bad but not for the usual reason. There's no memory buffer size limit in
-    # sedition (although POSIX regex C api might have some?) but regex-posix
-    # mishandles NULs so the substitution is not done anyway.
+    # Works in compiled mode, but the interpreter uses regex-posix which has
+    # the same issue as GNU sed (on glibc systems anyway).
     regex-max-int
     # unimplemented: /e flag and in particular the e command
     # unimplemented: -i flag
