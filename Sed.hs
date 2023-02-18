@@ -1,7 +1,7 @@
 {-# LANGUAGE OverloadedStrings, CPP, TypeFamilies, NamedFieldPuns, RecordWildCards, ScopedTypeVariables #-}
 {-# OPTIONS_GHC -fwarn-incomplete-patterns #-}
 
-module Sed (main) where
+module Main (main) where
 
 #define DEBUG 0
 

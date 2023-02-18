@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module RegexParserTest (main) where
+module Main (main) where
 
 import qualified Data.ByteString.Char8 as C
 import Data.List (nub, sort)

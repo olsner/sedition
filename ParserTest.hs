@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings #-}
 
-module ParserTest (main) where
+module Main (main) where
 
 import System.Exit
 

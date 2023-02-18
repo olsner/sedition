@@ -1,0 +1,86 @@
+cabal-version:      3.4
+name:               sedition
+version:            0.1.0.0
+
+synopsis:           sed compiler and interpreter
+description:        Optimizing sed compiler and interpreter with networking and threads
+
+-- A URL where users can report bugs.
+bug-reports:        https://github.com/olsner/sedition
+
+-- The license under which the package is released.
+license:            MIT
+
+-- The package author(s).
+author:             Simon Brenner <olsner@gmail.com>
+maintainer:         olsner@gmail.com
+
+-- A copyright notice.
+copyright:          Copyright (C) 2017 Simon Brenner
+category:           Compiler
+extra-source-files:
+    README.md sedition.h
+
+source-repository head
+  type:     git
+  location: https://github.com/olsner/sedition
+
+common lang
+    default-language: Haskell2010
+    build-depends:    base ^>=4.15.0.0
+    ghc-options:      -O2
+
+common deps
+    build-depends:    bytestring, utf8-string,
+                      containers,
+                      transformers,
+                      trifecta,
+                      regex-base, regex-posix,
+
+common warn
+    ghc-options: -Widentities -Wcompat -Wall -Wno-name-shadowing -Wno-missing-signatures
+
+executable sedition
+    import:           lang
+    import:           deps
+    import:           warn
+
+    main-is:          Sed.hs
+
+    other-modules:    Parser AST Bus IR
+                      Optimize ConstPred RedundantBranches LivePred
+                      Collections LiveString SameString Compile Interpret
+                      Regex
+                      TaggedRegex TNFA TDFA TDFA2C SimulateTNFA SimulateTDFA
+                      CharMap GenC
+
+    build-depends:    hoopl,
+                      regex-posix,
+                      array,
+                      time,
+                      -- For the compiler
+                      file-embed,
+                      -- For the interpreter
+                      random,
+                      network,
+                      process,
+    hs-source-dirs:   .
+
+
+test-suite parser-test
+    import:           lang
+    import:           deps
+    import:           warn
+
+    type:             exitcode-stdio-1.0
+    main-is:          ParserTest.hs
+    other-modules:    AST Parser
+
+test-suite regex-parser-test
+    import:           lang
+    import:           deps
+    import:           warn
+
+    type:             exitcode-stdio-1.0
+    main-is:          RegexParserTest.hs
+    other-modules:    Regex

@@ -1,0 +1,13 @@
+packages: .
+
+source-repository-package
+    type: git
+    location: https://github.com/olsner/hoopl
+    tag: 1a872b78ffa4bec6fd0508f420d2debbb9869ecb
+
+source-repository-package
+    type: git
+    location: https://github.com/olsner/regex-posix
+    tag: ea1bfaca82a0669204ec7749e21eecba549e7355
+
+jobs: $ncpus

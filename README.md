@@ -21,11 +21,14 @@ and none of the added sedition features should interfere with GNU ones.
   Build and install them locally. The regex-posix changes requires a libc that
   implements the `REG_STARTEND` flag.
 * Install ghc and cabal-install, make sure they're in your PATH.
-* Install Haskell prerequisites: `./boot.sh`
-* Build with `make`
+* Build with `make`. (This is a wrapper around `cabal build` etc, adding some
+  handy targets for running additional test suites.)
 
-The produced sed executable accepts the usual sed command-line options. (But
-not all of them are implemented yet.)
+The produced executable accepts the usual sed command-line options. (But not
+all of them are implemented yet.)
+
+The `./sed` script wraps `cabal run`, trying to make it easier to plug a
+locally built sedition into your sed command line.
 
 
 ## Compiling sed programs

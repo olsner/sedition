@@ -102,7 +102,7 @@ emitState TDFA{..} minLengths s =
     cWhen "YYEOF" (goto eolLabel) <>
     -- TODO if fallback is not set, skip the "if (false)" wrapper to produce
     -- nicer-looking output
-    cWhen "false" (decstate_nocheck s <> maybeSetFallback) <>
+    cWhen "false" (decstate_nocheck s <> maybeSetFallback <> ";") <>
     yystats "visited_chars" "1" <>
     stmt "YYCHAR = YYGET()" <>
     stmt ("YYDEBUG(\"" <> showB s <> ": YYCHAR=%x at %zu\\n\", YYCHAR, YYPOS)") <>
