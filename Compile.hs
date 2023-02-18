@@ -227,12 +227,17 @@ compileRE r@IR.RE{..} = wrapper body
     ere = reERE
     s = reString
     body | needRegexec = regexec
-         | testCompare = match_for_compare <> tdfa2c r re <> compare_matches
-         | otherwise   = tdfa2c r re -- reUsedTags
+         | testCompare = match_for_compare <> tdfa2c r re reUsedTags <> compare_matches
+         | otherwise   = tdfa2c r re reUsedTags
     re = Regex.parseString ere s
     needRegexec = forceRegcomp || not (TDFA2C.isCompatible re)
     res = C.pack $ Regex.reString re
-    wrapper b = "static bool " <> regexfun r <> "(match_t* m, string* s, const size_t orig_offset) {\n" <> comment description <> comment ("Used tags: " <> showB reUsedTags) <> "bool result = false;\n" <> b <> "return result;\n}\n"
+    wrapper b =
+        "static bool " <> regexfun r <>
+            "(match_t* m, string* s, const size_t orig_offset) {\n" <>
+        comment description <>
+        comment ("Used tags: " <> showB reUsedTags) <>
+        "bool result = false;\n" <> b <> "return result;\n}\n"
     match m = fun "match_regexp" [m, "s", "orig_offset", regex r, regexfun r]
     -- regcomp is run at start of main so we just need to forward the arguments.
     regexec = stmt ("result = " <> match "m")
@@ -246,13 +251,10 @@ compileRE r@IR.RE{..} = wrapper body
         " -> ERE: " <> cstring res <>
         (if needRegexec then " (using regcomp)" else " (using TDFA2C)")
 
-tdfa2c r re =
-    comment ("tdfa2c regex: " <> cstring res) <>
+tdfa2c r re used =
     sfun "clear_match" ["m"] <>
     -- Since regexec seems to set all unused matches to -1, do the same for
     -- compare_regexp_matches.
     (if testCompare then stmt "memset(&m->matches, 0xff, sizeof(m->matches))" else mempty) <>
     stmt ("m->fun = " <> regexfun r)  <>
-    byteString (TDFA2C.tdfa2c re)
-  where
-    res = C.pack $ Regex.reString re
+    byteString (TDFA2C.tdfa2c used re)

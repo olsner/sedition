@@ -11,6 +11,8 @@ import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set (Set)
 import qualified Data.Set as S
+import Data.IntSet (IntSet)
+import qualified Data.IntSet as IS
 
 -- import Data.List
 
@@ -232,9 +234,11 @@ genC tdfa@TDFA{..} =
 
 earlyOut l = sfun "YYSTATS" ["early_out", "1"] <> goto l
 
-tdfa2c :: Regex -> C.ByteString
-tdfa2c = toByteString .
-    genC . genTDFA . genTNFA . fixTags . tagRegex
+tdfa2c :: Maybe IntSet -> Regex -> C.ByteString
+tdfa2c used = toByteString .
+    genC . genTDFA . genTNFA . fixTags . unusedTags . tagRegex
+  where unusedTags | Just s <- used = selectTags (\(T t) -> t `IS.member` s)
+                   | otherwise = id
 
 isCompatible :: Regex -> Bool
 isCompatible = Regex.tdfa2cCompatible
