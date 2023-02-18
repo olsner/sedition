@@ -42,6 +42,7 @@ programHeader ofile program =
     foldMap (declare "FILE*" outfd) files <>
     foldMap (declare "match_t" match) matches <>
     foldMap (declare "bool" mpred) matches <>
+    sfun "enable_stats_on_sigint" [] <>
     foldMap initRegexp (M.assocs regexps) <>
     infd 0 <> " = next_input(argc, argv);\n" <>
     outfd 0 <> " = stdout;\n"

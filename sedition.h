@@ -8,6 +8,7 @@
 #include <limits.h>
 #include <malloc.h>
 #include <regex.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -325,6 +326,19 @@ static void tdfa2c_statistics() {
     fprintf(stderr, "%zu matches, %zu failed matches\n", yystats.matched, yystats.failed);
     fprintf(stderr, "%zu early outs due to string length\n", yystats.early_out);
     fprintf(stderr, "%zu EOF checks skipped thanks to minLength\n", yystats.goto_nocheck);
+#endif
+}
+
+#if ENABLE_YYSTATS
+void sigint_handler(int) {
+    tdfa2c_statistics();
+    exit(0);
+}
+#endif
+
+static void enable_stats_on_sigint() {
+#if ENABLE_YYSTATS
+    signal(SIGINT, sigint_handler);
 #endif
 }
 
