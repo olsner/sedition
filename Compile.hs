@@ -131,7 +131,7 @@ compileInsn (IR.Label lbl) = label (show lbl)
 compileInsn (IR.Branch l) = gotoL l
 compileInsn (IR.SetP p cond) = stmt (pred p <> " = " <> compileCond cond)
 compileInsn (IR.SetS s expr) = stmt (setString s expr)
-compileInsn (IR.SetM m expr) = stmt (mpred m <> "  = " <> compileMatch m expr)
+compileInsn (IR.SetM m expr) = stmt (mpred m <> " = " <> compileMatch m expr)
 compileInsn (IR.If c t f) = cIf (compileCond c) (gotoL t) (gotoL f)
 compileInsn (IR.Listen i maybeHost port) =
   sfun "sock_listen" [infd i, chost maybeHost, intDec port]

@@ -2,22 +2,17 @@ cabal-version:      3.4
 name:               sedition
 version:            0.1.0.0
 
+category:           Compiler
 synopsis:           sed compiler and interpreter
 description:        Optimizing sed compiler and interpreter with networking and threads
 
--- A URL where users can report bugs.
-bug-reports:        https://github.com/olsner/sedition
-
--- The license under which the package is released.
 license:            MIT
-
--- The package author(s).
+copyright:          Copyright (C) 2017 Simon Brenner
 author:             Simon Brenner <olsner@gmail.com>
 maintainer:         olsner@gmail.com
 
--- A copyright notice.
-copyright:          Copyright (C) 2017 Simon Brenner
-category:           Compiler
+bug-reports:        https://github.com/olsner/sedition
+
 extra-source-files:
     README.md sedition.h
 
@@ -49,7 +44,8 @@ executable sedition
 
     other-modules:    Parser AST Bus IR
                       Optimize ConstPred RedundantBranches LivePred
-                      Collections LiveString SameString Compile Interpret
+                      Collections LiveString SameString LiveLastRegex
+                      Compile Interpret
                       Regex
                       TaggedRegex TNFA TDFA TDFA2C SimulateTNFA SimulateTDFA
                       CharMap GenC
