@@ -143,6 +143,9 @@ tests =
 
   , (BRE, "^\\]", Concat [AnchorStart, Char ']'])
   , (BRE, "^\\", Concat [AnchorStart, Char '\\'])
+
+  -- Evil regexp from Twitter
+  , (ERE, "()((()(^|$|$^|^|$|$^^|$|$^|^|$|$^^^^|^|(|)($)|)+|^^|^|(|)($)|)+|)($)()+", Concat [Group Empty,Group (Or [Repeat 1 Nothing (Group (Or [Concat [Group Empty,Repeat 1 Nothing (Group (Or [AnchorStart,AnchorEnd,Concat [AnchorEnd,AnchorStart],AnchorStart,AnchorEnd,Concat [AnchorEnd,AnchorStart,AnchorStart],AnchorEnd,Concat [AnchorEnd,AnchorStart],AnchorStart,AnchorEnd,Concat [AnchorEnd,AnchorStart,AnchorStart,AnchorStart,AnchorStart],AnchorStart,Concat [Group (Or [Empty,Empty]),Group AnchorEnd],Empty]))],Concat [AnchorStart,AnchorStart],AnchorStart,Concat [Group (Or [Empty,Empty]),Group AnchorEnd],Empty])),Empty]),Group AnchorEnd,Repeat 1 Nothing (Group Empty)])
   ]
 
 -- Test code

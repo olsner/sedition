@@ -126,7 +126,7 @@ backRef = BackRef . digitToInt <$> (escaped digit)
 pERE = ereAlternate
 ereAlternate = ror <$> sepBy ereBranch (char '|')
 
-ereBranch = rconcat <$> some ereExpr
+ereBranch = rconcat <$> many ereExpr
 ereExpr = flip id <$> ereNondupl <*> option id ereDuplSym
 ereNondupl = choice [ereOneChar, anchorStart, anchorEnd, backRef, ereGroup]
 ereDuplSym = star <|> plus <|> question <|> ereBracedCount
