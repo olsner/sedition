@@ -215,7 +215,8 @@ static void trans(string* dst, const char* from, const char* to, string* src)
 static void random_string(string* dst)
 {
     uint8_t temp[16];
-    getrandom(temp, sizeof(temp), 0);
+    ssize_t res = getrandom(temp, sizeof(temp), 0);
+    assert(res == sizeof(temp));
 
     ensure_len_discard(dst, 2 * sizeof(temp) + 1);
     for (size_t i = 0; i < sizeof(temp); i++) {
