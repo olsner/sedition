@@ -593,7 +593,10 @@ test_sedition()
     local SED=$1
     echo Testing sedition-specific features
     # Should provide different random numbers each run!
-    if cmp -s <($SED -e '0 g yhjulwwiefzojcbxybbruweejw' /dev/null) <($SED -e '0 g yhjulwwiefzojcbxybbruweejw' /dev/null); then
+    # Run separately since runsed overwrites its own temp files.
+    $SED -e '0 g yhjulwwiefzojcbxybbruweejw' /dev/null >random1
+    $SED -e '0 g yhjulwwiefzojcbxybbruweejw' /dev/null >random2
+    if cmp -s random1 random2; then
         echo "FAIL: Same random number twice"
         exit 1
     fi
