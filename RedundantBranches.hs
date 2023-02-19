@@ -4,11 +4,11 @@ module RedundantBranches (redundantBranchesPass) where
 
 import Compiler.Hoopl as H
 
---import Debug.Trace
+-- import Debug.Trace
 
 import IR
 
-type RBFact = WithTopAndBot Label
+type RBFact = WithTopAndBot (Insn O C)
 lattice :: DataflowLattice RBFact
 lattice = addPoints "Redundant branches" join
  where
@@ -29,27 +29,38 @@ transfer = mkBTransfer3 first middle last
 
     -- O C
     last :: Insn O C -> FactBase RBFact -> RBFact
-    last (Branch t) _ = PElem t
-    last _          _ = Top
+    last insn _ = PElem insn
 
 rewrite :: FuelMonad m => BwdRewrite m Insn RBFact
 rewrite = deepBwdRw rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x RBFact -> m (Maybe (Graph Insn e x))
-    rw (Branch t) f   | Just t' <- label t f   = rwLast (Branch t')
     -- Do just one change at a time so that optimization fuel applies.
-    rw (If p tl fl) f | Just tl' <- label tl f = rwLast (If p tl' fl)
-                      | Just fl' <- label fl f = rwLast (If p tl fl')
-    rw (Fork l1 l2) f | Just l1' <- label l1 f = rwLast (Fork l1' l2)
-                      | Just l2' <- label l2 f = rwLast (Fork l1 l2')
+    rw i@(If p tl fl) f | Just tl' <- label tl f = rwLast i (If p tl' fl)
+                        | Just fl' <- label fl f = rwLast i (If p tl fl')
+                        -- Branch to an if with the same condition, so we can
+                        -- skip one step ahead.
+                        | Just (If p' tl' _) <- insn tl f, p == p'
+                                                 = rwLast i (If p tl' fl)
+                        | Just (If p' _ fl') <- insn fl f, p == p'
+                                                 = rwLast i (If p tl fl')
+    rw i@(Fork l1 l2) f | Just l1' <- label l1 f = rwLast i (Fork l1' l2)
+                        | Just l2' <- label l2 f = rwLast i (Fork l1 l2')
+    rw i@(Branch t)   f                          = rwInsn i t f
     rw _ _ = return Nothing
 
-    rwLast :: FuelMonad m => Insn O C -> m (Maybe (Graph Insn O C))
-    rwLast new = return (Just (mkLast new))
+    rwLast :: FuelMonad m => Insn O C -> Insn O C -> m (Maybe (Graph Insn O C))
+    rwLast _old new = return (Just (mkLast new))
+
+    rwInsn old l f | Just i <- insn l f = rwLast old i
+                   | otherwise          = return Nothing
+
+    insn l f | Just (PElem i) <- mapLookup l f = Just i
+             | otherwise                       = Nothing
 
     label :: Label -> FactBase RBFact -> Maybe Label
-    label l f | Just (PElem l') <- mapLookup l f = Just l'
-              | otherwise = Nothing
+    label l f | Just (PElem (Branch l')) <- mapLookup l f = Just l'
+              | otherwise                                 = Nothing
 
 simplifySameIfs :: FuelMonad m => BwdRewrite m Insn RBFact
 simplifySameIfs = deepBwdRw rw
