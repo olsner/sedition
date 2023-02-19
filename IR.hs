@@ -34,12 +34,11 @@ data Cond
   | Line Int
   -- current line > l (tested after the first line has been processed)
   | EndLine Int
-  | Bool Bool
   | IsMatch MVar
   | PRef Pred
   deriving (Show,Eq)
-cTrue = Bool True
-cFalse = Bool False
+cTrue = True
+cFalse = False
 
 newtype SVar = SVar Int deriving (Ord,Eq)
 data StringExpr
@@ -111,8 +110,7 @@ data Insn e x where
   -- OTOH it has side effects and this style kind of matches Read below.
   GetMessage    :: SVar                     -> Insn O O
 
-  -- TODO Looks like we only use True/False constants with SetP. Simplify :)
-  SetP          :: Pred -> Cond             -> Insn O O
+  SetP          :: Pred -> Bool             -> Insn O O
   SetS          :: SVar -> StringExpr       -> Insn O O
   SetM          :: MVar -> MatchExpr        -> Insn O O
   -- for n/N (which can never accept interrupts), and R
@@ -207,7 +205,7 @@ pLastSubst = Pred 3
 pHasQueuedOutput = Pred 4
 pHasPattern = Pred 5
 
-setLastSubst x = emit (SetP pLastSubst (Bool x))
+setLastSubst x = emit (SetP pLastSubst x)
 
 instance Show SVar where
   show (SVar 0) = "S{pattern-space}"
@@ -402,8 +400,8 @@ tProgram seds = mdo
   -- so to keep other things working we should maintain the flag correctly even
   -- if ipc is disabled.
   ipc <- gets ipcEnabled
-  emit (SetP pIntr (if ipc then PendingIPC else cFalse))
-  when ipc (tWhenP pIntr (() <$ emitBranch' intr))
+  when ipc (tWhen PendingIPC (() <$ emitBranch' intr))
+  emit (SetP pIntr False)
 
   line <- finishBlock' (If (AtEOF 0) exit line)
 
@@ -423,8 +421,9 @@ tProgram seds = mdo
   -- branch, to avoid printing it at the end of the loop.
   setString sPattern msg
 
-  emit (SetP pPreFirst cFalse)
-  emit (SetP pRunNormal cFalse)
+  emit (SetP pIntr True)
+  emit (SetP pPreFirst False)
+  emit (SetP pRunNormal False)
 
   openUsedFiles <- emitBranch' start
 
@@ -775,11 +774,9 @@ usedFiles (Redirect i j) = S.fromList [i, j]
 usedFiles (CloseFile i) = S.singleton i
 usedFiles (ReadFile _ i) = S.singleton i
 usedFiles (OpenFile i _ _) = S.singleton i
-usedFiles (SetP _ c) = condUsedFiles c
 usedFiles _ = S.empty
 
 usedPredicates :: Insn e x -> Set Pred
-usedPredicates (SetP p c) = S.insert p (condUsedPredicates c)
 usedPredicates (If c _ _) = condUsedPredicates c
 usedPredicates _ = S.empty
 
@@ -813,9 +810,9 @@ matchUsedStrings (NextMatch _ s) = S.singleton s
 matchUsedStrings (MVarRef _) = S.empty
 
 usedMatches :: Insn e x -> Set MVar
-usedMatches (SetP _ c) = condUsedMatches c
 usedMatches (SetS _ s) = stringExprMatches s
 usedMatches (SetM m e) = S.insert m (matchUsedMatches e)
+usedMatches (If (IsMatch m) _ _) = S.singleton m
 usedMatches _ = S.empty
 
 stringExprMatches (SSubstring _ i1 i2) =

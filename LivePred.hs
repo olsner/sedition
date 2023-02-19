@@ -26,7 +26,6 @@ kill _         f = f
 
 gen :: Insn e x -> LivePredFact -> LivePredFact
 gen (If c _ _) = genC c
-gen (SetP _ c) = genC c
 gen _          = id
 
 genC (PRef p) = setInsert p

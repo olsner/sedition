@@ -108,7 +108,6 @@ hasPendingIPC = "hasPendingIPC"
 lastRegex = "lastRegex"
 
 compileCond cond = case cond of
-  IR.Bool b -> bool b
   IR.Line l -> intDec l <> " == " <> lineNumber
   IR.EndLine l -> intDec l <> " < " <> lineNumber
   IR.IsMatch mvar -> mpred mvar
@@ -129,7 +128,7 @@ closeFile i = sfun "close_file" [infd i] <> sfun "close_file" [outfd i]
 compileInsn :: IR.Insn e x -> Builder
 compileInsn (IR.Label lbl) = label (show lbl)
 compileInsn (IR.Branch l) = gotoL l
-compileInsn (IR.SetP p cond) = stmt (pred p <> " = " <> compileCond cond)
+compileInsn (IR.SetP p value) = stmt (pred p <> " = " <> bool value)
 compileInsn (IR.SetS s expr) = stmt (setString s expr)
 compileInsn (IR.SetM m expr) = stmt (mpred m <> " = " <> compileMatch m expr)
 compileInsn (IR.If c t f) = cIf (compileCond c) (gotoL t) (gotoL f)

@@ -168,6 +168,7 @@ instance Ord RE where
 
 type Match = [MatchArray]
 
+-- TODO Use the stuff from Collections, e.g. SVarMap, MVarMap and PredSet
 data SedState program = SedState
   { program :: program
   , files :: Map Int File
@@ -271,7 +272,7 @@ runIR_debug i = do
 runIR :: IR.Insn e x -> SedM ()
 runIR (IR.Label _) = return ()
 runIR (IR.Branch l) = runIRLabel l
-runIR (IR.SetP p cond) = setPred p =<< evalCond cond
+runIR (IR.SetP p val) = setPred p val
 runIR (IR.SetS s expr) = setString s =<< evalStringExpr expr
 runIR (IR.SetM m expr) = setMatch m =<< case expr of
   IR.Match svar re -> checkRE svar =<< getRegex re
@@ -327,7 +328,6 @@ runIR (IR.ShellExec svar) = do
 --runIR cmd = fatal ("runIR: Unhandled instruction " ++ show cmd)
 
 evalCond cond = case cond of
-  IR.Bool b -> return b
   IR.Line l -> gets ((l ==) . lineNumber)
   IR.EndLine l -> gets ((l <) . lineNumber)
   IR.AtEOF fd -> liftIO . fileIsEOF =<< gets (fromJust . M.lookup fd . files)
