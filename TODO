@@ -2,23 +2,28 @@
 
 - Generate properly indented C code
 - number strings, regexes, predicates and labels from their own counters
+- Organize a bit, add subdirectories for regex/TDFA engine and optimizations
 
 # Functionality/bugs
 
 - Implement case conversions, \L\l\u\U - at least one is used by synsedizer
 - Port IPC to compiler / RTS
-- Add tests for IPC functionality
-- Add mode for bsd.sh that compares interpreted to compiled
-  - Or just record known-good outputs for every test...
 - ConstPred pass is too slow, why?
-- Improved correctness: use TDFA simulator in non-compiled mode instead of
+- Improved correctness: use TNFA/TDFA simulator in Interpreter instead of
   regex-posix?
+
+# Testing
+
+* Add some testing of regex matching, e.g. comparing regex-posix, TNFA and TDFA.
+* Add tests for IPC functionality
+* Add mode for bsd.sh that compares interpreted to compiled
+  - Or just record known-good outputs for every test...
+  - And move that into sedness
 
 # Optimizations
 
 ## "Advanced"
 
-* Track used groups in matches, feed back to regex compiler
 * Use knowledge of regex to eliminate useless next-match calls
   - anchored at start: can't match again
   - anchored at end: first match will contain the end of the string
@@ -31,8 +36,7 @@
 ## Operational
 
 - Optimize out concatenation of empty strings
-- Return bool from match functions, remove `match_t::result`
-- Dead variable stuff for matches (should fall out of used-tag tracking though)
+- Better way to handle concatentations without all the temporary strings
 
 ## Regex
 
@@ -43,10 +47,29 @@
   2. Remove all transitions to failed states
   3. Remove failed states themselves (unless that happens automatically when
      they are not mentioned and have no transitions?)
+* TNFA minimization - might make TDFA generation faster
 * TDFA minimization - combine equivalent states
+* More efficient searching:
+  - Fancy: something with the start-of-match tag - "abandon" states where the
+    start of match tag is already set but would be moved forward. Prototype in
+    SimulateTNFA, then see if the logic can be ported to the TDFA construction?
+  - Simpler: in cases where we don't emit tags at all the location/length of the
+    match would not be relevant so we can exit with a match on the first final
+    state and can look for e.g. ".*re".
+* Add lower-level IR for TDFA output, to simplify code gen and enable Hoopling.
+
+  All the stuff about fallback and EOF states should be emitted by TDFA -> IR,
+  removing special cases in code generation. Maybe setting tags from registers
+  and applying fixed tags is also done in the exit paths of the IR.
+
+  - Should the retry loop be explicit here, or still done by the C codegen?
+    Would be nice if it was explicit so that smart things about searching can
+    be done without involving code gen.
 
 ### Done
 
+* Return bool from match functions, remove `match_t::result`
+* Track used groups in matches, feed back to regex compiler
 * Skip retry if the regex is anchored at the start
 * Parts of minLength optimization:
   - Split up state entry point to have one without range check
