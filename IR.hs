@@ -777,6 +777,7 @@ usedFiles (OpenFile i _ _) = S.singleton i
 usedFiles _ = S.empty
 
 usedPredicates :: Insn e x -> Set Pred
+usedPredicates (SetP p _) = S.singleton p
 usedPredicates (If c _ _) = condUsedPredicates c
 usedPredicates _ = S.empty
 
