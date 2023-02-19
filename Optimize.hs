@@ -42,16 +42,12 @@ tracePass name pass | doTrace = do
 optimizeOnce :: (CheckpointMonad m, FuelMonad m) => Label -> Graph Insn C C -> m (Graph Insn C C)
 optimizeOnce entry program = do
   let entries = JustC [entry]
-  -- If this can eliminate something, constPred should have fewer predicates to
-  -- worry about.
-  program <- tracePass "livePred" $
-    analyzeAndRewriteBwd livePredPass entries program mapEmpty
   program <- tracePass "constPred" $
     analyzeAndRewriteFwd constPredPass entries program mapEmpty
-  program <- tracePass "livePred" $
-    analyzeAndRewriteBwd livePredPass entries program mapEmpty
   program <- tracePass "redundantBranches" $
     analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
+  program <- tracePass "livePred" $
+    analyzeAndRewriteBwd livePredPass entries program mapEmpty
   program <- tracePass "liveString" $
     analyzeAndRewriteBwd liveStringPass entries program mapEmpty
   program <- tracePass "constLastRegex" $
