@@ -9,10 +9,12 @@ import Compiler.Hoopl as H
 import Control.Monad
 import Control.Monad.Trans.State.Strict
 
+import Data.IntSet (IntSet)
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set (Set)
 import qualified Data.Set as S
+import Data.Maybe (fromJust)
 
 import System.Exit
 
@@ -70,20 +72,17 @@ newtype MVar = MVar Int deriving (Ord,Eq)
 instance Show MVar where
   show (MVar n) = "M" ++ show n
 
-newtype RE = RE Int deriving (Ord,Eq)
-instance Show RE where
-  show (RE n) = "R" ++ show n
-
-newRE :: IRM RE
-newRE = RE <$> freshUnique
+-- An implication of baking the used tags into the derived Eq instance is that
+-- deduplicating nicely duplicates/specializes regexes that could be made more
+-- efficient. We don't care much about binary size or compile time here.
+data RE = RE { reID :: Int, reString :: S, reERE :: Bool, reUsedTags :: Maybe IntSet }
+  deriving (Show,Ord,Eq)
 
 compileRE :: Maybe S -> IRM (Maybe RE)
-compileRE Nothing = return Nothing
+compileRE Nothing  = return Nothing
 compileRE (Just s) = do
-    ext <- gets extendedRegexps
-    r <- newRE
-    emit (CompileRE r s ext)
-    return (Just r)
+    ere <- gets extendedRegexps
+    return (Just (RE (-1) s ere Nothing))
 
 -- Note that we can't immediately replace the "last regexp" state with a match
 -- variable since pattern space may be modified between calls, or it may be
@@ -102,8 +101,6 @@ data Insn e x where
   Label         :: Label                    -> Insn C O
 
   Branch        :: Label                    -> Insn O C
-  -- TODO Consider if 'If' should have a Cond instead of Pred, and add a Pred
-  -- expression to Cond. Check which SetP would remain.
   If            :: Cond -> Label -> Label   -> Insn O C
   Fork          :: Label -> Label           -> Insn O C
   Quit          :: ExitCode                 -> Insn O C
@@ -114,6 +111,7 @@ data Insn e x where
   -- OTOH it has side effects and this style kind of matches Read below.
   GetMessage    :: SVar                     -> Insn O O
 
+  -- TODO Looks like we only use True/False constants with SetP. Simplify :)
   SetP          :: Pred -> Cond             -> Insn O O
   SetS          :: SVar -> StringExpr       -> Insn O O
   SetM          :: MVar -> MatchExpr        -> Insn O O
@@ -122,7 +120,6 @@ data Insn e x where
   Print         :: FD -> SVar               -> Insn O O
   Message       :: SVar                     -> Insn O O
 
-  CompileRE     :: RE -> S -> Bool          -> Insn O O
   SetLastRE     :: RE                       -> Insn O O
 
   ShellExec     :: SVar                     -> Insn O O
@@ -754,8 +751,19 @@ allFiles :: Program -> Set FD
 allFiles graph = foldGraphNodes (S.union . usedFiles) graph S.empty
 allMatches :: Program -> Set MVar
 allMatches graph = foldGraphNodes (S.union . usedMatches) graph S.empty
-allRegexps :: Program -> Map RE (S, Bool)
-allRegexps graph = foldGraphNodes (M.union . usedRegexps) graph M.empty
+allRegexps :: Program -> [RE]
+allRegexps graph = S.toList (foldGraphNodes usedRegexps graph S.empty)
+numberAllRegexps :: Program -> Program
+numberAllRegexps graph = mapGraph f graph
+  where
+    m = foldGraphNodes numberUsedRegexps graph M.empty
+    f :: Insn e x -> Insn e x
+    f (SetM m expr) = SetM m (fMatchExpr expr)
+    f (SetLastRE re) = SetLastRE (fre re)
+    f insn = insn
+    fMatchExpr (Match s re) = Match s (fre re)
+    fMatchExpr expr = expr
+    fre re = re { reID = fromJust (M.lookup re m) }
 
 usedFiles :: Insn e x -> Set FD
 usedFiles (Print i _) = S.singleton i
@@ -807,7 +815,7 @@ matchUsedStrings (MVarRef _) = S.empty
 usedMatches :: Insn e x -> Set MVar
 usedMatches (SetP _ c) = condUsedMatches c
 usedMatches (SetS _ s) = stringExprMatches s
-usedMatches (SetM m _) = S.singleton m
+usedMatches (SetM m e) = S.insert m (matchUsedMatches e)
 usedMatches _ = S.empty
 
 stringExprMatches (SSubstring _ i1 i2) =
@@ -832,9 +840,12 @@ condUsedStrings _ = S.empty
 condUsedFiles (AtEOF i) = S.singleton i
 condUsedFiles _ = S.empty
 
--- Every regexp is compiled if it is used anywhere, so don't bother checking
--- other instrucitons :) Unless we add a dead regexp pass somewhere?
-usedRegexps :: Insn e x -> Map RE (S, Bool)
-usedRegexps (CompileRE re s ere) = M.singleton re (s,ere)
-usedRegexps _ = M.empty
+numberUsedRegexps :: Insn e x -> Map RE Int -> Map RE Int
+numberUsedRegexps (SetM _ (Match _ re)) m = M.insertWith (flip const) re (M.size m) m
+numberUsedRegexps (SetLastRE re) m = M.insertWith (flip const) re (M.size m) m
+numberUsedRegexps _ m = m
 
+usedRegexps :: Insn e x -> Set RE -> Set RE
+usedRegexps (SetM _ (Match _ re)) = S.insert re
+usedRegexps (SetLastRE re) = S.insert re
+usedRegexps _ = id

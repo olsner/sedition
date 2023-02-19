@@ -172,11 +172,11 @@ data SedState program = SedState
   { program :: program
   , files :: Map Int File
   , lineNumber :: Int
-  , lastRegex :: Maybe Int
+  , lastRegex :: Maybe RE
   , predicates :: Set Int
   , strings :: Map Int S
   , matches :: Map Int Match
-  , regexps :: Map Int RE
+  , regexps :: Map IR.RE RE
 
   , ipcState :: Maybe IPCState
 }
@@ -296,8 +296,7 @@ runIR (IR.Fork entry next) = do
 runIR (IR.Redirect i j) = redirectFile i j
 runIR (IR.CloseFile i) = closeFile i
 
-runIR (IR.CompileRE re s ere) = setRegex re (compileRE s ere)
-runIR (IR.SetLastRE re) = setLastRegex re
+runIR (IR.SetLastRE re) = setLastRegex =<< getRegex re
 runIR (IR.Message s) = doMessage =<< getString s
 
 runIR (IR.Print i s) = printTo i =<< getString s
@@ -336,27 +335,27 @@ evalCond cond = case cond of
   IR.IsMatch m -> not . null <$> getMatch m
   IR.PRef p -> getPred p
 
-setRegex :: IR.RE -> RE -> SedM ()
-setRegex (IR.RE n) re = modify $ \s -> s { regexps = f (regexps s) }
-  -- TODO Map probably has one of these insert-but-don't-replace functions...
-  where f rvars | Just _ <- M.lookup n rvars = rvars
-                | otherwise                  = M.insert n re rvars
+getRegex src = state f
+  where
+    f s | Just re <- M.lookup src (regexps s) = (re, s)
+        | otherwise = (re, s { regexps = M.insert src re (regexps s) })
+        where re = compileRE src
 
-getRegex (IR.RE n) = gets (fromJust . M.lookup n . regexps)
-
-setLastRegex (IR.RE n) = modify $ \state -> state { lastRegex = Just n }
+setLastRegex :: RE -> SedM ()
+setLastRegex re = modify $ \state -> state { lastRegex = Just re }
 getLastRegex :: SedM RE
 getLastRegex = do
     last <- gets lastRegex
     case last of
-      Just n  -> getRegex (IR.RE n)
+      Just re -> return re
       Nothing -> fatal "no previous regular expression"
 
-compileRE :: S -> Bool -> RE
-compileRE s ere = RE s (makeRegexOpts compOpt defaultExecOpt s)
+compileRE :: IR.RE -> RE
+compileRE (IR.RE _ s ere _) = RE s (makeRegexOpts compOpt defaultExecOpt s)
   where
     compOpt | ere       = compExtended
             | otherwise = blankCompOpt
+    -- When we know used tags, see if we can do a match without capturing.
 
 -- TODO Use matchOnce instead to avoid unnecessary work. (NextMatch handling
 -- gets more tricky since it will need to know how to "continue" after a

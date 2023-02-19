@@ -1,4 +1,5 @@
 {-# LANGUAGE OverloadedStrings,GADTs,TypeFamilies,RankNTypes,TemplateHaskell #-}
+{-# LANGUAGE RecordWildCards #-}
 
 module Compile (compileIR) where
 
@@ -7,8 +8,6 @@ import Compiler.Hoopl as H
 
 import qualified Data.ByteString.Char8 as C
 import Data.FileEmbed (embedStringFile)
-import Data.Map (Map)
-import qualified Data.Map as M
 import Data.String
 
 -- import Debug.Trace
@@ -33,8 +32,8 @@ programHeader ofile program =
     \static bool hasPendingIPC = false;\n\
     \static int exit_status = EXIT_SUCCESS;\n\
     \static regex_match_fun_t* lastRegex = NULL;\n" <>
-    foldMap (declare "re_t" regexvar) regexpvars <>
-    foldMap compileRE (M.assocs allRegexps) <>
+    foldMap (declare "re_t" regexvar) regexps <>
+    foldMap compileRE allRegexps <>
     "int main(int argc, const char *argv[]) {\n" <>
     foldMap (declare "bool" pred) preds <>
     foldMap (declare "string" stringvar) strings <>
@@ -43,7 +42,7 @@ programHeader ofile program =
     foldMap (declare "match_t" match) matches <>
     foldMap (declare "bool" mpred) matches <>
     sfun "enable_stats_on_sigint" [] <>
-    foldMap initRegexp (M.assocs regexps) <>
+    foldMap initRegexp regexps <>
     infd 0 <> " = next_input(argc, argv);\n" <>
     outfd 0 <> " = stdout;\n"
   where
@@ -52,11 +51,9 @@ programHeader ofile program =
     strings = IR.allStrings program
     files = IR.allFiles program
     matches = IR.allMatches program
-    regexps :: Map IR.RE (S, Bool)
     allRegexps = IR.allRegexps program
-    regexps = M.filter needRegcomp allRegexps
-    regexpvars = M.keys regexps
-    initRegexp (re, (s, ere)) = sfun "compile_regexp" [regex re, cstring s, bool ere]
+    regexps = filter needRegcomp allRegexps
+    initRegexp re@IR.RE{..} = sfun "compile_regexp" [regex re, cstring reString, bool reERE]
 
 programFooter program = "exit:\n" <>
     foldMap closeFile files <>
@@ -68,18 +65,19 @@ programFooter program = "exit:\n" <>
   where
     strings = IR.allStrings program
     files = IR.allFiles program
-    regexps = M.keys (M.filter needRegcomp (IR.allRegexps program))
+    regexps = filter needRegcomp (IR.allRegexps program)
     freeRegex re = sfun "free_regexp" [regex re]
     freeString s = sfun "free_string" [string s]
 
 compileIR :: FilePath -> Bool -> H.Label -> Program -> S
-compileIR ofile _ipc entry program = toByteString $
+compileIR ofile _ipc entry program_in = toByteString $
   seditionRuntime
   <> programHeader (C.pack ofile) program
   <> gotoL entry
   <> foldMap compileBlock blocks
   <> programFooter program
-  where GMany _ blocks _ = program
+  where
+    program@(GMany _ blocks _) = IR.numberAllRegexps program_in
 
 -- compileBlock :: Block IR.Insn e x -> Builder
 compileBlock block = fold (mempty :: Builder)
@@ -101,8 +99,8 @@ mpred (IR.MVar m) = "MP" <> intDec m
 infd i = "inF" <> idIntDec i
 outfd i = "outF" <> idIntDec i
 
-regexvar (IR.RE i) = "RE" <> intDec i
-regexfun (IR.RE i) = "match_RE" <> intDec i
+regexvar IR.RE{..} = "RE" <> intDec reID
+regexfun IR.RE{..} = "match_RE" <> intDec reID
 regex r = "&" <> regexvar r
 
 lineNumber = "lineNumber"
@@ -119,7 +117,9 @@ compileCond cond = case cond of
   IR.PendingIPC -> hasPendingIPC
   IR.PRef p -> pred p
 
-compileMatch m (IR.Match svar re) = fun (regexfun re) [matchref m, string svar, "0"]
+compileMatch m (IR.Match svar re) =
+    comment ("Used set: " <> showB (IR.reUsedTags re))
+    <> fun (regexfun re) [matchref m, string svar, "0"]
 compileMatch m (IR.MatchLastRE svar) = fun lastRegex [matchref m, string svar, "0"]
 compileMatch m (IR.NextMatch m2 s) = fun "next_match" [matchref m, matchref m2, string s]
 compileMatch m (IR.MVarRef m2) = fun "copy_match" [matchref m, matchref m2, mpred m2]
@@ -149,7 +149,6 @@ compileInsn (IR.Redirect i j) =
 compileInsn (IR.CloseFile i) = closeFile i
 
 -- Done in initialization
-compileInsn (IR.CompileRE _ _ _) = mempty
 compileInsn (IR.SetLastRE re) = setLastRegex re
 compileInsn (IR.Message s) = sfun "send_message" [string s]
 
@@ -220,18 +219,20 @@ testCompare = False
 
 forceRegcomp = False
 
-needRegcomp (s, ere) = forceRegcomp ||
+needRegcomp (IR.RE _ s ere _) = forceRegcomp ||
     testCompare || not (TDFA2C.isCompatible (Regex.parseString ere s))
 
-compileRE (r, (s, ere)) = wrapper body
+compileRE r@IR.RE{..} = wrapper body
   where
+    ere = reERE
+    s = reString
     body | needRegexec = regexec
          | testCompare = match_for_compare <> tdfa2c r re <> compare_matches
-         | otherwise   = tdfa2c r re
+         | otherwise   = tdfa2c r re -- reUsedTags
     re = Regex.parseString ere s
     needRegexec = forceRegcomp || not (TDFA2C.isCompatible re)
     res = C.pack $ Regex.reString re
-    wrapper b = "static bool " <> regexfun r <> "(match_t* m, string* s, const size_t orig_offset) {\n" <> comment description <> "bool result = false;\n" <> b <> "return result;\n}\n"
+    wrapper b = "static bool " <> regexfun r <> "(match_t* m, string* s, const size_t orig_offset) {\n" <> comment description <> comment ("Used tags: " <> showB reUsedTags) <> "bool result = false;\n" <> b <> "return result;\n}\n"
     match m = fun "match_regexp" [m, "s", "orig_offset", regex r, regexfun r]
     -- regcomp is run at start of main so we just need to forward the arguments.
     regexec = stmt ("result = " <> match "m")
