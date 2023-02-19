@@ -35,18 +35,23 @@ programHeader ofile program =
     foldMap (declare "re_t" regexvar) regexps <>
     foldMap compileRE allRegexps <>
     "int main(int argc, const char *argv[]) {\n" <>
-    foldMap (declare "bool" pred) preds <>
+    -- These are just static to get them zero-initialized for free. (also they
+    -- are always passed by address, so anything smart the C compiler can do
+    -- with local variables might not apply anyway.) Other variables are local
+    -- to allow the C compiler more freedom.
     foldMap (declare "string" stringvar) strings <>
-    foldMap (declare "FILE*" infd) files <>
-    foldMap (declare "FILE*" outfd) files <>
     foldMap (declare "match_t" match) matches <>
-    foldMap (declare "bool" mpred) matches <>
+    foldMap (init "bool" pred "false") preds <>
+    foldMap (init "FILE*" infd "NULL") files <>
+    foldMap (init "FILE*" outfd "NULL") files <>
+    foldMap (init "bool" mpred "false") matches <>
     sfun "enable_stats_on_sigint" [] <>
     foldMap initRegexp regexps <>
     infd 0 <> " = next_input(argc, argv);\n" <>
     outfd 0 <> " = stdout;\n"
   where
     declare t s var = "static " <> t <> " " <> s var <> ";\n"
+    init t s value var = t <> " " <> s var <> " = " <> value <> ";\n"
     preds = IR.allPredicates program
     strings = IR.allStrings program
     files = IR.allFiles program
