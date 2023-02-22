@@ -142,6 +142,7 @@ tests =
 
   , ("z", [Sed Always Clear])
 
+  , ("/l1_7/p", [Sed (At (Match (Just "l1_7"))) (Print 0)])
   , ("/^$/! p", [Sed (NotAddr (At (Match (re "^$")))) (Print 0)])
   , ("8,13 !p", [Sed (NotAddr (Between (Line 8) (Line 13))) (Print 0)])
   , ("2,/^$/ {}", [Sed (Between (Line 2) (Match (re "^$"))) (Block [])])
@@ -151,6 +152,21 @@ tests =
   , ("=73", [Sed Always (PrintLineNumber 73)])
 
   , ("s/$/\\x0/", [Sed Always (subst' "$" [Literal "\000"])])
+
+  -- Found in life-in-sed
+  , ("$!N", [Sed (NotAddr (At EOF)) (NextA 0)])
+  , ("$!{N;}", [Sed (NotAddr (At EOF)) (Block [Sed Always (NextA 0)])])
+  -- GNU sed seems to be fine with just whitespace and no newline between a
+  -- label and following code, and a bload followed by } without a ; between.
+  -- , (":load $!{N; bload}", [
+  --    Sed Always (Label "load"),
+  --    Sed (NotAddr (At EOF)) (Block [
+  --       Sed Always (NextA 0),
+  --       Sed Always (Branch (Just "load"))])])
+  --, ("g # comment\n", [Sed Always (Get Nothing)])
+  , ("s/foo/\x1b\\?/", [Sed Always (subst' "foo" [Literal "\x1b?"])])
+  , ("s/\\x1b\\[\\?25l\\x1b\\[H//", [Sed Always (subst' "\x1b\\[\\?25l\x1b\\[H" [])])
+  , ("s/\\a\\f\\n\\r\\t\\v//", [Sed Always (subst' "\a\f\n\r\t\v" [])])
   ]
 
 counts :: [Bool] -> (Int,Int)

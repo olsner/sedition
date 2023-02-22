@@ -39,6 +39,10 @@ tests =
   -- Escaped/unesacped should be a literal pipe character
   , (BRE, "|", Char '|')
   , (ERE, "\\|", Char '|')
+  -- Escapes and stuff
+  , (ERE, "\\?", Char '?')
+  , (ERE, "\x1b", Char '\x1b')
+  , (ERE, "\\[", Char '[')
 
   -- Bracket expressions
   , (Both, "[/]", CClass "/")
@@ -145,7 +149,15 @@ tests =
   , (BRE, "^\\", Concat [AnchorStart, Char '\\'])
 
   -- Evil regexp from Twitter
-  , (ERE, "()((()(^|$|$^|^|$|$^^|$|$^|^|$|$^^^^|^|(|)($)|)+|^^|^|(|)($)|)+|)($)()+", Concat [Group Empty,Group (Or [Repeat 1 Nothing (Group (Or [Concat [Group Empty,Repeat 1 Nothing (Group (Or [AnchorStart,AnchorEnd,Concat [AnchorEnd,AnchorStart],AnchorStart,AnchorEnd,Concat [AnchorEnd,AnchorStart,AnchorStart],AnchorEnd,Concat [AnchorEnd,AnchorStart],AnchorStart,AnchorEnd,Concat [AnchorEnd,AnchorStart,AnchorStart,AnchorStart,AnchorStart],AnchorStart,Concat [Group (Or [Empty,Empty]),Group AnchorEnd],Empty]))],Concat [AnchorStart,AnchorStart],AnchorStart,Concat [Group (Or [Empty,Empty]),Group AnchorEnd],Empty])),Empty]),Group AnchorEnd,Repeat 1 Nothing (Group Empty)])
+  , (ERE, "()((()(^|$|$^|^|$|$^^|$|$^|^|$|$^^^^|^|(|)($)|)+|^^|^|(|)($)|)+|)($)()+", Concat [
+    Group Empty,
+    Group (Or [
+        Repeat 1 Nothing (Group (Or [Concat [Group Empty,Repeat 1 Nothing (Group (Or [AnchorStart,AnchorEnd,Concat [AnchorEnd,AnchorStart],AnchorStart,AnchorEnd,Concat [AnchorEnd,AnchorStart,AnchorStart],AnchorEnd,Concat [AnchorEnd,AnchorStart],AnchorStart,AnchorEnd,Concat [AnchorEnd,AnchorStart,AnchorStart,AnchorStart,AnchorStart],AnchorStart,Concat [Group (Or [Empty,Empty]),Group AnchorEnd],Empty]))],Concat [AnchorStart,AnchorStart],AnchorStart,Concat [Group (Or [Empty,Empty]),Group AnchorEnd],Empty])),
+        Empty]),
+    Group AnchorEnd,
+    Repeat 1 Nothing (Group Empty)])
+  -- from life-in-sed
+  , (ERE, "\x1b\\[\\?25l\x1b\\[H", literal "\x1b[?25l\x1b[H")
   ]
 
 -- Test code

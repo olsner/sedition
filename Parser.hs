@@ -50,8 +50,12 @@ pAddress = choice
   , Match . re <$> slash True
   ]
 
+unescape 'a' = '\a'
+unescape 'f' = '\f'
 unescape 'n' = '\n'
 unescape 'r' = '\r'
+unescape 't' = '\t'
+unescape 'v' = '\v'
 unescape c   = c
 
 hexUnescape _ d1 d2 = toEnum (read ['0','x',d1,d2])
@@ -114,12 +118,10 @@ slashWith re term = BS.concat <$> many p <* char term
   charBS c = BS.singleton <$> char c
   commonParsers term =
     [ BS.singleton <$> noneOf [term,'\n','\\']
-    -- TODO It's possible to use a regexp-special character as the delimiter,
-    -- which makes this a bit wonky. I think we may need to detect those and
-    -- treat them as explicitly literals (?), which may mean adding the \\
-    -- depending on if we use BRE or EREs.
+    -- See the "escaping precedence" chapter of the GNU sed manual. Basically
+    -- we unescape everything we recognize our here before parsing the regexp.
     , BS.singleton <$> try (char '\\' >> char term)
-    , BS.singleton <$> try (char '\\' *> (unescape <$> oneOf "rn"))
+    , BS.singleton <$> try (char '\\' *> pEscaped)
     -- Any other characters except the terminator get passed through to the
     -- regexp engine including the backslash.
     , (\x y -> BS.pack [x,y]) <$> char '\\' <*> anyChar ]
@@ -130,7 +132,7 @@ stringTerm term = slashWith False term
 pRegexp :: Char -> Parser (Maybe S)
 pRegexp term = re <$> slashWith True term
 
-pEscaped = choice [ unescape <$> oneOf "rn"
+pEscaped = choice [ unescape <$> oneOf "afnrtv"
                   , try (hexUnescape <$> char 'x' <*> hexDigit <*> hexDigit)
                   , hexUnescape1 <$> char 'x' <*> hexDigit
                   , char 'c' *> (controlChar <$> anyChar)]
