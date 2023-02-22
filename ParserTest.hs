@@ -23,17 +23,30 @@ subst2 pat rep t act = Subst (re pat) [Literal rep] t act
 emptySub = Subst Nothing [] SubstFirst SActionNone
 
 tests =
-  [ ("a text", [Sed Always (Append "text")])
+  [ (": label", [Sed Always (Label "label")])
+  , (":     label", [Sed Always (Label "label")])
+  , (":label", [Sed Always (Label "label")])
+
+  , ("a text", [Sed Always (Append "text")])
   , ("a\\\nfoo\\\nbar", [Sed Always (Append "foo\nbar")])
   , ("a\\\nfoo\\r\\nbar\\\nbaz", [Sed Always (Append "foo\r\nbar\nbaz")])
   , ("a text\\\nbar", [Sed Always (Append "text\nbar")])
   , ("A 1 2", [Sed Always (Accept 1 2)])
   , ("A1 2", [Sed Always (Accept 1 2)])
 
+  , ("b", [Sed Always (Branch Nothing)])
+  , ("b ", [Sed Always (Branch Nothing)])
+  , ("b # comment\n", [Sed Always (Branch Nothing)])
+  , ("b something", [Sed Always (Branch (Just "something"))])
+
   , ("c\\\nfoo\\\nbar", [Sed Always (Change "foo\nbar")])
   , ("c\\\nfoo\\r\\nbar\\\nbaz", [Sed Always (Change "foo\r\nbar\nbaz")])
 
   , ("D;d", [Sed Always DeleteFirstLine, Sed Always Delete])
+
+  , ("g", [Sed Always (Get Nothing)])
+  , ("g ", [Sed Always (Get Nothing)])
+  , ("g # comment\n", [Sed Always (Get Nothing)])
 
   , ("i text", [Sed Always (Insert "text")])
   , ("i\\\ntext", [Sed Always (Insert "text")])
@@ -158,12 +171,11 @@ tests =
   , ("$!{N;}", [Sed (NotAddr (At EOF)) (Block [Sed Always (NextA 0)])])
   -- GNU sed seems to be fine with just whitespace and no newline between a
   -- label and following code, and a bload followed by } without a ; between.
-  -- , (":load $!{N; bload}", [
-  --    Sed Always (Label "load"),
-  --    Sed (NotAddr (At EOF)) (Block [
-  --       Sed Always (NextA 0),
-  --       Sed Always (Branch (Just "load"))])])
-  --, ("g # comment\n", [Sed Always (Get Nothing)])
+  , (":load $!{N; bload}", [
+     Sed Always (Label "load"),
+     Sed (NotAddr (At EOF)) (Block [
+        Sed Always (NextA 0),
+        Sed Always (Branch (Just "load"))])])
   , ("s/foo/\x1b\\?/", [Sed Always (subst' "foo" [Literal "\x1b?"])])
   , ("s/\\x1b\\[\\?25l\\x1b\\[H//", [Sed Always (subst' "\x1b\\[\\?25l\x1b\\[H" [])])
   , ("s/\\a\\f\\n\\r\\t\\v//", [Sed Always (subst' "\a\f\n\r\t\v" [])])

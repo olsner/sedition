@@ -64,12 +64,13 @@ controlChar c = toEnum (fromEnum (toUpper c) `xor` 0x40)
 
 list p1 p2 = (:) <$> p1 <*> p2
 
--- not eof, blank, }, ; or #
-pLabel = BS.pack <$> wsThen (some (noneOf "; \t\n\f\t\v\r#"))
+wsMaybeP p = wsThen (maybeP p)
+pRequiredLabel = BS.pack <$> some (noneOf "; \t\n\f\t\v\r#{}")
+pLabel = wsMaybeP pRequiredLabel
 pRegister = pLabel
-pFileName = pLabel
+pFileName = wsThen pRequiredLabel
 -- Same but also delimited by : (for :port)
-pHostName = BS.pack <$> wsThen (some (noneOf ":; \t\n\f\t\v\r#"))
+pHostName = BS.pack <$> some (noneOf ":; \t\n\f\t\v\r#{}")
 -- Accept both single-line and multiple-line arguments to [aicm]
 -- initial whitespace is ignored (but only on the very first line after the
 -- command), after that backslash followed by newline continues the text on the
@@ -210,7 +211,7 @@ pQuit print = Quit print . intToExit <$> option 0 wsInt
 
 pCommand = charSwitchM $
   [ ('{', Block <$> pBlock)
-  , (':', Label <$> pLabel)
+  , (':', Label <$> wsThen pRequiredLabel)
   , ('<', Redirect <$> wsThen int <*> maybeP (ws1Then int))
   -- Is it relevant to have file number here? It does have no other arguments
   -- at least, but it's a nice character to overload with another meaning if
@@ -218,19 +219,19 @@ pCommand = charSwitchM $
   , ('=', PrintLineNumber <$> option 0 wsInt)
   , ('a', Append <$> pTextArgument)
   , ('A', Accept <$> wsThen int <*> ws1Then int)
-  , ('b', Branch <$> maybeP pLabel)
+  , ('b', Branch <$> pLabel)
   , ('c', Change <$> pTextArgument)
   , ('d', pure Delete)
   , ('D', pure DeleteFirstLine)
   , ('f', Fork <$> wsThen pLine)
-  , ('g', Get <$> maybeP pRegister)
-  , ('G', GetA <$> maybeP pRegister)
-  , ('h', Hold <$> maybeP pRegister)
-  , ('H', HoldA <$> maybeP pRegister)
-  , ('x', Exchange <$> maybeP pRegister)
+  , ('g', Get <$> pRegister)
+  , ('G', GetA <$> pRegister)
+  , ('h', Hold <$> pRegister)
+  , ('H', HoldA <$> pRegister)
+  , ('x', Exchange <$> pRegister)
   , ('i', Insert <$> pTextArgument)
   , ('l', PrintLiteral <$> option 70 wsInt)
-  , ('L', Listen <$> int <*> maybeP pHostName <*> (char ':' *> int))
+  , ('L', Listen <$> int <*> wsMaybeP pHostName <*> (char ':' *> int))
   , ('m', Message <$> maybeNonEmpty <$> wsThen pTextArgument)
   , ('n', Next <$> option 0 wsInt)
   , ('N', NextA <$> option 0 wsInt)
@@ -243,8 +244,8 @@ pCommand = charSwitchM $
   , ('s', anyChar >>= (\c -> mkSubst <$> pRegexp c
                                      <*> pReplacement c
                                      <*> many sFlag))
-  , ('t', Test <$> maybeP pLabel)
-  , ('T', TestNot <$> maybeP pLabel)
+  , ('t', Test <$> pLabel)
+  , ('T', TestNot <$> pLabel)
   , ('w', WriteFile <$> pFileName)
   -- TODO W for WriteFileFirstLine
   , ('y', anyChar >>= (\c -> Trans <$> stringTerm c <*> stringTerm c))
