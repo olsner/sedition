@@ -121,9 +121,7 @@ compileCond cond = case cond of
   IR.PendingIPC -> hasPendingIPC
   IR.PRef p -> pred p
 
-compileMatch m (IR.Match svar re) =
-    comment ("Used set: " <> showB (IR.reUsedTags re))
-    <> fun (regexfun re) [matchref m, string svar, "0"]
+compileMatch m (IR.Match svar re) = fun (regexfun re) [matchref m, string svar, "0"]
 compileMatch m (IR.MatchLastRE svar) = fun lastRegex [matchref m, string svar, "0"]
 compileMatch m (IR.NextMatch m2 s) = fun "next_match" [matchref m, matchref m2, string s]
 compileMatch m (IR.MVarRef m2) = fun "copy_match" [matchref m, matchref m2, mpred m2]
