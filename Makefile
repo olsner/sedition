@@ -24,12 +24,15 @@ cabal-test: cabal-build
 sed: cabal-build
 	ln -sf `$(CABAL) list-bin sedition:exe:sedition` sed
 
+tdfa2c: cabal-build
+	ln -sf `$(CABAL) list-bin sedition:exe:tdfa2c` tdfa2c
+
 check: run-bsdtests run-gnused-tests compiler-tests
 test: check
 compiler-tests: run-bsdtests-compiled run-gnused-tests-compiled
 
 test: cabal-test
-build: cabal-build sed
+build: cabal-build sed tdfa2c
 
 # There are a handful of failing BSD tests still, so ignore failures so we get
 # to the other test suites.

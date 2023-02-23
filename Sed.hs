@@ -176,6 +176,7 @@ do_main args = do
         reportTime "Compile (Sed)" tCompileStart tCompileEnd
 
     -- Dabburu kanpairu!
+    -- (https://www.youtube.com/watch?v=FHkFzRZdlV4)
     -- TODO or pipe the compiled C code directly into gcc so we can do it in
     -- one pass without an extra file inbetween.
     when (compileIt && runIt) $ do

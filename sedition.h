@@ -330,7 +330,7 @@ static void tdfa2c_statistics() {
 }
 
 #if ENABLE_YYSTATS
-void sigint_handler(int) {
+void sigint_handler(int sig) {
     tdfa2c_statistics();
     exit(0);
 }
@@ -395,6 +395,30 @@ static bool next_match(match_t* dst, match_t* src, string* s)
         offset++;
     }
     return src->fun(dst, s, offset);
+}
+
+static void print_match(bool res, match_t* m, string* s)
+{
+    if (!res) {
+        printf("\"%.*s\": NO MATCH\n", (int)s->len, s->buf);
+        return;
+    }
+    printf("\"%.*s\" MATCHED:\n", (int)s->len, s->buf);
+    for (int i = 0; i <= MAXGROUP; i++) {
+        if (!i || (m->matches[i].rm_so >= 0 && m->matches[i].rm_eo >= 0)) {
+            printf("\t%d: %td..%td\n",
+                   i, m->matches[i].rm_so, m->matches[i].rm_eo);
+            if (m->matches[i].rm_so > m->matches[i].rm_eo) {
+                printf("ERROR! starts after end?\n");
+            }
+            if (m->matches[i].rm_so > s->len) {
+                printf("ERROR! match starts outside string?\n");
+            }
+            if (m->matches[i].rm_eo > s->len) {
+                printf("ERROR! match ends outside string?\n");
+            }
+        }
+    }
 }
 
 //

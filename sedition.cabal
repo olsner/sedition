@@ -62,6 +62,19 @@ executable sedition
                       process,
     hs-source-dirs:   .
 
+executable tdfa2c
+    import:           lang
+    import:           deps
+    import:           warn
+
+    main-is:          TestTDFA2C.hs
+
+    other-modules:    Regex TaggedRegex
+                      TNFA TDFA TDFA2C SimulateTNFA SimulateTDFA
+                      CharMap GenC
+
+    build-depends:    time, process, file-embed
+    hs-source-dirs:   .
 
 test-suite parser-test
     import:           lang

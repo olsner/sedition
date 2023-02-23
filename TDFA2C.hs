@@ -56,7 +56,7 @@ matchFromTag t | possibleTag t =
   stmt ("m->matches[" <> matchix t <> "]." <> matchfld t <> " = " <> showB t)
                | otherwise = trace "found an unoptimized tag that can't be used by match" mempty -- skip all impossible tags
 
-debugTag t = yydebug ("\"match[" <> matchix t <> "]." <> matchfld t <> " = %d\\n\"") [showB t]
+debugTag t = yydebug ("\"match[" <> matchix t <> "]." <> matchfld t <> " = %td\\n\"") [showB t]
 
 setTagFromReg :: (TagId, RegId) -> Builder
 setTagFromReg (t, r) = stmt (showB t <> " = " <>
