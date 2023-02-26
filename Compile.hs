@@ -228,9 +228,13 @@ compileRE r@IR.RE{..} = wrapper body
   where
     ere = reERE
     s = reString
+    -- TODO Actually use the set of tags for comparison, so that we can
+    -- validate that the used tags optimization doesn't change output.
+    usedTags | testCompare = Nothing
+             | otherwise   = reUsedTags
     body | needRegexec = regexec
-         | testCompare = match_for_compare <> tdfa2c r re reUsedTags <> compare_matches
-         | otherwise   = tdfa2c r re reUsedTags
+         | testCompare = match_for_compare <> tdfa2c r re usedTags <> compare_matches
+         | otherwise   = tdfa2c r re usedTags
     re = Regex.parseString ere s
     needRegexec = forceRegcomp || not (TDFA2C.isCompatible re)
     res = C.pack $ Regex.reString re
