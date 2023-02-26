@@ -3,6 +3,7 @@
 - Generate properly indented C code
 - number strings, regexes, predicates and labels from their own counters
 - Organize a bit, add subdirectories for regex/TDFA engine and optimizations
+- Debugging: map IR labels to source labels
 
 # Functionality/bugs
 
@@ -11,6 +12,23 @@
 - ConstPred pass is too slow, why?
 - Improved correctness: use TNFA/TDFA simulator in Interpreter instead of
   regex-posix?
+- implement `#n` (1.18), currently disabled in bsd.sh
+- Ranges with 0 address (GNU extension). Very similar to 1,<> but allows the
+  end address to match on the first line (or something).
+  * Also apply appropriately to change-range special case...
+  * And reconcile with the pre-first line feature
+
+- Change and !:
+
+  '8,9!chello': replaces *each* line with hello except line 8 and 9
+  (are negated ranges even implemented?)
+
+  a positive range such as 8,9chello replaces both lines with a single hello
+
+- D/P (PrintFirstLine and DeleteFirstLine) are parsed but unimplemented?
+  - tested by gnused's uniq.sed
+  - now that pattern space is exposed to IR, we can use a regexp replace for it
+
 
 # Testing
 

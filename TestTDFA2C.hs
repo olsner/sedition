@@ -69,6 +69,8 @@ reportTime label start end = do
 
 -- TODO And option to run a match with TNFA instead of TDFA
 -- (running without -c currently enables TDFA)
+-- TODO Add option to "validate": run TNFA, TDFA *and* C compiled output,
+-- verify that they all give the same results on the set of input strings.
 data Options = Options
   { extendedRegexps :: Bool
   , cOutputFile :: FilePath
