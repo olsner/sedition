@@ -55,6 +55,7 @@
 
 - Optimize out concatenation of empty strings
 - Better way to handle concatentations without all the temporary strings
+- Deduplicate substrings in substitutions
 
 ## Regex
 
