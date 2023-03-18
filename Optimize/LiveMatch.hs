@@ -2,7 +2,7 @@
 
 -- liveMatchPass: Find and remove matches and submatches that are not used.
 
-module LiveMatch (liveMatchPass, canApplyLiveMatch) where
+module Optimize.LiveMatch (liveMatchPass, canApplyLiveMatch) where
 
 import Compiler.Hoopl as H hiding (joinMaps)
 

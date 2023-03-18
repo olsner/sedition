@@ -2,7 +2,7 @@
 -- regexes with explicit tag numbers. Tag 0 and 1 are the start/end of the
 -- whole match.
 
-module TaggedRegex where
+module Regex.TaggedRegex where
 
 import Control.Monad.Trans.State.Strict
 
@@ -17,8 +17,8 @@ import qualified Data.Map as M
 
 -- import Debug.Trace
 
-import Regex (Regex)
-import qualified Regex
+import Regex.Regex (Regex)
+import qualified Regex.Regex as Regex
 
 newtype Prio = P Int deriving (Show, Ord, Eq)
 

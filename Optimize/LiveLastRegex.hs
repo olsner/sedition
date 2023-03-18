@@ -3,7 +3,7 @@
 -- constLastRegexPass: Inline where LastRegexRE is known
 -- liveLastRegexPass: Remove unnecessary updates to LastRegexRE
 
-module LiveLastRegex (liveLastRegexPass, constLastRegexPass) where
+module Optimize.LiveLastRegex (liveLastRegexPass, constLastRegexPass) where
 
 import Compiler.Hoopl as H hiding (joinMaps)
 

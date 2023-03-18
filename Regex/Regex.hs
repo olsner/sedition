@@ -1,6 +1,6 @@
 {-# LANGUAGE OverloadedStrings, ApplicativeDo #-}
 
-module Regex (
+module Regex.Regex (
     parseString, parseOnly,
     Regex(..),
     reString,

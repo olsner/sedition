@@ -9,7 +9,7 @@ import System.Exit
 
 import Text.Trifecta (Result(..))
 
-import Regex
+import Regex.Regex
 
 data Dialect = BRE | ERE | Both deriving (Show,Ord,Eq)
 

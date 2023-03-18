@@ -9,7 +9,7 @@
 -- The effect of this compile-time optimization can probably also be achieved
 -- by having CoW strings and lazy substring/append at runtime.
 
-module SameString (sameStringPass) where
+module Optimize.SameString (sameStringPass) where
 
 import Compiler.Hoopl as H hiding ((<*>))
 

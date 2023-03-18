@@ -3,7 +3,7 @@
 -- Based on https://arxiv.org/pdf/2206.01398.pdf, "A Closer Look at TDFA"
 -- Simulate TNFA matching on strings.
 
-module SimulateTNFA where
+module Regex.SimulateTNFA where
 
 import Control.Applicative
 
@@ -15,8 +15,8 @@ import qualified Data.Set as S
 
 import Debug.Trace
 
-import TaggedRegex
-import TNFA
+import Regex.TaggedRegex
+import Regex.TNFA
 
 testTNFASimulation :: String -> String -> Maybe TagMap
 testTNFASimulation = tnfaMatch . genTNFA . testTagRegex

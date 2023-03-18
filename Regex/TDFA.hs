@@ -4,7 +4,7 @@
 -- Based on https://arxiv.org/pdf/2206.01398.pdf, "A Closer Look at TDFA"
 -- Determinization, convert a TNFA to a TDFA state machine.
 
-module TDFA where
+module Regex.TDFA where
 
 import Control.Monad.Trans.State.Strict hiding (mapState)
 import Control.Monad
@@ -23,10 +23,10 @@ import Data.Either (partitionEithers)
 
 import qualified CharMap as CM
 import CharMap (CharMap)
-import TaggedRegex hiding (Prio)
-import TNFA (genTNFA, TNFA(..))
-import qualified TNFA
-import SimulateTNFA (matchTerm)
+import Regex.TaggedRegex hiding (Prio)
+import Regex.TNFA (genTNFA, TNFA(..))
+import qualified Regex.TNFA as TNFA
+import Regex.SimulateTNFA (matchTerm)
 
 newtype StateId = S Int deriving (Ord, Eq)
 newtype RegId = R Int deriving (Ord, Eq)

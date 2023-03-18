@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving, CPP, ScopedTypeVariables, FlexibleContexts #-}
 
-module LivePred (livePredPass) where
+module Optimize.LivePred (livePredPass) where
 
 import Compiler.Hoopl as H
 

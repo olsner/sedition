@@ -8,13 +8,13 @@ import Debug.Trace
 
 import IR
 
-import ConstPred (constPredPass)
-import LivePred (livePredPass)
-import LiveString (liveStringPass)
---import SameString (sameStringPass)
-import RedundantBranches (redundantBranchesPass)
-import LiveMatch (liveMatchPass, canApplyLiveMatch)
-import LiveLastRegex (liveLastRegexPass, constLastRegexPass)
+import Optimize.ConstPred (constPredPass)
+import Optimize.LivePred (livePredPass)
+import Optimize.LiveString (liveStringPass)
+--import Optimize.SameString (sameStringPass)
+import Optimize.RedundantBranches (redundantBranchesPass)
+import Optimize.LiveMatch (liveMatchPass, canApplyLiveMatch)
+import Optimize.LiveLastRegex (liveLastRegexPass, constLastRegexPass)
 
 --debugBwd = debugBwdJoins trace (const True)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)

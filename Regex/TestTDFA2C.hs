@@ -18,11 +18,11 @@ import System.Process (rawSystem)
 
 import Text.Printf
 
-import SimulateTDFA
-import TaggedRegex
-import TNFA
-import TDFA
-import TDFA2C
+import Regex.SimulateTDFA
+import Regex.TaggedRegex
+import Regex.TNFA as TNFA
+import Regex.TDFA as TDFA
+import Regex.TDFA2C
 import GenC
 
 doSimulateTDFA tdfa s = print (runTDFA True tdfa s)

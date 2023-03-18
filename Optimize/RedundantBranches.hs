@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving, CPP, ScopedTypeVariables, FlexibleContexts #-}
 
-module RedundantBranches (redundantBranchesPass) where
+module Optimize.RedundantBranches (redundantBranchesPass) where
 
 import Compiler.Hoopl as H
 

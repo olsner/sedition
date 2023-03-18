@@ -1,6 +1,6 @@
 {-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving, CPP, ScopedTypeVariables, FlexibleContexts #-}
 
-module ConstPred (constPredPass) where
+module Optimize.ConstPred (constPredPass) where
 
 import Compiler.Hoopl as H hiding (joinMaps)
 

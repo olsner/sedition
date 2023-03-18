@@ -18,8 +18,8 @@ import AST
 import GenC
 import qualified IR
 import IR (Program)
-import qualified Regex
-import qualified TDFA2C
+import qualified Regex.Regex as Regex
+import qualified Regex.TDFA2C as TDFA2C
 
 seditionRuntime :: IsString a => a
 seditionRuntime = $(embedStringFile "sedition.h")

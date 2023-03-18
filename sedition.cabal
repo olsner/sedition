@@ -43,11 +43,23 @@ executable sedition
     main-is:          Sed.hs
 
     other-modules:    Parser AST Bus IR
-                      Optimize ConstPred RedundantBranches LivePred
-                      Collections LiveString SameString LiveMatch LiveLastRegex
+                      Collections
+                      Optimize
+                      Optimize.ConstPred
+                      Optimize.RedundantBranches
+                      Optimize.LivePred
+                      Optimize.LiveString
+                      Optimize.SameString
+                      Optimize.LiveMatch
+                      Optimize.LiveLastRegex
                       Compile Interpret
-                      Regex
-                      TaggedRegex TNFA TDFA TDFA2C SimulateTNFA SimulateTDFA
+                      Regex.Regex
+                      Regex.TaggedRegex
+                      Regex.TNFA
+                      Regex.TDFA
+                      Regex.TDFA2C
+                      Regex.SimulateTNFA
+                      Regex.SimulateTDFA
                       CharMap GenC
 
     build-depends:    hoopl,
@@ -67,10 +79,15 @@ executable tdfa2c
     import:           deps
     import:           warn
 
-    main-is:          TestTDFA2C.hs
+    main-is:          Regex/TestTDFA2C.hs
 
-    other-modules:    Regex TaggedRegex
-                      TNFA TDFA TDFA2C SimulateTNFA SimulateTDFA
+    other-modules:    Regex.Regex
+                      Regex.TaggedRegex
+                      Regex.TNFA
+                      Regex.TDFA
+                      Regex.TDFA2C
+                      Regex.SimulateTNFA
+                      Regex.SimulateTDFA
                       CharMap GenC
 
     build-depends:    time, process, file-embed
@@ -91,5 +108,5 @@ test-suite regex-parser-test
     import:           warn
 
     type:             exitcode-stdio-1.0
-    main-is:          RegexParserTest.hs
-    other-modules:    Regex
+    main-is:          Regex/RegexParserTest.hs
+    other-modules:    Regex.Regex

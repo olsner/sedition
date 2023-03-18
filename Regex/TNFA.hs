@@ -3,7 +3,7 @@
 -- Based on https://arxiv.org/pdf/2206.01398.pdf, "A Closer Look at TDFA"
 -- Conversion of tagged regex to Tagged Non-Deterministic Finite Automata.
 
-module TNFA where
+module Regex.TNFA where
 
 import Control.Monad.Trans.State.Strict
 
@@ -14,7 +14,7 @@ import qualified Data.Set as S
 
 -- import Debug.Trace
 
-import TaggedRegex
+import Regex.TaggedRegex
 
 newtype StateId = S Int deriving (Ord, Eq)
 instance Show StateId where

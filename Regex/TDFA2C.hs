@@ -1,7 +1,7 @@
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
 
-module TDFA2C where
+module Regex.TDFA2C where
 
 import qualified Data.ByteString.Char8 as C
 
@@ -20,12 +20,12 @@ import Debug.Trace
 
 import GenC
 
-import Regex (Regex)
-import qualified Regex
+import Regex.Regex (Regex)
+import qualified Regex.Regex as Regex
 
-import TaggedRegex
-import TNFA (genTNFA)
-import TDFA
+import Regex.TaggedRegex
+import Regex.TNFA (genTNFA)
+import Regex.TDFA
 
 decstate s = label (show s)
 decstate_nocheck s = label ("nocheck_" ++ show s)

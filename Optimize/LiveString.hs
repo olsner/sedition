@@ -2,7 +2,7 @@
 
 -- liveStringPass: Find and remove strings that are never read.
 
-module LiveString (liveStringPass) where
+module Optimize.LiveString (liveStringPass) where
 
 import Compiler.Hoopl as H
 

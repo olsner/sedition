@@ -1,6 +1,6 @@
 {-# LANGUAGE RecordWildCards #-}
 
-module SimulateTDFA where
+module Regex.SimulateTDFA where
 
 import Control.Monad.Trans.State.Strict
 import Control.Monad
@@ -19,10 +19,10 @@ import Debug.Trace
 
 import qualified CharMap as CM
 import CharMap (CharMap)
-import TaggedRegex
-import TNFA (genTNFA, testTNFA)
-import SimulateTNFA (testTNFASimulation, testTNFASimulationFind)
-import TDFA hiding (initState)
+import Regex.TaggedRegex
+import Regex.TNFA (genTNFA, testTNFA)
+import Regex.SimulateTNFA (testTNFASimulation, testTNFASimulationFind)
+import Regex.TDFA hiding (initState)
 
 regexFind :: String -> String -> Maybe TagMap
 regexFind = runTDFA True . genTDFA . genTNFA . testTagRegex
