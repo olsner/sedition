@@ -4,15 +4,11 @@ module Regex.RunIR where
 
 import Compiler.Hoopl as H
 
-import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Strict
 
 import Data.Map (Map)
 import Data.Map qualified as M
-import Data.Maybe
-
-import Debug.Trace
 
 import CharMap as CM
 import Regex.IR as IR
@@ -24,14 +20,15 @@ data S = S { char :: Char, buffer :: String, bufferLength :: Int,
              fallbackCursor :: Int, fallbackLabel :: Label }
          deriving (Show)
 
-initState s p = S { char = error "No character yet",
-                    buffer = s,
-                    bufferLength = length s,
-                    registers = M.empty,
-                    position = (-1),
-                    program = p,
-                    fallbackCursor = error "Fallback cursor used before init",
-                    fallbackLabel = error "Fallback label used before init" }
+initState s p = gonext $ S {
+  char = error "No char",
+  buffer = s,
+  bufferLength = length s,
+  registers = M.empty,
+  position = (-1),
+  program = p,
+  fallbackCursor = error "Fallback cursor used before init",
+  fallbackLabel = error "Fallback label used before init" }
 
 blocks S{ program = (_, GMany _ blocks _) } = blocks
 
@@ -40,9 +37,11 @@ type Result = Maybe (Map TagId Int)
 type M a = StateT S (Either Result) a
 
 next :: M ()
-next = modify f
-  where f s@S{position = p, buffer = x:xs} = s { char = x, buffer = xs, position = p + 1 }
-        f s@S{buffer = []} = s
+next = modify gonext
+
+gonext s@S{..} = case buffer of
+    (x:xs) -> s { char = x, buffer = xs, position = succ position }
+    [] -> s { position = succ position }
 
 getReg r = gets (M.lookup r . registers)
 setReg r val = modify $ \s@S{..} -> s { registers = M.insert r val registers }
@@ -58,7 +57,6 @@ runIR s p = case evalStateT (runLabel (entryPoint p)) (initState s p) of
 
 runLabel :: H.Label -> M ()
 runLabel entry = do
-    trace (show entry) (return ())
     block <- gets (mapLookup entry . blocks)
     case block of
       Just block -> runBlock block
@@ -71,13 +69,11 @@ run (Label _) = return ()
 
 -- O C control flow
 run (IfBOL tl fl) = do
-  bol <- gets ((0 ==) . position)
+  bol <- gets ((<= 0) . position)
   runLabel (if bol then tl else fl)
 run (Switch cm def) = do
   c <- gets char
-  let next = CM.findWithDefault def c cm
-  trace ("Matching on " ++ show c ++ " -> " ++ show next) (return ())
-  runLabel next
+  runLabel (CM.findWithDefault def c cm)
 run Fail = lift (Left Nothing)
 run (Match tagMap) = do
   regs <- gets registers
@@ -89,10 +85,7 @@ run (CheckBounds n eof cont) = do
   runLabel (if pos + n > len then eof else cont)
 run (Branch l) = runLabel l
 
-run Next = do
-    next
-    S{..} <- get
-    trace ("next: " ++ show char ++ "@" ++ show position ++ "/" ++ show bufferLength) (return ())
+run Next = next
 run (Set r) = setReg r =<< gets position
 run (Clear r) = clearReg r
 run (Copy r r2) = setReg' r =<< getReg r2
@@ -105,7 +98,8 @@ run RestoreCursor = modify $ \s@S{..} -> s { position = fallbackCursor }
 resolveTagMap pos regs = M.map f
   where
     f (IR.EndOfMatch d) = pos - d
-    f (IR.Reg r d) = fromJust (M.lookup r regs) - d
+    f (IR.Reg r d) | Just val <- M.lookup r regs = val - d
+                   | otherwise = (-1)
 
 testRunIR :: String -> String -> Result
 testRunIR re s = runIR s (testTDFA2IR re)

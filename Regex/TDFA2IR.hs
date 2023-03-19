@@ -76,6 +76,7 @@ gofail :: Graph Insn O C
 gofail = mkLast Fallback
 
 checkBounds d eof cont = mkLast (CheckBounds d eof cont)
+checkEOF = checkBounds 1
 
 gostate :: StateLabel -> IRM (Graph Insn O C)
 gostate s = getLabel s >>= return . goto
@@ -129,7 +130,7 @@ emitState TDFA{..} minLengths s = mdo
     maybeSetFallback fallbackLabel H.<*>
     mkBranch (if minLength > 1 then checkMinLength else checkEOFLabel))
   checkMinLength <- labelBlock (checkBounds minLength failLabel body)
-  checkEOFLabel <- labelBlock (checkBounds 1 eolLabel body)
+  checkEOFLabel <- labelBlock (checkEOF eolLabel body)
   defaultLabel <- if isFinalState
                     then labelBlock (emitEndRegOps tdfaFinalFunction H.<*>
                                      goto matchL)
@@ -188,12 +189,12 @@ emitIR tdfa@TDFA{..} = mdo
     Just dist -> labelBlock (checkBounds dist justFail startLabelBOL)
     Nothing   -> return justFail
 
-  entry <- labelBlock (mkMiddles [Next, SaveCursor, SetFallback failLabel] H.<*>
+  entry <- labelBlock (mkMiddles [SaveCursor, SetFallback failLabel] H.<*>
     mkLast (IfBOL startBOL startNotBOL))
 
   -- We get here if we reach the original fallback, i.e. we reach a state where
   -- it's impossible to match the rest of the string.
-  failLabel <- labelBlock (mkMiddle RestoreCursor H.<*> checkBounds 1 justFail retry)
+  failLabel <- labelBlock (mkMiddle RestoreCursor H.<*> checkEOF justFail retry)
   justFail <- labelBlock (mkLast Fail)
   -- We have a check bounds and restore cursor before this so we know we're not
   -- at the end of the string and can safely call Next. Then repeat matching
