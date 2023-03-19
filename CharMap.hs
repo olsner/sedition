@@ -1,11 +1,14 @@
+{-# LANGUAGE TupleSections #-}
+
 module CharMap (
     CharMap(),
     -- construction
     empty, singleton, fromList,
     -- access/update
-    CharMap.lookup, insert, delete,
+    CharMap.lookup, findWithDefault, insert, delete,
     -- conversion/extraction
-    elems, toList, toRanges,
+    elems, elemSet, toList, toRanges,
+    CharMap.traverse,
     isComplete) where
 
 import Data.List (sort)
@@ -22,6 +25,7 @@ empty = CharMap (M.empty)
 singleton k v = insert k v empty
 
 elems (CharMap m) = M.elems m
+elemSet (CharMap m) = S.fromList (M.elems m)
 
 backward :: Ord a => CharMap a -> Map a [Char]
 backward (CharMap m) = foldr multiMapInsert M.empty (M.toList m)
@@ -31,6 +35,9 @@ multiMapInsert (k,v) = M.insertWith (<>) v [k]
 
 lookup :: Char -> CharMap a -> Maybe a
 lookup k (CharMap m) = M.lookup k m
+
+findWithDefault :: a -> Char -> CharMap a -> a
+findWithDefault def k (CharMap m) = M.findWithDefault def k m
 
 toList :: Ord a => CharMap a -> [([Char], a)]
 toList m = [(ks, v) | (v,ks) <- M.toList (backward m)]
@@ -61,3 +68,7 @@ delete k (CharMap m) = CharMap (M.delete k m)
 
 -- Cheating here - Char has a large range but we'll work like Char8 here.
 isComplete (CharMap m) = S.toList (M.keysSet m) == ['\0'..'\xff']
+
+traverse :: Applicative f => (a -> f b) -> CharMap a -> f (CharMap b)
+traverse f (CharMap m) = CharMap . M.fromList <$> Prelude.traverse f' (M.toList m)
+  where f' (k,v) = (k,) <$> f v

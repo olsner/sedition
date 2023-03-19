@@ -58,8 +58,11 @@ executable sedition
                       Regex.TNFA
                       Regex.TDFA
                       Regex.TDFA2C
+                      Regex.TDFA2IR
                       Regex.SimulateTNFA
                       Regex.SimulateTDFA
+                      Regex.IR
+                      Regex.RunIR
                       CharMap GenC
 
     build-depends:    hoopl,
