@@ -39,7 +39,8 @@ data Insn e x where
   CheckBounds   :: Int -> Label -> Label    -> Insn O C
   Branch        :: Label                    -> Insn O C
 
-  -- TODO Add stats counters and trace messages
+  Trace         :: String                   -> Insn O O
+  -- TODO Add stats counters
 
   -- Read next character from string into current-character register. Must not
   -- be called without bounds check somewhere before it.

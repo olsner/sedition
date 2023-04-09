@@ -87,6 +87,8 @@ gostate_check s = gostate (s, Checked)
 yystats :: String -> Int -> Graph Insn O O
 yystats name inc = emptyGraph
 
+debug msg = mkMiddle (Trace msg)
+
 emitRegOp :: RegOp -> Graph Insn O O
 emitRegOp (r,val) = mkMiddle (g val) H.<*> yystats "regops" 1
   where
@@ -132,12 +134,13 @@ emitState TDFA{..} minLengths s = mdo
   checkMinLength <- labelBlock (checkBounds minLength failLabel body)
   checkEOFLabel <- labelBlock (checkEOF eolLabel body)
   defaultLabel <- if isFinalState
-                    then labelBlock (emitEndRegOps tdfaFinalFunction H.<*>
+                    then labelBlock (debug ("default-transition from final " ++ show s) H.<*>
+                                     emitEndRegOps tdfaFinalFunction H.<*>
                                      goto matchL)
                     else return failLabel
-  failLabel <- labelBlock (mkLast Fallback)
+  failLabel <- labelBlock (debug ("default-transition from non-final " ++ show s) H.<*> mkLast Fallback)
   switch <- emitTrans nocheckStates trans defaultLabel
-  body <- labelBlock (yystats "visited_chars" 1 H.<*> switch)
+  body <- labelBlock (debug ("state " ++ show s) H.<*> yystats "visited_chars" 1 H.<*> switch)
   return ()
   where
     trans = M.findWithDefault CM.empty s tdfaTrans
@@ -161,8 +164,8 @@ emitState TDFA{..} minLengths s = mdo
 
     emitEndRegOps opfun = foldMap emitRegOp (M.findWithDefault [] s opfun)
 
-    maybeSetFallback l | isFinalState = mkMiddles [SaveCursor, SetFallback l]
-                       | otherwise    = emptyGraph
+    maybeSetFallback l | isFinalState = mkMiddles [Trace ("setting fallback in " ++ show s), SaveCursor, SetFallback l]
+                       | otherwise    = debug ("no fallback from " ++ show s)
 
     minLength | Just min <- M.lookup s minLengths, min > 1 = min
               | otherwise = 0
@@ -199,7 +202,7 @@ emitIR tdfa@TDFA{..} = mdo
   -- We have a check bounds and restore cursor before this so we know we're not
   -- at the end of the string and can safely call Next. Then repeat matching
   -- from the starting not-BOL state.
-  retry <- labelBlock (mkMiddles [Next, SaveCursor, SetFallback failLabel]
+  retry <- labelBlock (mkMiddles [Next, Trace "retrying", SaveCursor, SetFallback failLabel]
                        H.<*> goto startNotBOL)
   g <- gets graph
   return (entry, g)

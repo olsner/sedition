@@ -4,31 +4,37 @@ module Regex.RunIR where
 
 import Compiler.Hoopl as H
 
+import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Strict
 
 import Data.Map (Map)
 import Data.Map qualified as M
 
+import Debug.Trace
+
 import CharMap as CM
 import Regex.IR as IR
 import Regex.TaggedRegex (TagId)
 import Regex.TDFA2IR (testTDFA2IR)
 
-data S = S { char :: Char, buffer :: String, bufferLength :: Int,
+data S = S { buffer :: String, bufferLength :: Int,
              registers :: Map R Int, position :: Int, program :: Program,
-             fallbackCursor :: Int, fallbackLabel :: Label }
+             fallbackCursor :: Int, fallbackLabel :: Label,
+             debugEnabled :: Bool }
          deriving (Show)
 
 initState s p = gonext $ S {
-  char = error "No char",
   buffer = s,
   bufferLength = length s,
   registers = M.empty,
   position = (-1),
   program = p,
   fallbackCursor = error "Fallback cursor used before init",
-  fallbackLabel = error "Fallback label used before init" }
+  fallbackLabel = error "Fallback label used before init",
+  debugEnabled = False }
+
+showState S{..} = "@" ++ show position ++ " " ++ show (drop position buffer) ++ " fallback @" ++ show fallbackCursor
 
 blocks S{ program = (_, GMany _ blocks _) } = blocks
 
@@ -39,9 +45,8 @@ type M a = StateT S (Either Result) a
 next :: M ()
 next = modify gonext
 
-gonext s@S{..} = case buffer of
-    (x:xs) -> s { char = x, buffer = xs, position = succ position }
-    [] -> s { position = succ position }
+gonext s@S{..} = s { position = succ position }
+char S{..} = buffer !! position
 
 getReg r = gets (M.lookup r . registers)
 setReg r val = modify $ \s@S{..} -> s { registers = M.insert r val registers }
@@ -85,6 +90,9 @@ run (CheckBounds n eof cont) = do
   runLabel (if pos + n > len then eof else cont)
 run (Branch l) = runLabel l
 
+run (Trace msg) = do
+    s <- get
+    when (debugEnabled s) $ traceM (msg ++ ": " ++ showState s)
 run Next = next
 run (Set r) = setReg r =<< gets position
 run (Clear r) = clearReg r
