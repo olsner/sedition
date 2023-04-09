@@ -3,6 +3,7 @@
 
 module GenC where
 
+import qualified Compiler.Hoopl as H
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy.Char8 as L
 import qualified Data.ByteString.Builder as B
@@ -26,6 +27,8 @@ toByteString = L.toStrict . B.toLazyByteString
 
 label name = string8 name <> ":\n"
 goto name = stmt ("goto " <> string8 name)
+gotoL :: H.Label -> Builder
+gotoL l = goto (show l)
 
 idIntDec i | i >= 0    = intDec i
            | otherwise = "_" <> intDec (negate i)

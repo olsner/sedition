@@ -2,15 +2,13 @@
 {-# LANGUAGE OverloadedStrings #-}
 {-# LANGUAGE RecursiveDo #-}
 {-# LANGUAGE TypeSynonymInstances,FlexibleInstances,FlexibleContexts #-}
+{-# OPTIONS_GHC -Wno-orphans #-}
 
 module Regex.TDFA2IR where
 
 import Compiler.Hoopl as H hiding (addBlock)
 
-import Control.Monad
 import Control.Monad.Trans.State.Strict
-
-import qualified Data.ByteString.Char8 as C
 
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -18,8 +16,6 @@ import Data.Set (Set)
 import qualified Data.Set as S
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IS
-
-import Debug.Trace
 
 import qualified CharMap as CM
 import CharMap (CharMap)
@@ -65,7 +61,7 @@ getLabel s = do
       l <- freshLabel
       modify (addLabel s l)
       return l
-setMatchLabel l = modify $ \s@IRState{..} -> s { matchLabel = l }
+setMatchLabel l = modify $ \s -> s { matchLabel = l }
 
 addBlock :: Graph Insn C C -> IRM ()
 addBlock block = modify $ \s@IRState{..} -> s { graph = graph |*><*| block }
@@ -85,7 +81,7 @@ gostate_nocheck s = (yystats "goto_nocheck" 1 H.<*>) <$> gostate (s, Unchecked)
 gostate_check s = gostate (s, Checked)
 
 yystats :: String -> Int -> Graph Insn O O
-yystats name inc = emptyGraph
+yystats _ _ = emptyGraph
 
 debug msg = mkMiddle (Trace msg)
 
@@ -208,8 +204,6 @@ emitIR tdfa@TDFA{..} = mdo
   return (entry, g)
 
   where
-    allTags = S.union (M.keysSet tdfaFixedTags) (M.keysSet tdfaFinalRegisters)
-    allRegs = tdfaRegisters tdfa
     tdfaMinLengths = minLengths tdfa
     onlyMatchAtBOL = not (M.member tdfaStartStateNotBOL tdfaMinLengths)
 
@@ -218,7 +212,7 @@ emitIR tdfa@TDFA{..} = mdo
     fixedTags = M.map f tdfaFixedTags
       where f (TR.EndOfMatch d) = IR.EndOfMatch d
             f (TR.FixedTag t d) = add d (M.lookup t finalTagRegs)
-            add d2 (Just (Reg r d1)) = Reg r (d1 + d2)
+            add d2 ~(Just (Reg r d1)) = Reg r (d1 + d2)
 
 genIR :: TDFA -> Program
 genIR tdfa = evalState (emitIR tdfa) initState

@@ -75,10 +75,15 @@ instance Show (Graph Insn e x) where
 
 instance NonLocal Insn where
   entryLabel (Label l) = l
+  successors (IfBOL l1 l2) = [l1, l2]
+  successors (Branch l) = [l]
   successors (Switch cm l) = S.toList (S.insert l (CM.elemSet cm))
   successors Fail = []
   successors (Match _) = []
   successors (CheckBounds _ eof cont) = [eof, cont]
+  -- Technically, any label mentioned in SetFallback...
+  -- Does the return value have to be complete?
+  successors (Fallback) = []
 
 instance HooplNode Insn where
   mkBranchNode = Branch

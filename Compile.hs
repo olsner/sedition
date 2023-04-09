@@ -92,9 +92,6 @@ compileBlock block = fold (mempty :: Builder)
     f :: forall e x . IR.Insn e x -> Builder -> Builder
     f insn builder = builder <> compileInsn insn
 
-gotoL :: H.Label -> Builder
-gotoL l = goto (show l)
-
 string (IR.SVar s) = "&S" <> intDec s
 stringvar (IR.SVar s) = "S" <> intDec s
 pred (IR.Pred p) = "P" <> intDec p
