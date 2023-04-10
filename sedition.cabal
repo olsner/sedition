@@ -93,11 +93,15 @@ executable tdfa2c
                       Regex.SimulateTNFA
                       Regex.SimulateTDFA
                       Regex.IR
+                      Regex.TDFA2IR
                       Regex.RunIR
                       Regex.CompileIR
-                      CharMap GenC
+                      Collections CharMap GenC
+                      -- TODO Split out Regex.Collections to avoid AST/IR
+                      -- dependency in regex parts.
+                      AST IR
 
-    build-depends:    time, process, file-embed
+    build-depends:    time, process, file-embed, hoopl
     hs-source-dirs:   .
 
 test-suite parser-test
