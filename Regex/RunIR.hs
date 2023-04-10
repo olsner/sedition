@@ -36,7 +36,7 @@ initState s p = gonext $ S {
 
 showState S{..} = "@" ++ show position ++ " " ++ show (drop position buffer) ++ " fallback @" ++ show fallbackCursor
 
-blocks S{ program = (_, GMany _ blocks _) } = blocks
+blocks S{ program = Program { programGraph = GMany _ blocks _ } } = blocks
 
 type Result = Maybe (Map TagId Int)
 
@@ -98,7 +98,7 @@ run (Set r) = setReg r =<< gets position
 run (Clear r) = clearReg r
 run (Copy r r2) = setReg' r =<< getReg r2
 
-run Fallback = runLabel =<< gets fallbackLabel
+run (Fallback _) = runLabel =<< gets fallbackLabel
 run (SetFallback l) = modify $ \s -> s { fallbackLabel = l }
 run SaveCursor = modify $ \s@S{..} -> s { fallbackCursor = position }
 run RestoreCursor = modify $ \s@S{..} -> s { position = fallbackCursor }

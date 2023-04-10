@@ -69,7 +69,7 @@ addBlock block = modify $ \s@IRState{..} -> s { graph = graph |*><*| block }
 goto :: Label -> Graph Insn O C
 goto l = mkLast (Branch l)
 gofail :: Graph Insn O C
-gofail = mkLast Fallback
+gofail = mkLast (Fallback setEmpty)
 
 checkBounds d eof cont = mkLast (CheckBounds d eof cont)
 checkEOF = checkBounds 1
@@ -134,7 +134,7 @@ emitState TDFA{..} minLengths s = mdo
                                      emitEndRegOps tdfaFinalFunction H.<*>
                                      goto matchL)
                     else return failLabel
-  failLabel <- labelBlock (debug ("default-transition from non-final " ++ show s) H.<*> mkLast Fallback)
+  failLabel <- labelBlock (debug ("default-transition from non-final " ++ show s) H.<*> gofail)
   switch <- emitTrans nocheckStates trans defaultLabel
   body <- labelBlock (debug ("state " ++ show s) H.<*> yystats "visited_chars" 1 H.<*> switch)
   return ()
@@ -201,7 +201,7 @@ emitIR tdfa@TDFA{..} = mdo
   retry <- labelBlock (mkMiddles [Next, Trace "retrying", SaveCursor, SetFallback failLabel]
                        H.<*> goto startNotBOL)
   g <- gets graph
-  return (entry, g)
+  return (finishProgram entry g)
 
   where
     tdfaMinLengths = minLengths tdfa

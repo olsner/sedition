@@ -56,7 +56,7 @@ data Insn e x where
   -- Fallback and restore mechanism.
   -- Jump back to the last set fallback label. Must not be used before the first
   -- SetFallback. The entry point probably has a SetFallback that goes to Fail.
-  Fallback      ::                             Insn O C
+  Fallback      :: LabelSet                 -> Insn O C
   -- Set fallback to given label.
   SetFallback   :: Label                    -> Insn O O
   -- This is done separately to allow fallback to at least sometimes be
@@ -81,15 +81,29 @@ instance NonLocal Insn where
   successors Fail = []
   successors (Match _) = []
   successors (CheckBounds _ eof cont) = [eof, cont]
-  -- Technically, any label mentioned in SetFallback...
-  -- Does the return value have to be complete?
-  successors (Fallback) = []
+  successors (Fallback ls) = setElems ls
 
 instance HooplNode Insn where
   mkBranchNode = Branch
   mkLabelNode = Label
 
-type Program = (Label, Graph Insn C C)
+data Program = Program { entryPoint :: Label,
+                         programGraph :: Graph Insn C C }
+  deriving (Show)
 
-entryPoint :: Program -> Label
-entryPoint (e, _) = e
+finishProgram :: Label -> Graph Insn C C -> Program
+finishProgram e g = Program e (updateFallbackLabels g)
+
+updateFallbackLabels g = mapGraph f g
+  where
+    f :: Insn e x -> Insn e x
+    f (Fallback _) = Fallback fallbacks
+    f insn = insn
+    fallbacks = usedFallbackLabels g
+
+usedFallbackLabels :: Graph Insn C C -> LabelSet
+usedFallbackLabels g = foldGraphNodes f g setEmpty
+  where
+    f :: Insn e x -> LabelSet -> LabelSet
+    f (SetFallback l) s = setInsert l s
+    f _ s = s

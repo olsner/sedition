@@ -83,7 +83,7 @@ emitCases (cs, label) = foldMap emitCase cs <> gotoL label
 -- The variable 'bool result' should be set to the success (true = match) of
 -- the regexp search.
 genC :: Program -> Builder
-genC (entry, graph) =
+genC Program{..} =
     stmt ("YYDEBUG(\"Starting match at %zu (of %zu)\\n\", orig_offset, s->len)") <>
     stmt ("const char *const YYBEGIN = s->buf") <>
     stmt ("const char *const YYLIMIT = s->buf + s->len") <>
@@ -99,9 +99,9 @@ genC (entry, graph) =
     stmt ("const char *fallback_cursor = NULL") <>
     -- foldMap declareReg allRegs <>
     blockComment "Jump to entry point" <>
-    gotoL entry <>
+    gotoL entryPoint <>
     blockComment "Basic blocks" <>
-    foldGraphNodes foldEmitInsn graph mempty <>
+    foldGraphNodes foldEmitInsn programGraph mempty <>
     blockComment "Exit point" <>
     label "end" <>
     sfun "YYSTATS" ["matched", "result"] <>
@@ -156,7 +156,7 @@ emitInsn (Clear r) = stmt (showB r <> " = nullptr")
 emitInsn (Copy r r2) = stmt (showB r <> " = " <> showB r2)
 
 -- O O fallback operations
-emitInsn Fallback = goto "*fallback_label"
+emitInsn (Fallback _) = goto "*fallback_label"
 emitInsn (SetFallback l) = stmt ("fallback_label = &&" <> showB l)
 emitInsn SaveCursor = stmt "fallback_cursor = YYCURSOR"
 emitInsn RestoreCursor = stmt "YYCURSOR = fallback_cursor"
