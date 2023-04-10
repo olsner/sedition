@@ -10,12 +10,14 @@ import Regex.IR
 
 import Regex.Optimize.RedundantBranches (redundantBranchesPass)
 import Regex.Optimize.PossibleFallback (possibleFallbackPass)
+import Regex.Optimize.LiveSetFallback (liveSetFallbackPass)
+import Regex.Optimize.LiveSaveCursor (liveSaveCursorPass)
 
 --debugBwd = debugBwdJoins trace (const True)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
 --debugBwd = id
 
-doTrace = True
+doTrace = False
 
 traceFuel :: FuelMonad m => Int -> m ()
 traceFuel oldFuel = do
@@ -39,16 +41,12 @@ optimizeOnce entry program = do
   let entries = JustC [entry]
   program <- tracePass "redundantBranches" $
     analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
+  program <- tracePass "liveSetFallback" $
+    analyzeAndRewriteBwd liveSetFallbackPass entries program mapEmpty
+  program <- tracePass "liveSaveCursor" $
+    analyzeAndRewriteBwd liveSaveCursorPass entries program mapEmpty
   program <- tracePass "possibleFallback" $
     analyzeAndRewriteFwd possibleFallbackPass entries program mapEmpty
-  -- program <- tracePass "livePred" $
-  --   analyzeAndRewriteBwd livePredPass entries program mapEmpty
-  -- program <- tracePass "liveString" $
-  --   analyzeAndRewriteBwd liveStringPass entries program mapEmpty
-  -- program <- tracePass "constLastRegex" $
-  --   analyzeAndRewriteFwd constLastRegexPass entries program mapEmpty
-  -- program <- tracePass "liveLastRegex" $
-  --   analyzeAndRewriteBwd liveLastRegexPass entries program mapEmpty
   return program
 
 optToFix f entry original = do
@@ -63,7 +61,7 @@ optToFix f entry original = do
   -- around in the final output.
   if oldFuel == newFuel || newFuel == 0 || show original == show optimized
     then return (finishProgram entry optimized)
-    else optToFix f entry optimized
+    else optToFix f entry (updateFallbackLabels optimized)
 
 optimize' :: (CheckpointMonad m, FuelMonad m) => Program -> m Program
 optimize' Program{..} = optToFix optimizeOnce entryPoint programGraph

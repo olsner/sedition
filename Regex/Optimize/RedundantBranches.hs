@@ -65,9 +65,20 @@ simplifySameIfs :: FuelMonad m => BwdRewrite m Insn RBFact
 simplifySameIfs = deepBwdRw rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x RBFact -> m (Maybe (Graph Insn e x))
-    rw (IfBOL tl fl)         _ | tl == fl = return (Just (mkLast (Branch tl)))
-    rw (CheckBounds _ tl fl) _ | tl == fl = return (Just (mkLast (Branch tl)))
+    rw (IfBOL tl fl)         f | tl == fl = rwLast (Branch tl)
+                               | Just i' <- same tl fl f = rwLast i'
+    rw (CheckBounds _ tl fl) f | tl == fl = rwLast (Branch tl)
+                               | Just i' <- same tl fl f = rwLast i'
     rw _ _ = return Nothing
+
+    same l1 l2 f | Just i1 <- insn l1 f, Just i2 <- insn l2 f,
+                   i1 == i2  = Just i1
+                 | otherwise = Nothing
+
+    insn l f | Just (PElem i) <- mapLookup l f = Just i
+             | otherwise                       = Nothing
+
+    rwLast new = return (Just (mkLast new))
 
 redundantBranchesPass :: FuelMonad m => BwdPass m Insn RBFact
 redundantBranchesPass = BwdPass

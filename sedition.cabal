@@ -66,6 +66,8 @@ executable sedition
                       Regex.OptimizeIR
                       Regex.RunIR
                       Regex.CompileIR
+                      Regex.Optimize.LiveSaveCursor
+                      Regex.Optimize.LiveSetFallback
                       Regex.Optimize.PossibleFallback
                       Regex.Optimize.RedundantBranches
                       CharMap GenC
@@ -101,6 +103,8 @@ executable tdfa2c
                       Regex.OptimizeIR
                       Regex.RunIR
                       Regex.CompileIR
+                      Regex.Optimize.LiveSaveCursor
+                      Regex.Optimize.LiveSetFallback
                       Regex.Optimize.PossibleFallback
                       Regex.Optimize.RedundantBranches
                       Collections CharMap GenC
