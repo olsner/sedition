@@ -44,7 +44,6 @@ fallback = deepFwdRw rw
     rw :: FuelMonad m => Insn e x -> PossibleFallbackFact -> m (Maybe (Graph Insn e x))
     rw (Fallback ls) f | [l] <- setElems ls = rwLast (Branch l)
                        | [l] <- setElems f  = rwLast (Branch l)
-                       | otherwise          = rwLast (Fallback (setIntersection ls f))
     rw _ _ = return Nothing
 
     rwLast insn = return (Just (mkLast insn))
