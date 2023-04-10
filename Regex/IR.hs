@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving, CPP, RecursiveDo, OverloadedStrings #-}
+{-# LANGUAGE FlexibleInstances, GADTs, TypeFamilies, StandaloneDeriving, RecordWildCards #-}
 
 module Regex.IR where
 
@@ -7,6 +7,7 @@ import Compiler.Hoopl as H
 import Data.Map (Map)
 import qualified Data.Set as S
 
+import Collections
 import CharMap (CharMap)
 import qualified CharMap as CM
 -- Ideally, this module has no dependencies on TDFA.
@@ -107,3 +108,12 @@ usedFallbackLabels g = foldGraphNodes f g setEmpty
     f :: Insn e x -> LabelSet -> LabelSet
     f (SetFallback l) s = setInsert l s
     f _ s = s
+
+allRegs :: Program -> RegSet
+allRegs Program{..} = foldGraphNodes f programGraph setEmpty
+  where
+    f :: Insn e x -> RegSet -> RegSet
+    f (Set r) = setInsert r
+    f (Clear r) = setInsert r
+    f (Copy r1 r2) = setInsert r1 . setInsert r2
+    f _ = id

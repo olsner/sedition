@@ -6,16 +6,10 @@ module Regex.CompileIR where
 
 import Compiler.Hoopl as H
 
-import Control.Monad
-import Control.Monad.Trans.Class
-import Control.Monad.Trans.State.Strict
-
 import qualified Data.ByteString.Char8 as C
 
-import Data.Map (Map)
+--import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Set (Set)
-import qualified Data.Set as S
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IS
 -- import Data.List
@@ -72,7 +66,7 @@ emitCases (cs, label) = foldMap emitCase cs <> gotoL label
 -- struct string { char* buf; size_t len; size_t alloc; };
 -- struct match_t { regmatch_t matches[]; }
 -- where regmatch_t has rm_so and rm_eo, corresponding to the even/odd tag
--- offset is > 0 when repeating a match for a global replace
+-- orig_offset is > 0 when repeating a match for a global replace
 --
 -- Tags are "tX" (offsets in string), registers are "rX" (pointers in string).
 --
@@ -83,7 +77,7 @@ emitCases (cs, label) = foldMap emitCase cs <> gotoL label
 -- The variable 'bool result' should be set to the success (true = match) of
 -- the regexp search.
 genC :: Program -> Builder
-genC Program{..} =
+genC program@Program{..} =
     stmt ("YYDEBUG(\"Starting match at %zu (of %zu)\\n\", orig_offset, s->len)") <>
     stmt ("const char *const YYBEGIN = s->buf") <>
     stmt ("const char *const YYLIMIT = s->buf + s->len") <>
@@ -97,7 +91,7 @@ genC Program{..} =
     stmt ("unsigned char YYCHAR = 0") <>
     stmt ("void *fallback_label = NULL") <>
     stmt ("const char *fallback_cursor = NULL") <>
-    -- foldMap declareReg allRegs <>
+    foldMap declareReg allRegs <>
     blockComment "Jump to entry point" <>
     gotoL entryPoint <>
     blockComment "Basic blocks" <>
@@ -106,6 +100,7 @@ genC Program{..} =
     label "end" <>
     sfun "YYSTATS" ["matched", "result"] <>
     sfun "YYSTATS" ["failed", "!result"]
+  where allRegs = setElems (IR.allRegs program)
 
 earlyOut l = sfun "YYSTATS" ["early_out", "1"] <> goto l
 
