@@ -125,7 +125,10 @@ emitInsn (Label l) = label (show l)
 -- O C control flow
 emitInsn (IfBOL tl fl) = cIf "YYCURSOR == YYBEGIN" (gotoL tl) (gotoL fl)
 emitInsn (Switch cm def) =
-    "switch (YYCHAR) {\n" <>
+    -- TODO Ensure this doesn't to duplicate reads from memory. I think we
+    -- generally only match once though. Passing through YYCHAR gives us a
+    -- cast to unsigned char along the way.
+    "switch (YYCHAR = YYGET()) {\n" <>
     foldMap emitCases (CM.toRanges cm) <>
     (if not (CM.isComplete cm)
         then " default: " <> gotoL def
@@ -143,7 +146,7 @@ emitInsn (CheckBounds n eof cont) =
 emitInsn (Branch l) = gotoL l
 
 -- O O debugging
-emitInsn (Trace msg) = yydebug (cstring (C.pack msg)) []
+emitInsn (Trace msg) = yydebug "\"%s\\n\"" [cstring (C.pack msg)]
 -- O O primitives
 emitInsn Next = sfun "YYNEXT" []
 emitInsn (Set r) = stmt (showB r <> " = YYCURSOR")
