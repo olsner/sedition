@@ -18,6 +18,7 @@ import System.Process (rawSystem)
 
 import Text.Printf
 
+import Regex.Regex (parseString)
 import Regex.SimulateTDFA
 import Regex.TaggedRegex
 import Regex.TNFA as TNFA
@@ -125,7 +126,7 @@ do_main args = do
   let regex:strings = nonOpts
 
   tStartParse <- timestamp
-  let re = testTagRegex regex
+  let re = fixTags . tagRegex . parseString extendedRegexps . C.pack $ regex
   tEndParse <- re `seq` timestamp
 
   when dumpParse $ do
