@@ -92,13 +92,13 @@ emitRegOp (r,val) = mkMiddle (g val) H.<*> yystats "regops" 1
     g (SetReg Nil) = Clear r
     g (CopyReg r2) = Copy r r2
 
-emitCase :: Set StateId -> TDFATrans -> IRM (Graph Insn O C)
-emitCase nocheckStates (s', regops) =
+emitCase :: Set StateId -> TDFATrans -> IRM Label
+emitCase nocheckStates (s', regops) = labelBlock =<<
     (foldMap emitRegOp regops H.<*> mkMiddle Next H.<*>) <$>
     (if skipCheck then gostate_nocheck s' else gostate_check s')
     where skipCheck = S.member s' nocheckStates
 
-emitCases :: Set StateId -> CharMap TDFATrans -> IRM (CharMap (Graph Insn O C))
+emitCases :: Set StateId -> CharMap TDFATrans -> IRM (CharMap Label)
 emitCases nocheckStates trans = CM.traverse (emitCase nocheckStates) trans
 
 labelBlock :: Graph Insn O C -> IRM Label
@@ -109,7 +109,7 @@ labelBlock b = do
 
 emitTrans :: Set StateId -> CharMap TDFATrans -> Label -> IRM (Graph Insn O C)
 emitTrans nocheckStates trans fail = do
-    table <- CM.traverse labelBlock =<< emitCases nocheckStates trans
+    table <- emitCases nocheckStates trans
     return (mkLast (Switch table fail))
 
 emitState :: TDFA -> Map StateId Int -> StateId -> IRM ()

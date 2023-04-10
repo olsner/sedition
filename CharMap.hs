@@ -69,6 +69,7 @@ delete k (CharMap m) = CharMap (M.delete k m)
 -- Cheating here - Char has a large range but we'll work like Char8 here.
 isComplete (CharMap m) = S.toList (M.keysSet m) == ['\0'..'\xff']
 
-traverse :: Applicative f => (a -> f b) -> CharMap a -> f (CharMap b)
-traverse f (CharMap m) = CharMap . M.fromList <$> Prelude.traverse f' (M.toList m)
-  where f' (k,v) = (k,) <$> f v
+traverse :: (Ord a, Applicative f) => (a -> f b) -> CharMap a -> f (CharMap b)
+traverse f cm = fromList . concat <$> Prelude.traverse f' (toList cm)
+  where
+    f' (ks,v) = (\v' -> (,v') <$> ks) <$> f v
