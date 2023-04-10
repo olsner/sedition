@@ -122,7 +122,7 @@ testTDFA2C :: String -> IO ()
 testTDFA2C = C.putStrLn . tdfa2c Nothing . Regex.parseString True . C.pack
 
 foldEmitInsn :: Insn e x -> Builder -> Builder
-foldEmitInsn insn = (emitInsn insn <>)
+foldEmitInsn insn = (<> emitInsn insn)
 
 emitInsn :: Insn e x -> Builder
 emitInsn (Label l) = label (show l)
