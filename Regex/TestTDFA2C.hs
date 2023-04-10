@@ -22,13 +22,14 @@ import Regex.SimulateTDFA
 import Regex.TaggedRegex
 import Regex.TNFA as TNFA
 import Regex.TDFA as TDFA
-import Regex.TDFA2C
+import Regex.TDFA2IR (genIR)
+import Regex.CompileIR
 import GenC
 
 doSimulateTDFA tdfa s = print (runTDFA True tdfa s)
 
 compileTDFA tdfa output = C.writeFile output . toByteString $
-    programHeader output <> genC tdfa <> programFooter
+    programHeader output <> genC (genIR tdfa) <> programFooter
 
 -- TODO Add flags to control gcc optimization/debug settings.
 compileC cFile exeFile defines =
