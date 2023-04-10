@@ -19,7 +19,7 @@ import GenC
 import qualified IR
 import IR (Program)
 import qualified Regex.Regex as Regex
-import qualified Regex.TDFA2C as TDFA2C
+import qualified Regex.CompileIR as Regex2C
 
 seditionRuntime :: IsString a => a
 seditionRuntime = $(embedStringFile "sedition.h")
@@ -219,7 +219,7 @@ testCompare = False
 forceRegcomp = False
 
 needRegcomp (IR.RE _ s ere _) = forceRegcomp ||
-    testCompare || not (TDFA2C.isCompatible (Regex.parseString ere s))
+    testCompare || not (Regex2C.isCompatible (Regex.parseString ere s))
 
 compileRE r@IR.RE{..} = wrapper body
   where
@@ -233,7 +233,7 @@ compileRE r@IR.RE{..} = wrapper body
          | testCompare = match_for_compare <> tdfa2c r re usedTags <> compare_matches
          | otherwise   = tdfa2c r re usedTags
     re = Regex.parseString ere s
-    needRegexec = forceRegcomp || not (TDFA2C.isCompatible re)
+    needRegexec = forceRegcomp || not (Regex2C.isCompatible re)
     res = C.pack $ Regex.reString re
     wrapper b =
         "static bool " <> regexfun r <>
@@ -252,7 +252,7 @@ compileRE r@IR.RE{..} = wrapper body
     description =
         (if ere then "ERE: "  else "BRE: ") <> cstring s <>
         " -> ERE: " <> cstring res <>
-        (if needRegexec then " (using regcomp)" else " (using TDFA2C)")
+        (if needRegexec then " (using regcomp)" else " (using Regex2C)")
 
 tdfa2c r re used =
     sfun "clear_match" ["m"] <>
@@ -260,4 +260,4 @@ tdfa2c r re used =
     -- compare_regexp_matches.
     (if testCompare then stmt "memset(&m->matches, 0xff, sizeof(m->matches))" else mempty) <>
     stmt ("m->fun = " <> regexfun r)  <>
-    byteString (TDFA2C.tdfa2c used re)
+    byteString (Regex2C.tdfa2c used re)
