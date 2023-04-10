@@ -66,6 +66,7 @@ executable sedition
                       Regex.OptimizeIR
                       Regex.RunIR
                       Regex.CompileIR
+                      Regex.Optimize.LiveRegister
                       Regex.Optimize.LiveSaveCursor
                       Regex.Optimize.LiveSetFallback
                       Regex.Optimize.PossibleFallback
@@ -103,6 +104,7 @@ executable tdfa2c
                       Regex.OptimizeIR
                       Regex.RunIR
                       Regex.CompileIR
+                      Regex.Optimize.LiveRegister
                       Regex.Optimize.LiveSaveCursor
                       Regex.Optimize.LiveSetFallback
                       Regex.Optimize.PossibleFallback

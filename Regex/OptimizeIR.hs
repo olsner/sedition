@@ -12,6 +12,7 @@ import Regex.Optimize.RedundantBranches (redundantBranchesPass)
 import Regex.Optimize.PossibleFallback (possibleFallbackPass)
 import Regex.Optimize.LiveSetFallback (liveSetFallbackPass)
 import Regex.Optimize.LiveSaveCursor (liveSaveCursorPass)
+import Regex.Optimize.LiveRegister (liveRegisterPass)
 
 --debugBwd = debugBwdJoins trace (const True)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
@@ -22,15 +23,15 @@ doTrace = False
 traceFuel :: FuelMonad m => Int -> m ()
 traceFuel oldFuel = do
   fuel <- fuelRemaining
-  trace (show (oldFuel - fuel) ++ " fuel consumed") (return ())
+  traceM (show (oldFuel - fuel) ++ " fuel consumed, " ++ show fuel ++ " remaining")
 
 tracePass name pass | doTrace = do
   oldFuel <- fuelRemaining
   (program,_,_) <- trace ("Optimizing program: " ++ show name ++ "...") pass
   traceFuel oldFuel
-  trace (show (setSize (labelsDefined program)) ++ " labels defined, " ++
-         show (setSize (labelsUsed program)) ++ " labels used") $ return ()
-  trace (show program) $ return ()
+  traceM (show (setSize (labelsDefined program)) ++ " labels defined, " ++
+          show (setSize (labelsUsed program)) ++ " labels used")
+  traceM (show (length (show program)))
   return program
                     | otherwise = do
   (program,_,_) <- pass
@@ -47,6 +48,8 @@ optimizeOnce entry program = do
     analyzeAndRewriteBwd liveSaveCursorPass entries program mapEmpty
   program <- tracePass "possibleFallback" $
     analyzeAndRewriteFwd possibleFallbackPass entries program mapEmpty
+  program <- tracePass "liveRegister" $
+    analyzeAndRewriteBwd liveRegisterPass entries program mapEmpty
   return program
 
 optToFix f entry original = do
@@ -73,7 +76,7 @@ optimize :: Fuel -> Program -> (Program, Fuel)
 optimize fuel p = runSFM fuel (optimize' p)
 
 -- TODO, optimizations:
--- * Dead register (backwards)
+-- * Dead store (backwards)
 --
 -- * switch with everything to the same target
 -- * labels with equivalent blocks? (backwards)
