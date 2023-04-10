@@ -47,7 +47,7 @@ debugTag t = yydebug ("\"match[" <> matchix t <> "]." <> matchfld t <> " = %td\\
 tagValue :: IR.TagValue -> Builder
 tagValue (Reg r d) = showB r <> " ? " <> showB r <> " - s->buf - " <> intDec d <> " : -1"
 -- TOOD off-by-one etc
-tagValue (EndOfMatch d) = "YYCURSOR - " <> intDec d
+tagValue (EndOfMatch d) = "YYPOS - " <> intDec d
 
 declareReg :: R -> Builder
 declareReg r = stmt ("const char* " <> showB r <> " = NULL")
@@ -123,7 +123,7 @@ emitInsn :: Insn e x -> Builder
 emitInsn (Label l) = label (show l)
 
 -- O C control flow
-emitInsn (IfBOL tl fl) = cIf "YYPOS == YYBEGIN" (gotoL tl) (gotoL fl)
+emitInsn (IfBOL tl fl) = cIf "YYCURSOR == YYBEGIN" (gotoL tl) (gotoL fl)
 emitInsn (Switch cm def) =
     "switch (YYCHAR) {\n" <>
     foldMap emitCases (CM.toRanges cm) <>
@@ -147,7 +147,7 @@ emitInsn (Trace msg) = yydebug (cstring (C.pack msg)) []
 -- O O primitives
 emitInsn Next = sfun "YYNEXT" []
 emitInsn (Set r) = stmt (showB r <> " = YYCURSOR")
-emitInsn (Clear r) = stmt (showB r <> " = nullptr")
+emitInsn (Clear r) = stmt (showB r <> " = NULL")
 emitInsn (Copy r r2) = stmt (showB r <> " = " <> showB r2)
 
 -- O O fallback operations
