@@ -128,8 +128,8 @@ emitInsn (Label l) = label (show l)
 emitInsn (IfBOL tl fl) = cIf "YYCURSOR == YYBEGIN" (gotoL tl) (gotoL fl)
 emitInsn (Switch cm def) =
     -- TODO Ensure this doesn't to duplicate reads from memory. I think we
-    -- generally only match once though. Passing through YYCHAR gives us a
-    -- cast to unsigned char along the way.
+    -- generally only match once per YYNEXT though. Passing through YYCHAR
+    -- gives us a cast to unsigned char along the way.
     "switch (YYCHAR = YYGET()) {\n" <>
     foldMap emitCases (CM.toRanges cm) <>
     (if not (CM.isComplete cm)

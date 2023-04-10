@@ -73,17 +73,10 @@ optimize :: Fuel -> Program -> (Program, Fuel)
 optimize fuel p = runSFM fuel (optimize' p)
 
 -- TODO, optimizations:
--- * Possible fallbacks
---   Forward pass:
---   - SetFallback adds to set
---   - Fallback is updated with new set of successors
---   (RedundantBranches will update Fallback to direct branch when only a single
---   branch is left in the set.)
--- * Dead SetFallback (backwards)
--- * Dead SaveCursor (backwards)
 -- * Dead register (backwards)
--- * labels with equivalent blocks? (backwards)
 --
+-- * switch with everything to the same target
+-- * labels with equivalent blocks? (backwards)
 -- * redundant bounds checks
 --   forwards:
 --   - record largest previously checked bound
@@ -92,5 +85,3 @@ optimize fuel p = runSFM fuel (optimize' p)
 --   backwards too? It's useless to check bounds for 2 if all successors check
 --   for 3 or more. OTOH, the failure path matters so this should track the
 --   failure label and only optimize out if we go to the same place.
---
--- * switch with everything to the same target

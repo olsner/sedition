@@ -41,6 +41,7 @@ cstring s = "\"" <> foldMap quoteC (C.unpack s) <> "\""
     quoteC '\t' = "\\t"
     quoteC '\"' = "\\\""
     quoteC '\\' = "\\\\"
+    quoteC '\'' = "'"
     quoteC c
       -- Add an extra "" pair to terminate the hex escape in case it is
       -- followed by a valid hex digit.
