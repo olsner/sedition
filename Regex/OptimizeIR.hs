@@ -9,6 +9,7 @@ import Debug.Trace
 import Regex.IR
 
 import Regex.Optimize.RedundantBranches (redundantBranchesPass)
+import Regex.Optimize.PossibleFallback (possibleFallbackPass)
 
 --debugBwd = debugBwdJoins trace (const True)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
@@ -36,10 +37,10 @@ tracePass name pass | doTrace = do
 optimizeOnce :: (CheckpointMonad m, FuelMonad m) => Label -> Graph Insn C C -> m (Graph Insn C C)
 optimizeOnce entry program = do
   let entries = JustC [entry]
-  -- program <- tracePass "constPred" $
-  --   analyzeAndRewriteFwd constPredPass entries program mapEmpty
   program <- tracePass "redundantBranches" $
     analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
+  program <- tracePass "possibleFallback" $
+    analyzeAndRewriteFwd possibleFallbackPass entries program mapEmpty
   -- program <- tracePass "livePred" $
   --   analyzeAndRewriteBwd livePredPass entries program mapEmpty
   -- program <- tracePass "liveString" $

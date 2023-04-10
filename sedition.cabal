@@ -53,6 +53,7 @@ executable sedition
                       Optimize.LiveMatch
                       Optimize.LiveLastRegex
                       Compile Interpret
+                      -- TODO Extract a library for the regex parts
                       Regex.Regex
                       Regex.TaggedRegex
                       Regex.TNFA
@@ -65,6 +66,7 @@ executable sedition
                       Regex.OptimizeIR
                       Regex.RunIR
                       Regex.CompileIR
+                      Regex.Optimize.PossibleFallback
                       Regex.Optimize.RedundantBranches
                       CharMap GenC
 
@@ -99,6 +101,7 @@ executable tdfa2c
                       Regex.OptimizeIR
                       Regex.RunIR
                       Regex.CompileIR
+                      Regex.Optimize.PossibleFallback
                       Regex.Optimize.RedundantBranches
                       Collections CharMap GenC
                       -- TODO Split out Regex.Collections to avoid AST/IR

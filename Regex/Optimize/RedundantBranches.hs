@@ -46,7 +46,6 @@ rewrite = deepBwdRw rw
                          | Just l'  <- label l f  = rwLast i (Switch cm l')
     -- TODO Rewrite branches in the switch map too
     rw i@(Branch t)    f                          = rwInsn i t f
-    rw i@(Fallback ls) _ | [l] <- setElems ls     = rwLast i (Branch l)
     rw _ _ = return Nothing
 
     rwLast :: FuelMonad m => Insn O C -> Insn O C -> m (Maybe (Graph Insn O C))
