@@ -62,8 +62,10 @@ executable sedition
                       Regex.SimulateTNFA
                       Regex.SimulateTDFA
                       Regex.IR
+                      Regex.OptimizeIR
                       Regex.RunIR
                       Regex.CompileIR
+                      Regex.Optimize.RedundantBranches
                       CharMap GenC
 
     build-depends:    hoopl,
@@ -94,8 +96,10 @@ executable tdfa2c
                       Regex.SimulateTDFA
                       Regex.IR
                       Regex.TDFA2IR
+                      Regex.OptimizeIR
                       Regex.RunIR
                       Regex.CompileIR
+                      Regex.Optimize.RedundantBranches
                       Collections CharMap GenC
                       -- TODO Split out Regex.Collections to avoid AST/IR
                       -- dependency in regex parts.

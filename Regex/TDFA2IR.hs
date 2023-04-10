@@ -83,7 +83,8 @@ gostate_check s = gostate (s, Checked)
 yystats :: String -> Int -> Graph Insn O O
 yystats _ _ = emptyGraph
 
-debug msg = mkMiddle (Trace msg)
+debug _ = emptyGraph
+--debug msg = mkMiddle (Trace msg)
 
 emitRegOp :: RegOp -> Graph Insn O O
 emitRegOp (r,val) = mkMiddle (g val) H.<*> yystats "regops" 1

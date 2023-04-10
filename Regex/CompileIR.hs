@@ -27,6 +27,7 @@ import Regex.TaggedRegex (TagId(..), fixTags, selectTags, tagRegex)
 import Regex.TNFA (genTNFA)
 import Regex.TDFA (genTDFA)
 import Regex.TDFA2IR (genIR)
+import Regex.OptimizeIR (optimize)
 import GenC
 
 yystats name inc = sfun "YYSTATS" [name, inc]
@@ -106,7 +107,8 @@ earlyOut l = sfun "YYSTATS" ["early_out", "1"] <> goto l
 
 tdfa2c :: Maybe IntSet -> Regex -> C.ByteString
 tdfa2c used = toByteString .
-    genC . genIR . genTDFA . genTNFA . fixTags . unusedTags . tagRegex
+    genC . fst . optimize 10000 .
+    genIR . genTDFA . genTNFA . fixTags . unusedTags . tagRegex
   where unusedTags | Just s <- used = selectTags (\(T t) -> t `IS.member` s)
                    | otherwise = id
 

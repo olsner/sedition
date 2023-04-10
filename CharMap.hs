@@ -4,6 +4,7 @@ module CharMap (
     CharMap(),
     -- construction
     empty, singleton, fromList,
+    CharMap.null,
     -- access/update
     CharMap.lookup, findWithDefault, insert, delete,
     -- conversion/extraction
@@ -23,6 +24,8 @@ newtype CharMap a = CharMap (Map Char a) deriving (Show, Ord, Eq)
 
 empty = CharMap (M.empty)
 singleton k v = insert k v empty
+
+null (CharMap m) = M.null m
 
 elems (CharMap m) = M.elems m
 elemSet (CharMap m) = S.fromList (M.elems m)

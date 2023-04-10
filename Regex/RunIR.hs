@@ -17,6 +17,7 @@ import CharMap as CM
 import Regex.IR as IR
 import Regex.TaggedRegex (TagId)
 import Regex.TDFA2IR (testTDFA2IR)
+import Regex.OptimizeIR (optimize)
 
 data S = S { buffer :: String, bufferLength :: Int,
              registers :: Map R Int, position :: Int, program :: Program,
@@ -110,4 +111,4 @@ resolveTagMap pos regs = M.map f
                    | otherwise = (-1)
 
 testRunIR :: String -> String -> Result
-testRunIR re s = runIR s (testTDFA2IR re)
+testRunIR re s = runIR s . fst . optimize 10000 . testTDFA2IR $ re
