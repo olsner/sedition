@@ -133,9 +133,10 @@ emitInsn (Switch cm def) =
     -- gives us a cast to unsigned char along the way.
     "switch (YYCHAR = YYGET()) {\n" <>
     foldMap emitCases (CM.toRanges cm) <>
-    (if not (CM.isComplete cm)
-        then " default: " <> gotoL def
-        else mempty) <>
+    " default: " <> gotoL def <> "}\n"
+emitInsn (TotalSwitch cm) =
+    "switch (YYCHAR = YYGET()) {\n" <>
+    foldMap emitCases (CM.toRanges cm) <>
     "}\n"
 emitInsn Fail = goto "end"
 emitInsn (Match tagMap) =

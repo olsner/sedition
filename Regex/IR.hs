@@ -28,8 +28,13 @@ data Insn e x where
   -- otherwise go to the second.
   IfBOL         :: Label -> Label           -> Insn O C
   -- Match current character against label map, jump to matching label.
-  -- For characters not in the label map, go to fallback label instead.
+  -- For characters not in the label map, go to default-label instead.
   Switch        :: CharMap Label -> Label   -> Insn O C
+  -- Switch that does not need a default case.
+  -- All switches could use this by augmenting them with missing entries, but
+  -- then we'd want a corresponding transformation on the output side to e.g.
+  -- use default for the most common target label.
+  TotalSwitch   :: CharMap Label            -> Insn O C
   -- Definitely did not match.
   Fail          ::                             Insn O C
   -- Definitely did match. Argument maps tags to final registers, including the
@@ -79,6 +84,7 @@ instance NonLocal Insn where
   successors (IfBOL l1 l2) = [l1, l2]
   successors (Branch l) = [l]
   successors (Switch cm l) = S.toList (S.insert l (CM.elemSet cm))
+  successors (TotalSwitch cm) = S.toList (CM.elemSet cm)
   successors Fail = []
   successors (Match _) = []
   successors (CheckBounds _ eof cont) = [eof, cont]

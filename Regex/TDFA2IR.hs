@@ -111,7 +111,18 @@ labelBlock b = do
 emitTrans :: Set StateId -> CharMap TDFATrans -> Label -> IRM (Graph Insn O C)
 emitTrans nocheckStates trans fail = do
     table <- emitCases nocheckStates trans
-    return (mkLast (Switch table fail))
+    return (mkLast (mkSwitch table fail))
+
+mkSwitch table def
+  | [] <- ranges                        = Branch def
+  -- TODO Do these as optimizations instead - labels can be merged by
+  -- RedundantBranches which could create new single-target switches.
+  | [(_,label)] <- ranges, complete     = Branch label
+  | [(_,label)] <- ranges, def == label = Branch label
+  | complete                            = TotalSwitch table
+  | otherwise                           = Switch table def
+  where ranges   = CM.toRanges table
+        complete = CM.isComplete table
 
 emitState :: TDFA -> Map StateId Int -> StateId -> IRM ()
 emitState TDFA{..} minLengths s = mdo

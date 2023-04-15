@@ -10,6 +10,7 @@ import Control.Monad.Trans.State.Strict
 
 import Data.Map (Map)
 import Data.Map qualified as M
+import Data.Maybe
 
 import Debug.Trace
 
@@ -80,6 +81,9 @@ run (IfBOL tl fl) = do
 run (Switch cm def) = do
   c <- gets char
   runLabel (CM.findWithDefault def c cm)
+run (TotalSwitch cm) = do
+  c <- gets char
+  runLabel (fromJust $ CM.lookup c cm)
 run Fail = lift (Left Nothing)
 run (Match tagMap) = do
   regs <- gets registers
