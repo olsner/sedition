@@ -246,6 +246,7 @@ compileRE r@IR.RE{..} = wrapper body
     regexec = stmt ("result = " <> match "m")
     match_for_compare =
         stmt "match_t m2" <>
+        sfun "clear_match" ["m2"] <>
         stmt ("const bool result2 = " <> match "&m2")
     compare_matches = sfun "compare_regexp_matches" ["result2", "&m2", "result", "m", "s", "orig_offset", "__PRETTY_FUNCTION__", cstring res]
 
@@ -255,9 +256,6 @@ compileRE r@IR.RE{..} = wrapper body
         (if needRegexec then " (using regcomp)" else " (using Regex2C)")
 
 tdfa2c r re used =
-    sfun "clear_match" ["m"] <>
-    -- Since regexec seems to set all unused matches to -1, do the same for
-    -- compare_regexp_matches.
-    (if testCompare then stmt "memset(&m->matches, 0xff, sizeof(m->matches))" else mempty) <>
+    (if testCompare then sfun "clear_match" ["m"] else mempty) <>
     stmt ("m->fun = " <> regexfun r)  <>
     byteString (Regex2C.tdfa2c used re)

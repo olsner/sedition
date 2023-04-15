@@ -344,7 +344,10 @@ static void enable_stats_on_sigint() {
 
 static void clear_match(match_t* m)
 {
-    memset(m, 0, sizeof(*m));
+    m->fun = NULL;
+    // Since regexec seems to set all unused matches to -1, do the same for
+    // compare_regexp_matches.
+    memset(&m->matches, 0xff, sizeof(m->matches));
 }
 
 __attribute__((noinline)) static bool copy_match(match_t* dst, match_t* src, bool src_result)
@@ -356,8 +359,6 @@ __attribute__((noinline)) static bool copy_match(match_t* dst, match_t* src, boo
 static bool match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
                          regex_match_fun_t* fun)
 {
-    clear_match(m);
-
     // Stop matching when we've consumed the whole string, but allow a zero
     // length match if it comes first?
     if (offset && offset >= s->len) {
