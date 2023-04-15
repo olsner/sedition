@@ -184,13 +184,8 @@ emitIR tdfa@TDFA{..} = mdo
   let startNotBOL | onlyMatchAtBOL = justFail
                   | otherwise      = startLabelNotBOL
 
-  -- Probably redundant since the checked entry will also check bounds.
-  startBOL <- case M.lookup tdfaStartState tdfaMinLengths of
-    Just dist -> labelBlock (checkBounds dist justFail startLabelBOL)
-    Nothing   -> return justFail
-
   entry <- labelBlock (mkMiddles [SaveCursor, SetFallback failLabel] H.<*>
-    mkLast (IfBOL startBOL startNotBOL))
+    mkLast (IfBOL startLabelBOL startNotBOL))
 
   -- We get here if we reach the original fallback, i.e. we reach a state where
   -- it's impossible to match the rest of the string.
