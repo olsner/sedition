@@ -46,8 +46,9 @@ matchFromTag (t,val) | possibleTag t =
 debugTag t = yydebug ("\"match[" <> matchix t <> "]." <> matchfld t <> " = %td\\n\"") ["m->matches[" <> matchix t <> "]." <> matchfld t]
 
 tagValue :: IR.TagValue -> Builder
-tagValue (Reg r d) = showB r <> " ? " <> showB r <> " - s->buf - " <> intDec d <> " : -1"
--- TOOD off-by-one etc
+tagValue (Reg r 0) = showB r <> " ? " <> showB r <> " - YYBEGIN : -1"
+tagValue (Reg r d) = showB r <> " ? " <> showB r <> " - YYBEGIN - " <> intDec d <> " : -1"
+tagValue (EndOfMatch 0) = "YYPOS"
 tagValue (EndOfMatch d) = "YYPOS - " <> intDec d
 
 declareReg :: R -> Builder
