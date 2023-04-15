@@ -17,6 +17,10 @@
 #include <string.h>
 #include <sys/random.h>
 
+#define NOINLINE __attribute__((noinline))
+#define FORCE_INLINE __attribute__((alwaysinline))
+#define UNUSED __attribute__((unused))
+
 // TODO Rename to YYTRACE use YYDEBUG for e.g. statistics collection.
 #if ENABLE_YYDEBUG
 #define YYDEBUG(fmt,...) fprintf(stderr, "%s: " fmt, __PRETTY_FUNCTION__, ## __VA_ARGS__)

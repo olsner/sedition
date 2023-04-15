@@ -236,7 +236,7 @@ compileRE r@IR.RE{..} = wrapper body
     needRegexec = forceRegcomp || not (Regex2C.isCompatible re)
     res = C.pack $ Regex.reString re
     wrapper b =
-        "static bool " <> regexfun r <>
+        "NOINLINE static bool " <> regexfun r <>
             "(match_t* m, string* s, const size_t orig_offset) {\n" <>
         comment description <>
         comment ("Used tags: " <> showB reUsedTags) <>
