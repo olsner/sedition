@@ -79,10 +79,6 @@ optimize :: Fuel -> Program -> (Program, Fuel)
 optimize fuel p = runSFM fuel (optimize' p)
 
 -- TODO, optimizations:
--- * complete switches (making the default label dead code)
--- * switch with everything to the same target
---   (handled in TDFA2IR when same-target from construction, but optimizations
---   can e.g. merge all targets to the same label later on)
 -- * redundant bounds checks
 --   forwards:
 --   - record largest previously checked bound

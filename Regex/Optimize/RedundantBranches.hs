@@ -4,9 +4,10 @@ module Regex.Optimize.RedundantBranches (redundantBranchesPass) where
 
 import Compiler.Hoopl as H
 
--- import Debug.Trace
+import Debug.Trace
 
 import qualified CharMap as CM
+import CharMap (CharMap)
 import Regex.IR
 
 type RBFact = WithTopAndBot (Insn O C)
@@ -44,7 +45,12 @@ rewrite = deepBwdRw rw
                          | Just l2' <- label l2 f = rwLast i (CheckBounds n l1 l2')
     rw i@(Switch cm l) f | CM.null cm             = rwLast i (Branch l)
                          | Just l'  <- label l f  = rwLast i (Switch cm l')
-    -- TODO Rewrite branches in the switch map too
+                         -- Single target label matches the default-branch
+                         | Just l == oneLabel cm  = rwLast i (Branch l)
+                         | Just cm' <- mapLabels cm f = rwLast i (Switch cm' l)
+    rw i@(TotalSwitch m) f
+                         | Just l' <- oneLabel m  = rwLast i (Branch l')
+                         | Just m' <- mapLabels m f = rwLast i (TotalSwitch m')
     rw i@(Branch t)    f                          = rwInsn i t f
     rw _ _ = return Nothing
 
@@ -60,6 +66,19 @@ rewrite = deepBwdRw rw
     label :: Label -> FactBase RBFact -> Maybe Label
     label l f | Just (PElem (Branch l')) <- mapLookup l f = Just l'
               | otherwise                                 = Nothing
+
+    -- Doesn't seem to ever actually do anything?
+    mapLabels :: CharMap Label -> FactBase RBFact -> Maybe (CharMap Label)
+    mapLabels cm f | cm' == cm = Nothing
+                   | otherwise = trace ("Found switch label rewrite! " ++ show cm ++ " -> " ++ show cm') $ Just cm'
+      -- TODO Add map function instead of using traverse
+      where Just cm' = CM.traverse fun cm
+            fun l | Just l' <- label l f = trace ("Found switch label rewrite! " ++ show l ++ " -> " ++ show l') $ Just l'
+                  | Just i  <- insn l f  = trace ("can't have instruction in switch, but: " ++ show l ++ " -> " ++ show i) $ Just l
+                  | otherwise            = Just l
+
+    oneLabel cm | [(_,label)] <- CM.toRanges cm = Just label
+                | otherwise                     = Nothing
 
 simplifySameIfs :: FuelMonad m => BwdRewrite m Insn RBFact
 simplifySameIfs = deepBwdRw rw
