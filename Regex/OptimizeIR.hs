@@ -12,6 +12,7 @@ import Regex.Optimize.RedundantBranches (redundantBranchesPass)
 import Regex.Optimize.PossibleFallback (possibleFallbackPass)
 import Regex.Optimize.LiveSetFallback (liveSetFallbackPass)
 import Regex.Optimize.LiveSaveCursor (liveSaveCursorPass)
+import Regex.Optimize.RedundantRestoreCursor (redundantRestoreCursorPass)
 import Regex.Optimize.LiveRegister (liveRegisterPass)
 
 --debugBwd = debugBwdJoins trace (const True)
@@ -44,6 +45,8 @@ optimizeOnce entry program = do
     analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
   program <- tracePass "liveSetFallback" $
     analyzeAndRewriteBwd liveSetFallbackPass entries program mapEmpty
+  program <- tracePass "redundantRestoreCursor" $
+    analyzeAndRewriteFwd redundantRestoreCursorPass entries program mapEmpty
   program <- tracePass "liveSaveCursor" $
     analyzeAndRewriteBwd liveSaveCursorPass entries program mapEmpty
   program <- tracePass "possibleFallback" $
@@ -76,15 +79,24 @@ optimize :: Fuel -> Program -> (Program, Fuel)
 optimize fuel p = runSFM fuel (optimize' p)
 
 -- TODO, optimizations:
--- * Dead store (backwards)
---
 -- * switch with everything to the same target
--- * labels with equivalent blocks? (backwards)
+-- * complete switches (making the default label dead code)
 -- * redundant bounds checks
 --   forwards:
 --   - record largest previously checked bound
 --   - reduce by one after YYNEXT
 --   - remove any lower or equal bound checks
+--
 --   backwards too? It's useless to check bounds for 2 if all successors check
 --   for 3 or more. OTOH, the failure path matters so this should track the
 --   failure label and only optimize out if we go to the same place.
+--
+-- * labels with equivalent blocks? (backwards)
+--
+-- * duplicate basic blocks to expose unnecessary bounds checks
+--   e.g. checkbounds -> L1: some code -> checkbounds, where L1 is used
+--   elsewhere (so that it might have different incoming bounds, preventing
+--   the normal bounds-check optimization)
+--   but only do this if the checkbounds overlap?
+--   and maybe do some thinking on a higher level to avoid emitting IR that
+--   has code like this?

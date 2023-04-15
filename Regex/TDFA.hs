@@ -690,8 +690,6 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
 
 -- Minimum length to an accepting state. If there aren't this many characters
 -- left in the string it cannot match from here.
--- TODO This makes it easy to fast-out if the string is short, but we'd also
--- like to use it to avoid unnecessary range checks. Evaluate :)
 -- TODO Put in TDFA struct and calculate in construction if really useful.
 minLengths :: TDFA -> Map StateId Int
 minLengths tdfa@TDFA{..} = go ss (M.map (const 0) (tdfaFinalFunction `M.union` tdfaEOL `M.union` tdfaFallbackFunction)) True

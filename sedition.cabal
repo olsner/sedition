@@ -71,6 +71,7 @@ executable sedition
                       Regex.Optimize.LiveSetFallback
                       Regex.Optimize.PossibleFallback
                       Regex.Optimize.RedundantBranches
+                      Regex.Optimize.RedundantRestoreCursor
                       CharMap GenC
 
     build-depends:    hoopl,
@@ -109,6 +110,7 @@ executable tdfa2c
                       Regex.Optimize.LiveSetFallback
                       Regex.Optimize.PossibleFallback
                       Regex.Optimize.RedundantBranches
+                      Regex.Optimize.RedundantRestoreCursor
                       Collections CharMap GenC
                       -- TODO Split out Regex.Collections to avoid AST/IR
                       -- dependency in regex parts.

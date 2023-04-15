@@ -2,7 +2,6 @@
 
 - Generate properly indented C code
 - number strings, regexes, predicates and labels from their own counters
-- Organize a bit, add subdirectories for regex/TDFA engine and optimizations
 - Debugging: map IR labels to source labels
 
 # Functionality/bugs
@@ -75,15 +74,11 @@
   - Simpler: in cases where we don't emit tags at all the location/length of the
     match would not be relevant so we can exit with a match on the first final
     state and can look for e.g. ".*re".
-* Add lower-level IR for TDFA output, to simplify code gen and enable Hoopling.
 
-  All the stuff about fallback and EOF states should be emitted by TDFA -> IR,
-  removing special cases in code generation. Maybe setting tags from registers
-  and applying fixed tags is also done in the exit paths of the IR.
-
-  - Should the retry loop be explicit here, or still done by the C codegen?
-    Would be nice if it was explicit so that smart things about searching can
-    be done without involving code gen.
+* Don't use start/end tags for anchored regexes
+  On a higher level than regex compilation - by replacing tag references with
+  0/end of string in substrings, the tags will end up unused and the regular
+  optimizations apply.
 
 ### Done
 
