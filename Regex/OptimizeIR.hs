@@ -9,6 +9,7 @@ import Debug.Trace
 import Regex.IR
 
 import Regex.Optimize.RedundantBranches (redundantBranchesPass)
+import Regex.Optimize.RedundantCheckBounds (redundantCheckBoundsPass)
 import Regex.Optimize.PossibleFallback (possibleFallbackPass)
 import Regex.Optimize.LiveSetFallback (liveSetFallbackPass)
 import Regex.Optimize.LiveSaveCursor (liveSaveCursorPass)
@@ -53,6 +54,8 @@ optimizeOnce entry program = do
     analyzeAndRewriteFwd possibleFallbackPass entries program mapEmpty
   program <- tracePass "liveRegister" $
     analyzeAndRewriteBwd liveRegisterPass entries program mapEmpty
+  program <- tracePass "redundantCheckBounds" $
+    analyzeAndRewriteFwd redundantCheckBoundsPass entries program mapEmpty
   return program
 
 optToFix f entry original = do
@@ -79,18 +82,10 @@ optimize :: Fuel -> Program -> (Program, Fuel)
 optimize fuel p = runSFM fuel (optimize' p)
 
 -- TODO, optimizations:
--- * redundant bounds checks
---   forwards:
---   - record largest previously checked bound
---   - reduce by one after YYNEXT
---   - remove any lower or equal bound checks
---
---   backwards too? It's useless to check bounds for 2 if all successors check
---   for 3 or more. OTOH, the failure path matters so this should track the
---   failure label and only optimize out if we go to the same place.
---
+-- * beginning-of-line checks
+--   - unknown on entry (since we may have entered through next_match)
+--   - false after reaching a Next
 -- * labels with equivalent blocks? (backwards)
---
 -- * duplicate basic blocks to expose unnecessary bounds checks
 --   e.g. checkbounds -> L1: some code -> checkbounds, where L1 is used
 --   elsewhere (so that it might have different incoming bounds, preventing
