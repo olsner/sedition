@@ -23,7 +23,7 @@ import Regex.Regex (Regex)
 import qualified Regex.Regex as Regex
 
 import Regex.IR as IR
-import Regex.TaggedRegex (TagId(..), fixTags, selectTags, tagRegex)
+import Regex.TaggedRegex hiding (EndOfMatch)
 import Regex.TNFA (genTNFA)
 import Regex.TDFA (genTDFA)
 import Regex.TDFA2IR (genIR)
@@ -109,7 +109,7 @@ earlyOut l = sfun "YYSTATS" ["early_out", "1"] <> goto l
 tdfa2c :: Maybe IntSet -> Regex -> C.ByteString
 tdfa2c used = toByteString .
     genC . fst . optimize 100000 .
-    genIR . genTDFA . genTNFA . fixTags . unusedTags . tagRegex
+    genIR . genTDFA . genTNFA . fixTags . makeSearchRegex . unusedTags . tagRegex
   where unusedTags | Just s <- used = selectTags (\(T t) -> t `IS.member` s)
                    | otherwise = id
 
