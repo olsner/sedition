@@ -7,18 +7,12 @@ import Control.Monad
 
 -- import Data.ByteString.Char8 (ByteString)
 -- import qualified Data.ByteString.Char8 as C
-import Data.List
 import Data.Map (Map)
 import qualified Data.Map as M
-import Data.Maybe
-import Data.Ord
-import Data.Set (Set)
-import qualified Data.Set as S
 
 import Debug.Trace
 
 import qualified CharMap as CM
-import CharMap (CharMap)
 import Regex.TaggedRegex
 import Regex.TNFA (genTNFA, testTNFA)
 import Regex.SimulateTNFA (testTNFASimulation, testTNFASimulationFind)
@@ -44,7 +38,7 @@ initState p s = RunState { sFallback = Nothing, sPos = p, sRegs = M.empty, sRetr
 
 getPos = gets sPos
 incPos = modify $ \s@RunState{..} -> s { sPos = succ sPos }
-setPos new = modify $ \s@RunState{..} -> s { sPos = new }
+setPos new = modify $ \s -> s { sPos = new }
 getRegs = gets sRegs
 modifyRegs f = modify $ \s@RunState{..} -> s { sRegs = f sRegs }
 setFallback fs = modify $ \s@RunState{..} ->
@@ -54,7 +48,7 @@ setFallback fs = modify $ \s@RunState{..} ->
 type RunTDFA a = State RunState a
 
 runTDFA :: Bool -> TDFA -> String -> Maybe TagMap
-runTDFA search tdfa@TDFA{..} xs =
+runTDFA search TDFA{..} xs =
   evalState (go' tdfaStartState xs) (initState 0 xs)
   where
     go :: StateId -> String -> RunTDFA (Maybe TagMap)
