@@ -15,6 +15,7 @@ import Regex.Optimize.LiveSetFallback (liveSetFallbackPass)
 import Regex.Optimize.LiveSaveCursor (liveSaveCursorPass)
 import Regex.Optimize.RedundantRestoreCursor (redundantRestoreCursorPass)
 import Regex.Optimize.LiveRegister (liveRegisterPass)
+import Regex.Optimize.SameResult (sameResultPass)
 
 --debugBwd = debugBwdJoins trace (const True)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
@@ -56,6 +57,8 @@ optimizeOnce entry program = do
     analyzeAndRewriteBwd liveRegisterPass entries program mapEmpty
   program <- tracePass "redundantCheckBounds" $
     analyzeAndRewriteFwd redundantCheckBoundsPass entries program mapEmpty
+  program <- tracePass "sameResult" $
+    analyzeAndRewriteBwd sameResultPass entries program mapEmpty
   return program
 
 optToFix f entry original = do

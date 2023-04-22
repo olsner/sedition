@@ -74,7 +74,9 @@ rewrite = deepBwdRw rw
       -- TODO Add map function instead of using traverse
       where Just cm' = CM.traverse fun cm
             fun l | Just l' <- label l f = trace ("Found switch label rewrite! " ++ show l ++ " -> " ++ show l') $ Just l'
-                  | Just i  <- insn l f  = trace ("can't have instruction in switch, but: " ++ show l ++ " -> " ++ show i) $ Just l
+                  -- The SameResult optimization produces this case now, so
+                  -- skip tracing.
+                  -- | Just _  <- insn l f  = trace ("can't have instruction in switch, but: " ++ show l ++ " -> " ++ show i) $ Just l
                   | otherwise            = Just l
 
     oneLabel cm | [(_,label)] <- CM.toRanges cm = Just label
