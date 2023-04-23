@@ -145,8 +145,10 @@ emitInsn (Match tagMap) =
     foldMap matchFromTag (M.toList tagMap) <>
     foldMap debugTag (M.keys tagMap) <>
     goto "end"
+emitInsn (CheckBounds 1 eof cont) =
+  cIf ("YYLIMIT <= YYCURSOR") (gotoL eof) (gotoL cont)
 emitInsn (CheckBounds n eof cont) =
-  cIf ("YYLIMIT - YYCURSOR < " <> intDec n) (gotoL eof) (gotoL cont)
+  cIf ("YYLIMIT < YYCURSOR + " <> intDec n) (gotoL eof) (gotoL cont)
 emitInsn (Branch l) = gotoL l
 
 -- O O debugging
