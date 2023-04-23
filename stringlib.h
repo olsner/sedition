@@ -76,9 +76,8 @@ void init_string_heap(string* strings, size_t n)
     n_strings = n;
     memset(all_strings, 0, sizeof(string) * n);
 
-    // const size_t heap_vsize = (size_t)1 << 40; // Assume 64-bit :)
-    const size_t heap_vsize = (size_t)1 << 30; // Assume 64-bit :)
-    const size_t first_gc = 10 << 20; // Start out with a 10MB heap.
+    const size_t heap_vsize = (size_t)1 << 30;
+    const size_t first_gc = heap_vsize;
     string_heap_start = mmap(NULL, heap_vsize, PROT_READ | PROT_WRITE,
             MAP_ANONYMOUS | MAP_PRIVATE | MAP_NORESERVE, -1, 0);
     string_heap_cur = string_heap_start;
@@ -101,7 +100,7 @@ static char* gc_get_new_addr(const char* base)
     return headerp->gcdata;
 }
 
-static void gc_string_heap(const size_t need)
+__attribute__((noinline)) static void gc_string_heap(const size_t need)
 {
     char* const start = string_heap_start;
     char* const old_cur = string_heap_cur;
@@ -286,8 +285,8 @@ void append_str(string* dst, const char *src, size_t n)
 
 void copy(string* dst, string* src)
 {
-    // TODO Maybe don't copy everything, but just the used fragments
-    memcpy(dst, src, sizeof(string));
+    dst->n_frags = src->n_frags;
+    memcpy(dst->frag, src->frag, sizeof(fragment) * dst->n_frags);
 }
 
 void concat_newline(string* dst, string* a, string* b)
@@ -325,7 +324,6 @@ void concat_inplace(string* dst, string* b)
         compact_string(dst);
     }
     if (b->n_frags > NFRAG - dst->n_frags) {
-        // If both strings need compacting, just allocate one new string instead...
         compact_string(b);
     }
     assert(dst->n_frags + b->n_frags <= NFRAG);
