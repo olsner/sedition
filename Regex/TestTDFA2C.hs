@@ -18,17 +18,22 @@ import System.Process (rawSystem)
 
 import Text.Printf
 
+import Regex.Regex (parseString)
 import Regex.SimulateTDFA
 import Regex.TaggedRegex
 import Regex.TNFA as TNFA
 import Regex.TDFA as TDFA
-import Regex.TDFA2C
+import Regex.TDFA2IR (genIR)
+import Regex.CompileIR (genC)
+import Regex.OptimizeIR (optimize)
 import GenC
 
 doSimulateTDFA tdfa s = print (runTDFA True tdfa s)
 
+tdfa2c = genC . fst . optimize 10000 . genIR
+
 compileTDFA tdfa output = C.writeFile output . toByteString $
-    programHeader output <> genC tdfa <> programFooter
+    programHeader output <> tdfa2c tdfa <> programFooter
 
 -- TODO Add flags to control gcc optimization/debug settings.
 compileC cFile exeFile defines =
@@ -124,7 +129,7 @@ do_main args = do
   let regex:strings = nonOpts
 
   tStartParse <- timestamp
-  let re = testTagRegex regex
+  let re = fixTags . tagRegex . parseString extendedRegexps . C.pack $ regex
   tEndParse <- re `seq` timestamp
 
   when dumpParse $ do
@@ -151,7 +156,13 @@ do_main args = do
     reportTime "TNFA" tStartTNFA tEndTNFA
     reportTime "TDFA" tStartTDFA tEndTDFA
 
+  -- TODO Always go from TDFA to IR and optimize (with control of fuel), then
+  -- either use RunIR or compile it to C.
+  -- TODO Also add pre- and post-opt dumps of IR.
+
   when (dumpTDFA || dumpTNFA) exitSuccess
+
+  -- TODO Add dumpIR and dumpC options
 
   flip catch exitWith $ do
     when compileIt $ do

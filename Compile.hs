@@ -19,7 +19,7 @@ import GenC
 import qualified IR
 import IR (Program)
 import qualified Regex.Regex as Regex
-import qualified Regex.TDFA2C as TDFA2C
+import qualified Regex.CompileIR as Regex2C
 
 seditionRuntime :: IsString a => a
 seditionRuntime = $(embedStringFile "sedition.h")
@@ -91,9 +91,6 @@ compileBlock block = fold (mempty :: Builder)
     fold = foldBlockNodesF f block
     f :: forall e x . IR.Insn e x -> Builder -> Builder
     f insn builder = builder <> compileInsn insn
-
-gotoL :: H.Label -> Builder
-gotoL l = goto (show l)
 
 string (IR.SVar s) = "&S" <> intDec s
 stringvar (IR.SVar s) = "S" <> intDec s
@@ -222,7 +219,7 @@ testCompare = False
 forceRegcomp = False
 
 needRegcomp (IR.RE _ s ere _) = forceRegcomp ||
-    testCompare || not (TDFA2C.isCompatible (Regex.parseString ere s))
+    testCompare || not (Regex2C.isCompatible (Regex.parseString ere s))
 
 compileRE r@IR.RE{..} = wrapper body
   where
@@ -236,10 +233,10 @@ compileRE r@IR.RE{..} = wrapper body
          | testCompare = match_for_compare <> tdfa2c r re usedTags <> compare_matches
          | otherwise   = tdfa2c r re usedTags
     re = Regex.parseString ere s
-    needRegexec = forceRegcomp || not (TDFA2C.isCompatible re)
+    needRegexec = forceRegcomp || not (Regex2C.isCompatible re)
     res = C.pack $ Regex.reString re
     wrapper b =
-        "static bool " <> regexfun r <>
+        "NOINLINE static bool " <> regexfun r <>
             "(match_t* m, string* s, const size_t orig_offset) {\n" <>
         comment description <>
         comment ("Used tags: " <> showB reUsedTags) <>
@@ -249,18 +246,16 @@ compileRE r@IR.RE{..} = wrapper body
     regexec = stmt ("result = " <> match "m")
     match_for_compare =
         stmt "match_t m2" <>
+        sfun "clear_match" ["m2"] <>
         stmt ("const bool result2 = " <> match "&m2")
     compare_matches = sfun "compare_regexp_matches" ["result2", "&m2", "result", "m", "s", "orig_offset", "__PRETTY_FUNCTION__", cstring res]
 
     description =
         (if ere then "ERE: "  else "BRE: ") <> cstring s <>
         " -> ERE: " <> cstring res <>
-        (if needRegexec then " (using regcomp)" else " (using TDFA2C)")
+        (if needRegexec then " (using regcomp)" else " (using Regex2C)")
 
 tdfa2c r re used =
-    sfun "clear_match" ["m"] <>
-    -- Since regexec seems to set all unused matches to -1, do the same for
-    -- compare_regexp_matches.
-    (if testCompare then stmt "memset(&m->matches, 0xff, sizeof(m->matches))" else mempty) <>
+    (if testCompare then sfun "clear_match" ["m"] else mempty) <>
     stmt ("m->fun = " <> regexfun r)  <>
-    byteString (TDFA2C.tdfa2c used re)
+    byteString (Regex2C.tdfa2c used re)

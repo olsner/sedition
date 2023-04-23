@@ -217,6 +217,8 @@ sPattern = SVar 0
 sOutputQueue = SVar 1
 sHoldSpace = SVar 2
 
+type IRM = State IRState
+
 instance UniqueMonad IRM where
   freshUnique = do
     res <- firstFreeUnique <$> get
@@ -340,8 +342,6 @@ tIf c tx fx = mdo
 ifCheck c tx fx = do
   cond <- tCheck c
   tIf cond tx fx
-
-type IRM = State IRState
 
 toIR :: Bool -> Bool -> Bool -> [Sed] -> (Label, Graph Insn C C)
 toIR autoprint ere ipc seds = evalState go (startState autoprint ere ipc)

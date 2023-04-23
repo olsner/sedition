@@ -10,6 +10,7 @@ import Data.Foldable ()
 import Data.Traversable ()
 
 import IR (Pred(..), SVar(..), MVar(..))
+import Regex.TDFA (RegId(..))
 
 newtype PredMap a = PM (M.IntMap a)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
@@ -164,4 +165,28 @@ instance IsMap MVarMap where
   mapToList (MVM m) = [(MVar k, v) | (k,v) <- M.toList m]
   mapFromList assocs = MVM (M.fromList [(k, v) | (MVar k, v) <- assocs])
   mapFromListWith f assocs = MVM (M.fromListWith f [(k, v) | (MVar k, v) <- assocs])
+
+newtype RegSet = RS S.IntSet
+
+instance IsSet RegSet where
+  type ElemOf RegSet = RegId
+
+  setNull (RS s) = S.null s
+  setSize (RS s) = S.size s
+  setMember (R k) (RS s) = S.member k s
+
+  setEmpty = RS S.empty
+  setSingleton (R k) = RS (S.singleton k)
+  setInsert (R k) (RS s) = RS (S.insert k s)
+  setDelete (R k) (RS s) = RS (S.delete k s)
+
+  setUnion (RS x) (RS y) = RS (S.union x y)
+  setDifference (RS x) (RS y) = RS (S.difference x y)
+  setIntersection (RS x) (RS y) = RS (S.intersection x y)
+  setIsSubsetOf (RS x) (RS y) = S.isSubsetOf x y
+
+  setFold k z (RS s) = S.foldr (k . R) z s
+
+  setElems (RS s) = map R (S.elems s)
+  setFromList ks = RS (S.fromList [k | R k <- ks])
 

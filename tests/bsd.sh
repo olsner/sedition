@@ -210,7 +210,8 @@ hello' /dev/null
 	mark '2.6' ; $SED -n -e '$p' lines1 /dev/null lines2
 	# Should not print anything
 	mark '2.7' ; $SED -n -e '20p' lines1
-	mark '2.8' ; $SED -n -e '0p' lines1
+	# Prints an error in GNU sed, invalid usage of line address 0
+	mark '2.8' ; $SED -n -e '0p' lines1 2>/dev/null
 	mark '2.9' ; $SED -n '/l1_7/p' lines1
 	mark '2.10' ; $SED -n ' /l1_7/ p' lines1
 	mark '2.11'
@@ -591,7 +592,6 @@ u2/g' lines1
 test_sedition()
 {
     local SED=$1
-    echo Testing sedition-specific features
     # Should provide different random numbers each run!
     # Run separately since runsed overwrites its own temp files.
     $SED -e '0 g yhjulwwiefzojcbxybbruweejw' /dev/null >random1
