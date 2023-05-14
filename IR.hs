@@ -58,6 +58,7 @@ data StringExpr
   | SFormatLiteral Int SVar
   | SGetLineNumber
   deriving (Show,Eq)
+
 emptyS = SConst ""
 -- TODO Very inefficient with the current implementation(s) of STrans, but that
 -- should be optimized in general and might end up just as efficient as using
@@ -159,10 +160,11 @@ instance HooplNode Insn where
 
 type Program = Graph IR.Insn C C
 
--- TODO remove freshUnique (unless Hoopl uses it internally?), then add
--- separate counters for strings, regexps and matches.
 data IRState = State
   { firstFreeUnique :: Unique
+  , firstFreePred :: Int
+  , firstFreeMVar :: Int
+  , firstFreeSVar :: Int
   , autoprint :: Bool
   , extendedRegexps :: Bool
   , ipcEnabled :: Bool
@@ -182,7 +184,10 @@ instance Show (Graph Insn e x) where
 invalidLabel :: String -> Label
 invalidLabel s = error ("Invalid label: " ++ s)
 startState autoprint ere ipc = State
-  { firstFreeUnique = firstNormalPred
+  { firstFreeUnique = 0
+  , firstFreePred = firstNormalPred
+  , firstFreeMVar = 0
+  , firstFreeSVar = firstNormalSVar
   , autoprint = autoprint
   , extendedRegexps = ere
   , ipcEnabled = ipc
@@ -203,8 +208,7 @@ instance Show Pred where
   show (Pred 5) = "P{has-pattern}"
   show (Pred n) = "P" ++ show n
 
--- Also includes space for special string and match variables.
-firstNormalPred = 5
+firstNormalPred = 6
 
 pPreFirst = Pred 0
 pIntr = Pred 1
@@ -223,7 +227,9 @@ instance Show SVar where
 
 sPattern = SVar 0
 sOutputQueue = SVar 1
+-- TODO Remove and assign generically using hold spaces mapping
 sHoldSpace = SVar 2
+firstNormalSVar = 3
 
 type IRM = State IRState
 
@@ -237,13 +243,23 @@ initBlock :: Label -> Graph Insn C O
 initBlock l = mkLabel l
 
 newLabel = freshLabel
-newPred = Pred <$> freshUnique
-newMatch = MVar <$> freshUnique
+newPred = do
+    res <- firstFreePred <$> get
+    modify $ \state -> state { firstFreePred = res + 1 }
+    return (Pred res)
+newMatch = do
+    res <- firstFreeMVar <$> get
+    modify $ \state -> state { firstFreeMVar = res + 1 }
+    return (MVar res)
+newString :: IRM SVar
+newString = do
+    res <- firstFreeSVar <$> get
+    modify $ \state -> state { firstFreeSVar = res + 1 }
+    return (SVar res)
+
 emitPred :: Bool -> IRM Pred
 emitPred c = newPred >>= \p -> emit (SetP p c) >> return p
 
-newString :: IRM SVar
-newString = SVar <$> freshUnique
 -- TODO Rename to copyString or something so we can use setString for this.
 setStringExpr s expr = emit (SetS s expr)
 setString :: SVar -> SVar -> IRM ()

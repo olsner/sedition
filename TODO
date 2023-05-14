@@ -1,7 +1,6 @@
 # Cosmetic
 
 - Generate properly indented C code
-- number strings, regexes, predicates and labels from their own counters
 - Debugging: map IR labels to source labels
   (Could be as simple as emitting a comment?)
 
