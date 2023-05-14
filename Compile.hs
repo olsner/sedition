@@ -116,6 +116,7 @@ compileCond cond = case cond of
   IR.AtEOF 0 -> fun "is_all_eof" ["&" <> infd 0, "argc", "argv"]
   IR.AtEOF i -> fun "is_eof" [infd i]
   IR.PendingIPC -> hasPendingIPC
+  IR.IsStringEmpty svar -> "!" <> fun "string_len" [string svar]
   IR.PRef p -> pred p
 
 compileMatch m (IR.Match svar re) = fun (regexfun re) [matchref m, string svar, "0"]
@@ -205,6 +206,7 @@ setString t (IR.SGetLineNumber) = fun "format_int" [string t, lineNumber]
 resolveStringIndex :: IR.SVar -> IR.SIndex -> Builder
 resolveStringIndex s ix = case ix of
   IR.SIStart -> "0"
+  IR.SIOffset i -> intDec i
   IR.SIEnd -> fun "string_len" [string s]
   IR.SIMatchStart m -> groupStart m 0
   IR.SIMatchEnd m -> groupEnd m 0

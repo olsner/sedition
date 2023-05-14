@@ -37,9 +37,11 @@ build: cabal-build sed tdfa2c
 # There are a handful of failing BSD tests still, so ignore failures so we get
 # to the other test suites.
 run-bsdtests: sed
+	@echo "Running BSD tests on interpreter..."
 	cd tests && ./bsd.sh
 
 run-bsdtests-compiled: sed
+	@echo "Running BSD tests on compiler..."
 	cd tests && ./bsd.sh ../runsed
 
 gnused:

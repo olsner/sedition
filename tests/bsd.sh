@@ -477,6 +477,9 @@ p
 ' lines1
 	mark '6.5' ; $SED -e '4n' lines1
 	mark '6.6' ; $SED -n -e '4n' lines1
+	# TODO Tests for DeleteFirstLine and PrintFirstLine, implement :)
+	#mark '6.7' ; $SED -e '4{ N; D}' lines1
+	#mark '6.8' ; $SED -e '4{ N; P}' lines1
 }
 
 test_print()
@@ -587,6 +590,18 @@ u2/g' lines1
     # Test extraction of empty subexpressions in compiled output (substring
     # would not accept -1..-1 as a valid empty offset)
     mark '8.30' ; $SED -r 's/((l)|(_))/;\2;\3;/g' lines1
+
+	mark '8.31' ; echo FOO | $SED -r 's/.*/\\l &\l&/'
+	              echo FOO | $SED -r 's/.*/\\L &\L&/'
+	              echo foo | $SED -r 's/.*/\\u &\u&/'
+	              echo foo | $SED -r 's/.*/\\U &\U&/'
+	              echo foo | $SED -r 's/.*/\\U\\E &\U&\E&/'
+	              echo FOO | $SED -r 's/.*/\\L\\E &\L&\E&/'
+	mark '8.32' ; echo foo | $SED -r 's/.*/foo\lFOO\LFOO\ufoo\Ufoo\EfOoBaR/'
+	# With an empty substitution, the case conversion should apply to the
+	# following literal (or other substitution component) instead.
+	mark '8.33' ; echo foobar | $SED -r 's/foo(x*)bar/foo\u\1bar/'
+	              echo fooxbar | $SED -r 's/foo(x*)bar/foo\u\1bar/'
 }
 
 test_sedition()

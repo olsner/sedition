@@ -333,6 +333,7 @@ evalCond cond = case cond of
   IR.AtEOF fd -> liftIO . fileIsEOF =<< gets (fromJust . M.lookup fd . files)
   IR.PendingIPC -> hasPendingIPC =<< gets ipcState
   IR.IsMatch m -> not . null <$> getMatch m
+  IR.IsStringEmpty s -> C.null <$> getString s
   IR.PRef p -> getPred p
 
 getRegex src = state f
@@ -383,8 +384,9 @@ evalStringExpr (IR.SSubstring s start end) = do
   return (substring startix endix s)
   where
     substring start end = C.take (end - start) . C.drop start
-    resolve IR.SIStart _ = return 0
-    resolve IR.SIEnd   s = return (C.length s)
+    resolve IR.SIStart            _ = return 0
+    resolve IR.SIEnd              s = return (C.length s)
+    resolve (IR.SIOffset i)       _ = return i
     resolve (IR.SIMatchStart m)   _ = groupStart 0 m
     resolve (IR.SIMatchEnd m)     _ = groupEnd 0 m
     resolve (IR.SIGroupStart m i) _ = groupStart i m

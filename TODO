@@ -3,12 +3,11 @@
 - Generate properly indented C code
 - number strings, regexes, predicates and labels from their own counters
 - Debugging: map IR labels to source labels
+  (Could be as simple as emitting a comment?)
 
 # Functionality/bugs
 
-- Implement case conversions, \L\l\u\U - at least one is used by synsedizer
 - Port IPC to compiler / RTS
-- ConstPred pass is too slow, why?
 - Improved correctness: use TNFA/TDFA simulator in Interpreter instead of
   regex-posix?
 - implement `#n` (1.18), currently disabled in bsd.sh
@@ -26,6 +25,7 @@
 
 - D/P (PrintFirstLine and DeleteFirstLine) are parsed but unimplemented?
   - tested by gnused's uniq.sed
+  - commented-out test cases in bsd.sh too
   - now that pattern space is exposed to IR, we can use a regexp replace for it
 
 
@@ -55,6 +55,10 @@
 - Optimize out concatenation of empty strings
 - Better way to handle concatentations without all the temporary strings
 - Deduplicate substrings in substitutions
+- Optimize out IsEmptyString used by case conversion
+  Perhaps only practical on literals?
+  Optimizing on regex submatches in general would be useful, but requires more
+  information about the parsed regex to figure out the length of a group.
 
 ## Regex
 
@@ -74,6 +78,8 @@
   - Simpler: in cases where we don't emit tags at all the location/length of the
     match would not be relevant so we can exit with a match on the first final
     state and can look for e.g. ".*re".
+    This seemed to be a bit slower though. I think because there's no support
+    for non-greedy .* and returning shortest instead of longest match.
 
 * Don't use start/end tags for anchored regexes
   On a higher level than regex compilation - by replacing tag references with

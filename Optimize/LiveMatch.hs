@@ -60,6 +60,7 @@ genSI (SIMatchStart m) = mapSetInsert m startOfMatch
 genSI (SIMatchEnd m) = mapSetInsert m endOfMatch
 genSI (SIGroupStart m i) = mapSetInsert m (startOfGroup i)
 genSI (SIGroupEnd m i) = mapSetInsert m (endOfGroup i)
+genSI (SIOffset _) = id
 genSI SIStart = id
 genSI SIEnd = id
 

@@ -9,6 +9,7 @@ import Compiler.Hoopl as H
 import Control.Monad
 import Control.Monad.Trans.State.Strict
 
+import qualified Data.ByteString.Char8 as C
 import Data.IntSet (IntSet)
 import Data.Map (Map)
 import qualified Data.Map as M
@@ -36,6 +37,7 @@ data Cond
   | EndLine Int
   | IsMatch MVar
   | PRef Pred
+  | IsStringEmpty SVar
   deriving (Show,Eq)
 cTrue = True
 cFalse = False
@@ -57,10 +59,16 @@ data StringExpr
   | SGetLineNumber
   deriving (Show,Eq)
 emptyS = SConst ""
+-- TODO Very inefficient with the current implementation(s) of STrans, but that
+-- should be optimized in general and might end up just as efficient as using
+-- toupper/tolower. (which might not even be all that good anyway.)
+sUpper = STrans (C.pack ['a'..'z']) (C.pack ['A'..'Z'])
+sLower = STrans (C.pack ['A'..'Z']) (C.pack ['a'..'z'])
 
 data SIndex
   = SIStart
   | SIEnd
+  | SIOffset Int
   | SIMatchStart MVar
   | SIMatchEnd MVar
   | SIGroupStart MVar Int
@@ -231,13 +239,17 @@ initBlock l = mkLabel l
 newLabel = freshLabel
 newPred = Pred <$> freshUnique
 newMatch = MVar <$> freshUnique
+emitPred :: Bool -> IRM Pred
+emitPred c = newPred >>= \p -> emit (SetP p c) >> return p
 
 newString :: IRM SVar
 newString = SVar <$> freshUnique
+-- TODO Rename to copyString or something so we can use setString for this.
+setStringExpr s expr = emit (SetS s expr)
 setString :: SVar -> SVar -> IRM ()
-setString s src = emit (SetS s (SVarRef src))
+setString s src = setStringExpr s (SVarRef src)
 emitString :: StringExpr -> IRM SVar
-emitString expr = newString >>= \s -> emit (SetS s expr) >> return s
+emitString expr = withNewString (\s -> setStringExpr s expr)
 emitCString :: S -> IRM SVar
 emitCString s = emitString (SConst s)
 withNewString f = do
@@ -669,22 +681,92 @@ tSubstAction (SActionWriteFile path) res = do
     fd <- getExternalFD path True
     emit (Print fd res)
 
+data CState
+  = Conv CaseConv
+  -- Apply the first conversion to one character, then revert to the other
+  -- conversion. The predicate starts out True, i.e. first-character conversion
+  -- still needs to be done, then is set to False whenever a conversion is
+  -- actually done.
+  | CharConv Pred CaseConv CaseConv
+  deriving (Show)
+
+initCState = Conv NoConv
+setCaseConv _ Upper = return (Conv Upper)
+setCaseConv _ Lower = return (Conv Lower)
+setCaseConv _ AST.NoConv = return (Conv NoConv)
+setCaseConv (Conv c) UpperChar = emitPred True >>= \p -> return (CharConv p Upper c)
+setCaseConv (Conv c) LowerChar = emitPred True >>= \p -> return (CharConv p Lower c)
+setCaseConv (CharConv p _ c) UpperChar = return (CharConv p Upper c)
+setCaseConv (CharConv p _ c) LowerChar = return (CharConv p Lower c)
+
 tSub m s sub = case sub of
   Literal lit -> emitCString lit
   WholeMatch -> emitString (SSubstring s (SIMatchStart m) (SIMatchEnd m))
   BackReference i ->
     emitString (SSubstring s (SIGroupStart m i) (SIGroupEnd m i))
-  -- add some statefulness for case conversions.
-  -- noconv/lower/upper can be tracked statically - convert whole strings to
-  -- the current conversion. When entering lower/upper char, add a predicate
-  -- and update it when emitting a non-empty string. Case conversion itself
-  -- will have primitives for uppercasing the whole string or the first char.
-  -- Note that \U..\l.. reverts back to \U after lowercasing one character.
-  -- e.g. echo foobar | sed -r 's/(foo)(bar)/\U\1\l\2/' -> FOObAR
-  -- Note also that literals in the string are affected (this can be done at
-  -- compile time and may remove some of those first-char conversions).
-  SetCaseConv _ -> comment "UNIMPL: case conversion" >> emitString emptyS
-  -- _ -> error (show sub)
+  SetCaseConv _ -> error "leftover SetCaseConv"
+
+{-
+Note: Translating case conversions
+
+For the normal upper/lower/reset conversions we track the current conversion
+state and apply it to any substitution part we output. The first-character
+conversions are a bit more interesting - we need to track the strings we apply
+conversion to because empty strings don't count, the first actually output
+character is the one that gets case conversion and then we revert to the
+previous conversion.
+
+We use a new predicate variable for each conversion step/stage to track if we
+should apply the conversion to the next character, then set it to false when
+we have output a non-empty string. At IR conversion time we don't try to be
+clever about it (e.g. looking at Literals emitted ot anything). That may/will
+be done by some optimization later.
+
+Some more interesting behaviours of these escapes:
+
+ * \U..\l.. reverts back to \U after lowercasing one character.
+   e.g. echo foobar | sed -r 's/(foo)(bar)/\U\1\l\2/' -> FOObAR
+
+   It might be enough for the first-char case to track one "revert to" state,
+   with whatever the previous state was. \U\l\u would be a one-char uppercase
+   going back to uppercase so it can be treated as just \U.
+
+ * Literals in the string are affected (this can be done at compile time and
+   may remove some of those first-char conversions). For now, leave this for
+   optimization passes?
+-}
+applyCaseConv conv s = case conv of
+    Conv NoConv -> return s
+    Conv Upper -> emitString (sUpper s)
+    Conv Lower -> emitString (sLower s)
+    Conv UpperChar -> error "First-char conversion should have been translated"
+    Conv LowerChar -> error "First-char conversion should have been translated"
+    CharConv p conv1 convN -> do
+      sres <- newString
+      tIfP p (tIf (IsStringEmpty s) (setString sres s)
+                                    (convChar sres conv1 s >>
+                                     emit (SetP p cFalse)))
+              (setString sres =<< applyCaseConv (Conv convN) s)
+      return sres
+
+convChar sres conv s = do
+    -- We've already checked that s is not empty.
+    head <- emitString (SSubstring s SIStart (SIOffset 1))
+    tail <- emitString (SSubstring s (SIOffset 1) SIEnd)
+    head' <- emitString (case conv of
+                           Lower -> sLower head
+                           Upper -> sUpper head
+                           _ -> error ("Invalid first-char conversion " ++ show conv))
+    setStringExpr sres (SAppend head' tail)
+
+tSubs _ _   _      [] = return []
+tSubs m pat cstate (SetCaseConv c:ss) = do
+  cstate' <- setCaseConv cstate c
+  tSubs m pat cstate' ss
+tSubs m pat cstate (sub:subs) = do
+  s <- tSub m pat sub
+  s' <- applyCaseConv cstate s
+  (s':) <$> tSubs m pat cstate subs
 
 tConcat [x] = return x
 tConcat xs  = emitString emptyS >>= go xs
@@ -692,11 +774,9 @@ tConcat xs  = emitString emptyS >>= go xs
     go []     acc = return acc
     go (x:xs) acc = emit (SetS acc (SAppend acc x)) >> go xs acc
 
-tSubs m s subs = tConcat =<< mapM (tSub m s) subs
-
 tSubst m s sub flags = case flags of
   SubstFirst -> do
-    ss <- mapM (tSub m s) sub
+    ss <- tSubs m s initCState sub
     -- TODO Analyze the regexp to see if it will always match from the
     -- beginning and/or to the end of the string.
     prefix <- emitString (SSubstring s SIStart (SIMatchStart m))
@@ -714,7 +794,7 @@ tSubst m s sub flags = case flags of
 
     mnext <- emitMatch (NextMatch m' s)
 
-    ss <- mapM (tSub m' s) sub
+    ss <- tSubs m' s initCState sub
     s1 <- tConcat (sres:ss)
 
     hasNextMatch <- finishBlock' (If (IsMatch mnext) hasNextMatch lastMatch)
