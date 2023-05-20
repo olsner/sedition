@@ -804,24 +804,26 @@ tSubst m s sub flags = case flags of
     tSubst m' s sub (SubstNth (n - 1))
   SubstAll -> mdo
     sres <- emitString (SSubstring s SIStart (SIMatchStart m))
-    m' <- emitMatch (MVarRef m)
 
     loop <- label
 
-    mnext <- emitMatch (NextMatch m' s)
+    mnext <- emitMatch (NextMatch m s)
 
-    ss <- tSubs m' s initCState sub
+    ss <- tSubs m s initCState sub
     s1 <- tConcat (sres:ss)
 
     hasNextMatch <- finishBlock' (If (IsMatch mnext) hasNextMatch lastMatch)
 
-    mid <- emitString (SSubstring s (SIMatchEnd m') (SIMatchStart mnext))
+    mid <- emitString (SSubstring s (SIMatchEnd m) (SIMatchStart mnext))
     emit (SetS sres (SAppend s1 mid))
-    emit (SetM m' (MVarRef mnext))
+    -- TODO Last instance of copy_match, figure out how to remove. E.g.
+    -- duplicate the match code so we can leave the next match in m before
+    -- looping?
+    emit (SetM m (MVarRef mnext))
 
     lastMatch <- emitBranch' loop
 
-    suffix <- emitString (SSubstring s (SIMatchEnd m') SIEnd)
+    suffix <- emitString (SSubstring s (SIMatchEnd m) SIEnd)
     emit (SetS sres (SAppend s1 suffix))
 
     return sres
