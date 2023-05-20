@@ -124,6 +124,8 @@ static void clear_string(string* s)
     s->len = 0;
 }
 
+// src must be a statically allocated string that we can keep a reference to
+// without copying.
 static void set_str_const(string* dst, const char* src, size_t n)
 {
     if (dst->alloc) {
@@ -134,21 +136,21 @@ static void set_str_const(string* dst, const char* src, size_t n)
     dst->len = n;
 }
 
-static void copy_cstr(string* dst, const char* src, size_t n)
+static void set_cstr(string* dst, const char* src, size_t n)
 {
     ensure_len_discard(dst, n);
     memcpy(dst->buf, src, n);
     dst->len = n;
 }
 
-static void append_str(string* dst, const char *str, size_t n)
+static void append_cstr(string* dst, const char *str, size_t n)
 {
     ensure_len(dst, dst->len + n);
     memcpy(dst->buf + dst->len, str, n);
     dst->len += n;
 }
 
-static void copy(string* dst, string* src)
+static void set_str(string* dst, string* src)
 {
     assert(dst != src);
     ensure_len_discard(dst, src->len);
@@ -179,10 +181,10 @@ static void concat(string* dst, string* a, string* b)
     dst->len = n;
 }
 
-static void concat_inplace(string* dst, string* b)
+static void append_str(string* dst, string* b)
 {
     assert(dst != b);
-    append_str(dst, b->buf, b->len);
+    append_cstr(dst, b->buf, b->len);
 }
 
 static void substring(string* dst, string* src, ptrdiff_t i1, ptrdiff_t i2)
@@ -238,36 +240,36 @@ static void format_literal(string* dst, int width, string* s)
     for (size_t i = 0; i < s->len; i++) {
         uint8_t c = s->buf[i];
         if (c == '\n') {
-            append_str(dst, "$\n", 2);
+            append_cstr(dst, "$\n", 2);
             col = 0;
         } else if (c == '\\') {
-            append_str(dst, "\\\\", 2);
+            append_cstr(dst, "\\\\", 2);
             col += 2;
         } else if (!isprint(c) || c >= 128) {
             // one more here to have room for a NUL from snprintf
-            append_str(dst, "\\ooo", 5);
+            append_cstr(dst, "\\ooo", 5);
             dst->len--;
             snprintf(dst->buf + dst->len - 3, 4, "%03o", c);
             col += 4;
         } else {
-            append_str(dst, (const char *)&c, 1);
+            append_cstr(dst, (const char *)&c, 1);
             col++;
         }
         // TODO Should be breaking before output? I think the haskell also gets
         // this wrong if e.g. an octal escape would straddle a line break.
         if (col >= width - 1) {
-            append_str(dst, "\\\n", 2);
+            append_cstr(dst, "\\\n", 2);
             col = 0;
         }
     }
-    append_str(dst, "$", 1);
+    append_cstr(dst, "$", 1);
 }
 
 static void format_int(string* dst, int i)
 {
     char temp[32];
     snprintf(temp, sizeof(temp), "%d", i);
-    copy_cstr(dst, temp, strlen(temp));
+    set_cstr(dst, temp, strlen(temp));
 }
 
 //

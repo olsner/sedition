@@ -185,7 +185,7 @@ setLastRegex re = stmt (lastRegex <> " = &" <> regexfun re)
 setString :: IR.SVar -> IR.StringExpr -> Builder
 setString t (IR.SConst s) | C.null s = fun "clear_string" [string t]
                           | True     = fun "set_str_const" [string t, cstring s, intDec (C.length s)]
-setString t (IR.SVarRef svar) = fun "copy" [string t, string svar]
+setString t (IR.SVarRef svar) = fun "set_str" [string t, string svar]
 setString t (IR.SRandomString) = fun "random_string" [string t]
 setString t (IR.STrans from to s) =
   -- TODO compile transformations into functions. Might require that we add
@@ -193,7 +193,7 @@ setString t (IR.STrans from to s) =
   fun "trans" [string t, cstring from, cstring to, string s]
 setString t (IR.SAppendNL a b) = fun "concat_newline" (map string [t, a, b])
 setString t (IR.SAppend a b)
-    | t == a    = fun "concat_inplace" (map string [t, b])
+    | t == a    = fun "append_str" (map string [t, b])
     | otherwise = fun "concat" (map string [t, a, b])
 setString t (IR.SSubstring s start end) =
   fun "substring" [string t, string s, startix, endix]
