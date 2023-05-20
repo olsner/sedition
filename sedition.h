@@ -46,19 +46,11 @@ static struct {
 struct string { char* buf; size_t len; size_t alloc; };
 typedef struct string string;
 
-struct match_t;
-typedef struct match_t match_t;
-
-typedef bool regex_match_fun_t(match_t*, string*, size_t);
-typedef regex_t re_t;
-
 #define MAXGROUP 9
-struct match_t {
-    regex_match_fun_t *fun;
-    struct {
-        ptrdiff_t rm_so, rm_eo;
-    } matches[MAXGROUP + 1];
-};
+#define MAXTAGS (2 * (MAXGROUP + 1))
+typedef ptrdiff_t tags_t[MAXTAGS];
+typedef bool regex_match_fun_t(tags_t, string*, size_t);
+typedef regex_t re_t;
 
 static int lineNumber;
 static int inputFileIndex;
@@ -291,8 +283,8 @@ static void free_regexp(regex_t* re)
 }
 
 static void compare_regexp_matches(
-        bool ref_match, match_t* ref,
-        bool match, match_t* m,
+        bool ref_match, tags_t ref,
+        bool match, tags_t m,
         string* s, size_t offset,
         const char *function, const char *original_re)
 {
@@ -304,13 +296,11 @@ static void compare_regexp_matches(
                 match ? "match" : "not");
         diff = true;
     } else if (ref_match) {  // Only compare groups on match
-        for (int i = 0; i <= MAXGROUP; i++) {
-            if (ref->matches[i].rm_so != m->matches[i].rm_so ||
-                    ref->matches[i].rm_eo != m->matches[i].rm_eo) {
+        for (int i = 0; i < MAXTAGS; i += 2) {
+            if (ref[i] != m[i] || ref[i + 1] != m[i + 1]) {
                 fprintf(stderr, "%s: group %d should be %td..%td, not %td..%td\n",
-                        function, i,
-                        ref->matches[i].rm_so, ref->matches[i].rm_eo,
-                        m->matches[i].rm_so, m->matches[i].rm_eo);
+                        function, i / 2,
+                        ref[i], ref[i + 1], m[i], m[i + 1]);
                 diff = true;
             }
         }
@@ -348,22 +338,19 @@ static void enable_stats_on_sigint() {
 #endif
 }
 
-static void clear_match(match_t* m)
+static void clear_match(tags_t m)
 {
-    m->fun = NULL;
     // Since regexec seems to set all unused matches to -1, do the same for
     // compare_regexp_matches.
-    memset(&m->matches, 0xff, sizeof(m->matches));
+    memset(m, 0xff, sizeof(tags_t));
 }
 
-__attribute__((noinline)) static bool copy_match(match_t* dst, match_t* src, bool src_result)
+static void copy_match(tags_t dst, tags_t src)
 {
-    memcpy(dst, src, sizeof(match_t));
-    return src_result;
+    memcpy(dst, src, sizeof(tags_t));
 }
 
-static bool match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
-                         regex_match_fun_t* fun)
+static bool match_regexp(tags_t m, string* s, size_t offset, re_t* regex)
 {
     // Stop matching when we've consumed the whole string, but allow a zero
     // length match if it comes first?
@@ -374,9 +361,7 @@ static bool match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
         assert(s->len <= INT_MAX);
     }
 
-    // May need to convert since glibc is dumb and uses 'int' for regoff_t...
     regmatch_t tmp_matches[MAXGROUP + 1];
-    m->fun = fun;
     tmp_matches[0].rm_so = offset;
     tmp_matches[0].rm_eo = s->len;
     // REG_STARTEND with non-zero offset seems to imply REG_NOTBOL in glibc.
@@ -387,41 +372,40 @@ static bool match_regexp(match_t* m, string* s, size_t offset, re_t* regex,
         abort();
     }
     for (int i = 0; i <= MAXGROUP; i++) {
-        m->matches[i].rm_so = tmp_matches[i].rm_so;
-        m->matches[i].rm_eo = tmp_matches[i].rm_eo;
+        m[2 * i + 0] = tmp_matches[i].rm_so;
+        m[2 * i + 1] = tmp_matches[i].rm_eo;
     }
     return res == 0;
 }
 
-static bool next_match(match_t* dst, match_t* src, string* s)
+static bool next_match(tags_t dst, tags_t src, regex_match_fun_t fun, string* s)
 {
-    size_t offset = src->matches[0].rm_eo;
+    size_t offset = src[1];
     // Try to handle regexpes that match the empty string. We should try every
     // position and also try at the end of the string.
-    if (src->matches[0].rm_so == offset && offset < s->len) {
+    if (src[0] == offset && offset < s->len) {
         offset++;
     }
-    return src->fun(dst, s, offset);
+    return fun(dst, s, offset);
 }
 
-static void print_match(bool res, match_t* m, string* s)
+static void print_match(bool res, tags_t m, string* s)
 {
     if (!res) {
         printf("\"%.*s\": NO MATCH\n", (int)s->len, s->buf);
         return;
     }
     printf("\"%.*s\" MATCHED:\n", (int)s->len, s->buf);
-    for (int i = 0; i <= MAXGROUP; i++) {
-        if (!i || (m->matches[i].rm_so >= 0 && m->matches[i].rm_eo >= 0)) {
-            printf("\t%d: %td..%td\n",
-                   i, m->matches[i].rm_so, m->matches[i].rm_eo);
-            if (m->matches[i].rm_so > m->matches[i].rm_eo) {
+    for (int i = 0; i < MAXTAGS; i += 2) {
+        if (i == 0 || (m[i] >= 0 && m[i + 1] >= 0)) {
+            printf("\t%d: %td..%td\n", i / 2, m[i], m[i + 1]);
+            if (m[i] > m[i + 1]) {
                 printf("ERROR! starts after end?\n");
             }
-            if (m->matches[i].rm_so > s->len) {
+            if (m[i] > s->len) {
                 printf("ERROR! match starts outside string?\n");
             }
-            if (m->matches[i].rm_eo > s->len) {
+            if (m[i + 1] > s->len) {
                 printf("ERROR! match ends outside string?\n");
             }
         }

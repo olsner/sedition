@@ -40,7 +40,8 @@ programHeader ofile program =
     -- with local variables might not apply anyway.) Other variables are local
     -- to allow the C compiler more freedom.
     foldMap (declare "string" stringvar) strings <>
-    foldMap (declare "match_t" match) matches <>
+    foldMap (declare "tags_t" match) matches <>
+    foldMap (declare "regex_match_fun_t*" matchfun) matches <>
     foldMap (init "bool" pred "false") preds <>
     foldMap (init "FILE*" infd "NULL") files <>
     foldMap (init "FILE*" outfd "NULL") files <>
@@ -96,7 +97,8 @@ string (IR.SVar s) = "&S" <> intDec s
 stringvar (IR.SVar s) = "S" <> intDec s
 pred (IR.Pred p) = "P" <> intDec p
 match (IR.MVar m) = "M" <> intDec m
-matchref (IR.MVar m) = "&M" <> intDec m
+matchref (IR.MVar m) = "M" <> intDec m
+matchfun (IR.MVar m) = "MF" <> intDec m
 mpred (IR.MVar m) = "MP" <> intDec m
 infd i = "inF" <> idIntDec i
 outfd i = "outF" <> idIntDec i
@@ -119,10 +121,19 @@ compileCond cond = case cond of
   IR.IsStringEmpty svar -> "!" <> fun "string_len" [string svar]
   IR.PRef p -> pred p
 
-compileMatch m (IR.Match svar re) = fun (regexfun re) [matchref m, string svar, "0"]
-compileMatch m (IR.MatchLastRE svar) = fun lastRegex [matchref m, string svar, "0"]
-compileMatch m (IR.NextMatch m2 s) = fun "next_match" [matchref m, matchref m2, string s]
-compileMatch m (IR.MVarRef m2) = fun "copy_match" [matchref m, matchref m2, mpred m2]
+compileMatch m (IR.Match svar re) =
+  stmt (matchfun m <> " = &" <> regexfun re) <>
+  stmt (mpred m <> " = " <> fun (regexfun re) [matchref m, string svar, "0"])
+compileMatch m (IR.MatchLastRE svar) =
+  stmt (matchfun m <> " = " <> lastRegex) <>
+  stmt (mpred m <> " = " <> fun lastRegex [matchref m, string svar, "0"])
+compileMatch m (IR.NextMatch m2 s) =
+  stmt (matchfun m <> " = " <> matchfun m2) <>
+  stmt (mpred m <> " = " <> fun "next_match" [matchref m, matchref m2, matchfun m2, string s])
+compileMatch m (IR.MVarRef m2) =
+  sfun "copy_match" [matchref m, matchref m2] <>
+  stmt (matchfun m <> " = " <> matchfun m2) <>
+  stmt (mpred m <> " = " <> mpred m2)
 
 closeFile i = sfun "close_file" [infd i] <> sfun "close_file" [outfd i]
 
@@ -131,7 +142,7 @@ compileInsn (IR.Label lbl) = label (show lbl)
 compileInsn (IR.Branch l) = gotoL l
 compileInsn (IR.SetP p value) = stmt (pred p <> " = " <> bool value)
 compileInsn (IR.SetS s expr) = stmt (setString s expr)
-compileInsn (IR.SetM m expr) = stmt (mpred m <> " = " <> compileMatch m expr)
+compileInsn (IR.SetM m expr) = compileMatch m expr
 compileInsn (IR.If c t f) = cIf (compileCond c) (gotoL t) (gotoL f)
 compileInsn (IR.Listen i maybeHost port) =
   sfun "sock_listen" [infd i, chost maybeHost, intDec port]
@@ -214,8 +225,8 @@ resolveStringIndex s ix = case ix of
   IR.SIGroupStart m i -> groupStart m i
   IR.SIGroupEnd m i -> groupEnd m i
   where
-    groupStart m i = match m <> ".matches[" <> intDec i <> "].rm_so"
-    groupEnd m i = match m <> ".matches[" <> intDec i <> "].rm_eo"
+    groupStart m i = match m <> "[" <> intDec (2 * i) <> "]"
+    groupEnd m i = match m <> "[" <> intDec (2 * i + 1) <> "]"
 
 testCompare = False
 
@@ -233,23 +244,23 @@ compileRE r@IR.RE{..} = wrapper body
     usedTags | testCompare = Nothing
              | otherwise   = reUsedTags
     body | needRegexec = regexec
-         | testCompare = match_for_compare <> tdfa2c r re usedTags <> compare_matches
-         | otherwise   = tdfa2c r re usedTags
+         | testCompare = match_for_compare <> tdfa2c re usedTags <> compare_matches
+         | otherwise   = tdfa2c re usedTags
     re = Regex.parseString ere s
     needRegexec = forceRegcomp || not (Regex2C.isCompatible re)
     res = C.pack $ Regex.reString re
     wrapper b =
         "NOINLINE static bool " <> regexfun r <>
-            "(match_t* m, string* s, const size_t orig_offset) {\n" <>
+            "(tags_t m, string* s, const size_t orig_offset) {\n" <>
         comment description <>
         comment ("Used tags: " <> showB reUsedTags) <>
         "bool result = false;\n" <> b <> "return result;\n}\n"
-    match m = fun "match_regexp" [m, "s", "orig_offset", regex r, regexfun r]
+    match m = fun "match_regexp" [m, "s", "orig_offset", regex r]
     -- regcomp is run at start of main so we just need to forward the arguments.
     regexec = stmt ("result = " <> match "m")
     match_for_compare =
-        stmt "match_t m2" <>
-        sfun "clear_match" ["m2"] <>
+        stmt "tags_t m2" <>
+        sfun "clear_tags" ["m2"] <>
         stmt ("const bool result2 = " <> match "&m2")
     compare_matches = sfun "compare_regexp_matches" ["result2", "&m2", "result", "m", "s", "orig_offset", "__PRETTY_FUNCTION__", cstring res]
 
@@ -258,7 +269,6 @@ compileRE r@IR.RE{..} = wrapper body
         " -> ERE: " <> cstring res <>
         (if needRegexec then " (using regcomp)" else " (using Regex2C)")
 
-tdfa2c r re used =
-    (if testCompare then sfun "clear_match" ["m"] else mempty) <>
-    stmt ("m->fun = " <> regexfun r)  <>
+tdfa2c re used =
+    (if testCompare then sfun "clear_tags" ["m"] else mempty) <>
     byteString (Regex2C.tdfa2c used re)

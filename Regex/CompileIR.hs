@@ -33,17 +33,13 @@ import GenC
 yystats name inc = sfun "YYSTATS" [name, inc]
 yydebug fmt args = sfun "YYDEBUG" (fmt : args)
 
-matchix (T t) = showB (t `div` 2)
-matchfld (T t) | even t = "rm_so"
-               | otherwise = "rm_eo"
-
+tagix (T t) = intDec t
 possibleTag (T t) = t < 20
 
-matchFromTag (t,val) | possibleTag t =
-  stmt ("m->matches[" <> matchix t <> "]." <> matchfld t <> " = " <> tagValue val)
-               | otherwise = trace "found an unoptimized tag that can't be used by match" mempty -- skip all impossible tags
+matchFromTag (t,val) | possibleTag t = stmt ("m[" <> tagix t <> "] = " <> tagValue val)
+                     | otherwise = trace "found an unoptimized tag that can't be used by match" mempty -- skip all impossible tags
 
-debugTag t = yydebug ("\"match[" <> matchix t <> "]." <> matchfld t <> " = %td\\n\"") ["m->matches[" <> matchix t <> "]." <> matchfld t]
+debugTag t = yydebug ("\"match[" <> tagix t <> "] = %td\\n\"") ["m[" <> tagix t <> "]"]
 
 tagValue :: IR.TagValue -> Builder
 tagValue (Reg r 0) = showB r <> " ? " <> showB r <> " - YYBEGIN : -1"
@@ -64,9 +60,9 @@ emitCases (cs, label) = foldMap emitCase cs <> gotoL label
 
 -- Calling convention for matcher functions:
 -- 
--- static bool FUN(match_t* m, string* s, const size_t orig_offset)
+-- static bool FUN(tags_t* m, string* s, const size_t orig_offset)
 -- struct string { char* buf; size_t len; size_t alloc; };
--- struct match_t { regmatch_t matches[]; }
+-- typedef ptrdiff_t tags_t[20]
 -- where regmatch_t has rm_so and rm_eo, corresponding to the even/odd tag
 -- orig_offset is > 0 when repeating a match for a global replace
 --

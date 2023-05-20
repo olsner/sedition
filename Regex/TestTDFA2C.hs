@@ -49,19 +49,19 @@ startingLine = length (lines seditionRuntime) + 2
 programHeader :: String -> Builder
 programHeader ofile = seditionRuntime <>
     "#line " <> intDec startingLine <> " " <> cstring (C.pack ofile) <> "\n" <>
-    "static bool match(match_t* m, string* s, const size_t orig_offset) {\n" <>
+    "static bool match(tags_t m, string* s, const size_t orig_offset) {\n" <>
     "bool result = false;\n" <>
-    sfun "memset" ["m", "0xff", "sizeof(*m)"]
+    sfun "memset" ["m", "0xff", "sizeof(tags_t)"]
 programFooter :: Builder
 programFooter = "return result;\n" <>
     "}\n" <>
     "void main(int argc, const char *argv[]) {\n" <>
-    "  static match_t m;\n" <>
+    "  static tags_t m;\n" <>
     "  static string s;\n" <>
     "  for (int i = 1; i < argc; i++) {\n" <>
     "    set_str_const(&s, argv[i], strlen(argv[i]));\n" <>
-    "    bool res = match(&m, &s, 0);\n" <>
-    "    print_match(res, &m, &s);\n" <>
+    "    bool res = match(m, &s, 0);\n" <>
+    "    print_match(res, m, &s);\n" <>
     "  }\n}\n"
 
 -- TODO Some duplication with Sed.hs, extract utilities or something.

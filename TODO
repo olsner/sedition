@@ -3,7 +3,6 @@
 - Generate properly indented C code
 - Debugging: map IR labels to source labels
   (Could be as simple as emitting a comment?)
-- Replace `rm_so`/`rm_eo` with array of tags
 
 # Functionality/bugs
 
@@ -60,16 +59,13 @@
   SAppend [a,b,SSubstring c s e, ...]
   Then we can emit one code block with e.g. calculating buffer size and copying
   stuff into the target.
+- If we have explict append sequences, find adjacent substrings, e.g. in
+  `s/.../\1\2\3bar/` you can use a single substring including the prefix of the
+  string up to the end of \3, instead of splitting it up before appending.
 - Optimize out IsEmptyString used by case conversion
   Perhaps only practical on literals?
   Optimizing on regex submatches in general would be useful, but requires more
   information about the parsed regex to figure out the length of a group.
-
-## Cleanup stuff
-
-- (may be more relevant after removing next-match): split up match (tag array)
-  and repeat-match function pointer so the C compiler can do more with match
-  functions.
 
 ## Regex
 
