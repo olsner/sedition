@@ -116,8 +116,8 @@ emitTrans nocheckStates trans fail = do
 mkSwitch table def | CM.isComplete table = TotalSwitch table
                    | otherwise           = Switch table def
 
-emitState :: TDFA -> Map StateId Int -> StateId -> IRM ()
-emitState TDFA{..} minLengths s = mdo
+emitState :: TDFA -> StateId -> IRM ()
+emitState TDFA{..} s = mdo
   matchL <- gets matchLabel
 
   fallbackLabel <- labelBlock (fallbackRegOps matchL)
@@ -167,18 +167,18 @@ emitState TDFA{..} minLengths s = mdo
     maybeSetFallback l | isFinalState = mkMiddles [Trace ("setting fallback in " ++ show s), SaveCursor, SetFallback l]
                        | otherwise    = debug ("no fallback from " ++ show s)
 
-    minLength | Just min <- M.lookup s minLengths, min > 1 = min
+    minLength | Just min <- M.lookup s tdfaMinLengths, min > 1 = min
               | otherwise = 0
 
     nocheckStates
-      | minLength > 0 = M.keysSet (M.filter (< minLength) minLengths)
+      | minLength > 0 = M.keysSet (M.filter (< minLength) tdfaMinLengths)
       | otherwise = S.empty
 
 emitIR :: TDFA -> IRM Program
 emitIR tdfa@TDFA{..} = mdo
   setMatchLabel matchLabel
 
-  mapM_ (emitState tdfa tdfaMinLengths) (tdfaStates tdfa)
+  mapM_ (emitState tdfa) (tdfaStates tdfa)
   matchLabel <- labelBlock (mkLast (Match finalTagRegMap))
 
   startLabelNotBOL <- getLabel (tdfaStartStateNotBOL, Checked)
@@ -203,7 +203,6 @@ emitIR tdfa@TDFA{..} = mdo
   return (finishProgram entry g)
 
   where
-    tdfaMinLengths = minLengths tdfa
     onlyMatchAtBOL = not (M.member tdfaStartStateNotBOL tdfaMinLengths)
 
     finalTagRegMap = M.union finalTagRegs fixedTags

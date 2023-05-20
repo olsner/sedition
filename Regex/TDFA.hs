@@ -63,7 +63,8 @@ data TDFA = TDFA {
     -- For debugging (mostly)
     tdfaTagRegMap :: Map StateId (Map TNFA.StateId (Map TagId RegId)),
     tdfaStateMap :: Map StateId (Set TNFA.StateId),
-    tdfaOriginalFinalState :: TNFA.StateId
+    tdfaOriginalFinalState :: TNFA.StateId,
+    tdfaMinLengths :: Map StateId Int
   }
   deriving (Show, Ord, Eq)
 
@@ -567,7 +568,7 @@ determinize tnfa@TNFA{..} = do
   let ts' = insertRegOps mergedBackups ts
   -- trace ("fallbacks: " ++ show fb) (pure ())
   -- trace ("all backup operations: " ++ show mergedBackups) (pure ())
-  return (TDFA {
+  let tdfa = TDFA {
     tdfaStartState = s0,
     tdfaStartStateNotBOL = s1,
     tdfaFinalRegisters = finRegs,
@@ -579,8 +580,9 @@ determinize tnfa@TNFA{..} = do
     -- Debugging stuff:
     tdfaTagRegMap = tagRegMap,
     tdfaStateMap = stateIdMap,
-    tdfaOriginalFinalState = tnfaFinalState
-    })
+    tdfaOriginalFinalState = tnfaFinalState,
+    tdfaMinLengths = minLengths tdfa
+    } in return tdfa
 
 multiMapFromList :: Ord a => [(a,b)] -> Map a [b]
 multiMapFromList ts = foldr prepend M.empty ts
@@ -684,13 +686,11 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
     showEOLRegOps s | Just o <- M.lookup s tdfaEOL = eolRegOps o
                     | otherwise = ""
 
-    tdfaMinLengths = minLengths tdfa
     showMinLength s | Just dist <- M.lookup s tdfaMinLengths = "  Min length: " ++ show dist ++ "\n"
                     | otherwise = "  [failed state]\n"
 
 -- Minimum length to an accepting state. If there aren't this many characters
 -- left in the string it cannot match from here.
--- TODO Put in TDFA struct and calculate in construction if really useful.
 minLengths :: TDFA -> Map StateId Int
 minLengths tdfa@TDFA{..} = go ss (M.map (const 0) (tdfaFinalFunction `M.union` tdfaEOL `M.union` tdfaFallbackFunction)) True
   where

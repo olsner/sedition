@@ -69,13 +69,13 @@
 
 ## Regex
 
-* Finish minLength optimization:
-  - Precalculate minLength and store in TDFA
 * Strip out failed states
   1. Identify failed states using minLength
   2. Remove all transitions to failed states
   3. Remove failed states themselves (unless that happens automatically when
      they are not mentioned and have no transitions?)
+* Recognize literals and emit special code (or at least make TNFA/TDFA stuff
+  faster - the madding gnused test is quite slow)
 * TNFA minimization - might make TDFA generation faster
 * TDFA minimization - combine equivalent states
 * More efficient searching:
@@ -101,6 +101,7 @@
 * Parts of minLength optimization:
   - Split up state entry point to have one without range check
   - When transitioning to a state with a lower minLength, skip check
+  - Precalculate minLength and store in TDFA
 
 ### Abandoned
 
