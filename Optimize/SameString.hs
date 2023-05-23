@@ -79,8 +79,7 @@ sameString = deepFwdRw rw
     rw _ _ = return Nothing
 
     rwE (SVarRef s)        f = var1 SVarRef s f
-    rwE (SAppendNL s1 s2)  f = var2 SAppendNL s1 s2 f
-    rwE (SAppend s1 s2)    f = var2 SAppend s1 s2 f
+    rwE (SAppend xs)       f = SAppend <$> varN xs f
     rwE (STrans from to s) f = var1 (STrans from to) s f
     rwE (SFormatLiteral w s) f = var1 (SFormatLiteral w) s f
     rwE (SSubstring s i j) f = var1 (\s -> SSubstring s i j) s f
@@ -93,18 +92,16 @@ sameString = deepFwdRw rw
 
     rwC _                  _ = Nothing
 
-    -- Don't return Just x unless at least one of the arguments were rewritten.
-    -- Avoids wasting optimization fuel when nothing changes. Also return Just
-    -- if only one of the arguments changed so we don't miss a rewrite.
-    var2 :: (SVar -> SVar -> a) -> SVar -> SVar -> SameStringFact -> Maybe a
-    var2 con s1 s2 f | s1' <- var1 id s1 f, s2' <- var1 id s2 f =
-        if isJust s1' || isJust s2'
-          then Just (con (fromMaybe s1 s1') (fromMaybe s2 s2'))
-          else Nothing
-
     var1 :: (SVar -> a) -> SVar -> SameStringFact -> Maybe a
     var1 con s f | Just (PElem t) <- M.lookup s f = Just (con t)
                  | otherwise                      = Nothing
+
+    varN :: [StringExpr] -> SameStringFact -> Maybe [StringExpr]
+    varN []     _ = Nothing
+    varN [x]    f = (:[]) <$> rwE x f
+    varN (x:xs) f | Just x'  <- rwE x f   = Just (x':xs)
+                  | Just xs' <- varN xs f = Just (x:xs')
+                  | otherwise             = Nothing
 
 
 sameStringPass :: FuelMonad m => FwdPass m Insn SameStringFact

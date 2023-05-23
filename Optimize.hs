@@ -61,7 +61,8 @@ optimizeOnce entry program = do
       else pure program
   -- This doesn't seem to do much for runtime, so skip it. Should be more
   -- relevant when we try to analyze the contents of strings though.
-  --(program,_,_) <- analyzeAndRewriteFwd sameStringPass entries program mapEmpty
+  --program <- tracePass "sameStringPass" $
+  --  analyzeAndRewriteFwd sameStringPass entries program mapEmpty
   return program
 
 optToFix f original = do

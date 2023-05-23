@@ -47,8 +47,7 @@ genM (MVarRef _) = id
 
 genS :: StringExpr -> LiveStringFact -> LiveStringFact
 genS (SVarRef s) = setInsert s
-genS (SAppendNL s1 s2) = setInsert s1 . setInsert s2
-genS (SAppend s1 s2) = setInsert s1 . setInsert s2
+genS (SAppend xs) = foldr (.) id (map genS xs)
 genS (STrans _ _ s) = setInsert s
 genS (SSubstring s _ _) = setInsert s
 genS (SFormatLiteral _ s) = setInsert s

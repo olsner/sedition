@@ -369,14 +369,9 @@ evalStringExpr (IR.SVarRef svar) = getString svar
 evalStringExpr (IR.SRandomString) = liftIO randomString
 evalStringExpr (IR.STrans from to str) =
     trans from to <$> getString str
-evalStringExpr (IR.SAppendNL a b) = do
-    a <- getString a
-    b <- getString b
-    return (C.concat [a, "\n", b])
-evalStringExpr (IR.SAppend a b) = do
-    a <- getString a
-    b <- getString b
-    return (a <> b)
+evalStringExpr (IR.SAppend xs) = do
+    ss <- mapM evalStringExpr xs
+    return (C.concat ss)
 evalStringExpr (IR.SSubstring s start end) = do
   s <- getString s
   startix <- resolve start s

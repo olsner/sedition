@@ -53,6 +53,7 @@ transferM t (MVarRef s) = mapRename s t
 
 genS :: StringExpr -> LiveMatchFact -> LiveMatchFact
 genS (SSubstring _ i j) = genSI i . genSI j
+genS (SAppend xs) = foldr (.) id (map genS xs)
 genS _ = id
 
 genSI :: SIndex -> LiveMatchFact -> LiveMatchFact

@@ -49,11 +49,7 @@ data StringExpr
   | SRandomString
   -- from to string
   | STrans S S SVar
-  -- TODO Replace with more appends and perhaps a predefined svar that contains
-  -- a newline.
-  -- e.g. a ++ "\n" ++ b
-  | SAppendNL SVar SVar
-  | SAppend SVar SVar
+  | SAppend [StringExpr]
   | SSubstring SVar SIndex SIndex
   | SFormatLiteral Int SVar
   | SGetLineNumber
@@ -65,6 +61,8 @@ emptyS = SConst ""
 -- toupper/tolower. (which might not even be all that good anyway.)
 sUpper = STrans (C.pack ['a'..'z']) (C.pack ['A'..'Z'])
 sLower = STrans (C.pack ['A'..'Z']) (C.pack ['a'..'z'])
+sAppendNL a b = SAppend [SVarRef a, SConst "\n", SVarRef b]
+sAppend a b = SAppend [SVarRef a, SVarRef b]
 
 data SIndex
   = SIStart
@@ -260,12 +258,11 @@ newString = do
 emitPred :: Bool -> IRM Pred
 emitPred c = newPred >>= \p -> emit (SetP p c) >> return p
 
--- TODO Rename to copyString or something so we can use setString for this.
-setStringExpr s expr = emit (SetS s expr)
-setString :: SVar -> SVar -> IRM ()
-setString s src = setStringExpr s (SVarRef src)
+setString s expr = emit (SetS s expr)
+copyString :: SVar -> SVar -> IRM ()
+copyString s src = setString s (SVarRef src)
 emitString :: StringExpr -> IRM SVar
-emitString expr = withNewString (\s -> setStringExpr s expr)
+emitString expr = withNewString (\s -> setString s expr)
 emitCString :: S -> IRM SVar
 emitCString s = emitString (SConst s)
 withNewString f = do
@@ -286,7 +283,7 @@ getExternalFD path write = do
     -- Negative FD's for external files
     nextFd = negate . succ . M.size
 
-setPattern s = setString sPattern s >> emit (SetP pHasPattern cTrue)
+setPattern s = copyString sPattern s >> emit (SetP pHasPattern cTrue)
 
 addLabelMapping name l = modify $
     \state -> state { sourceLabels = M.insert name l (sourceLabels state) }
@@ -383,7 +380,7 @@ toIR autoprint ere ipc seds = evalState go (startState autoprint ere ipc)
 checkQueuedOutput =
   tWhenP pHasQueuedOutput $ do
     emit (Print 0 sOutputQueue)
-    setString sOutputQueue =<< emitString emptyS
+    copyString sOutputQueue =<< emitString emptyS
     emit (SetP pHasQueuedOutput cFalse)
 
 openFile (path, write) fd = emit (OpenFile fd write path)
@@ -447,7 +444,7 @@ tProgram seds = mdo
   emit (GetMessage msg)
   -- Update pattern variable for matching but don't set pHasPattern in IPC
   -- branch, to avoid printing it at the end of the loop.
-  setString sPattern msg
+  copyString sPattern msg
 
   emit (SetP pIntr True)
   emit (SetP pPreFirst False)
@@ -590,7 +587,7 @@ tCmd (AST.NextA fd) = do
     checkQueuedOutput
     setLastSubst False
     line <- readString fd
-    tmp <- emitString (SAppendNL sPattern line)
+    tmp <- emitString (sAppendNL sPattern line)
     tIfP pHasPattern (setPattern tmp) (setPattern line)
 tCmd (AST.Listen fd host port) = emit (Listen fd host port)
 tCmd (AST.Accept sfd fd) = emit (Accept sfd fd)
@@ -617,7 +614,7 @@ tCmd (AST.Fork sed) = mdo
 
 tCmd (AST.Clear) = do
     t <- emitString emptyS
-    setString sPattern t
+    copyString sPattern t
     emit (SetP pHasPattern cFalse)
 tCmd (AST.Change s) = do
     emitCString s >>= \s -> emit (Print 0 s)
@@ -637,30 +634,30 @@ tCmd (AST.Trans from to) = do
     setPattern s
 tCmd (AST.Hold maybeReg) = do
     space <- getHoldMapping maybeReg
-    setString space sPattern
+    copyString space sPattern
 tCmd (AST.HoldA maybeReg) = do
     space <- getHoldMapping maybeReg
-    tmp2 <- emitString (SAppendNL space sPattern)
-    setString space tmp2
+    tmp2 <- emitString (sAppendNL space sPattern)
+    copyString space tmp2
 
 tCmd (AST.Get (Just "yhjulwwiefzojcbxybbruweejw")) = do
     temp <- emitString SRandomString
     setPattern temp
 tCmd (AST.GetA (Just "yhjulwwiefzojcbxybbruweejw")) = do
     temp <- emitString SRandomString
-    tmp2 <- emitString (SAppendNL sPattern temp)
-    setString sPattern tmp2
+    tmp2 <- emitString (sAppendNL sPattern temp)
+    copyString sPattern tmp2
 
 tCmd (AST.Get maybeReg) = setPattern =<< getHoldMapping maybeReg
 tCmd (AST.GetA maybeReg) = do
     space <- getHoldMapping maybeReg
-    tmp2 <- emitString (SAppendNL sPattern space)
-    setString sPattern tmp2
+    tmp2 <- emitString (sAppendNL sPattern space)
+    copyString sPattern tmp2
 tCmd (AST.Exchange maybeReg) = do
     space <- getHoldMapping maybeReg
     tmp <- emitString (SVarRef space)
-    setString space sPattern
-    setString sPattern tmp
+    copyString space sPattern
+    copyString sPattern tmp
 tCmd (AST.Insert s) = emitCString s >>= \s -> emit (Print 0 s)
 tCmd (AST.Append s) = tAppendOutputQueue =<< emitCString s
 tCmd (AST.ReadFile path) = do
@@ -683,12 +680,12 @@ tAppendOutputQueue s = tIfP pHasQueuedOutput ifTrue ifFalse
   where
     -- already set to true, so no need to update predicate. Just append to
     -- the queue.
-    ifTrue = setString sOutputQueue =<< emitString (SAppendNL sOutputQueue s)
+    ifTrue = copyString sOutputQueue =<< emitString (sAppendNL sOutputQueue s)
     -- If there's no queued output yet, we know we can simply replace the
     -- queued output with a constant.
     ifFalse = do
         emit (SetP pHasQueuedOutput cTrue)
-        setString sOutputQueue s
+        copyString sOutputQueue s
 
 tSubstAction SActionNone _ = return ()
 tSubstAction SActionExec res = emit (ShellExec res)
@@ -716,11 +713,10 @@ setCaseConv (CharConv p _ c) UpperChar = return (CharConv p Upper c)
 setCaseConv (CharConv p _ c) LowerChar = return (CharConv p Lower c)
 
 tSub m s sub = case sub of
-  Literal lit -> emitCString lit
-  WholeMatch -> emitString (SSubstring s (SIMatchStart m) (SIMatchEnd m))
-  BackReference i ->
-    emitString (SSubstring s (SIGroupStart m i) (SIGroupEnd m i))
-  SetCaseConv _ -> error "leftover SetCaseConv"
+  Literal lit     -> return (SConst lit)
+  WholeMatch      -> return (SSubstring s (SIMatchStart m) (SIMatchEnd m))
+  BackReference i -> return (SSubstring s (SIGroupStart m i) (SIGroupEnd m i))
+  SetCaseConv _   -> error "leftover SetCaseConv"
 
 {-
 Note: Translating case conversions
@@ -751,29 +747,32 @@ Some more interesting behaviours of these escapes:
    may remove some of those first-char conversions). For now, leave this for
    optimization passes?
 -}
+applyCaseConv :: CState -> StringExpr -> IRM StringExpr
 applyCaseConv conv s = case conv of
     Conv NoConv -> return s
-    Conv Upper -> emitString (sUpper s)
-    Conv Lower -> emitString (sLower s)
+    Conv Upper -> sUpper <$> emitString s
+    Conv Lower -> sLower <$> emitString s
     Conv UpperChar -> error "First-char conversion should have been translated"
     Conv LowerChar -> error "First-char conversion should have been translated"
     CharConv p conv1 convN -> do
+      s' <- emitString s
       sres <- newString
-      tIfP p (tIf (IsStringEmpty s) (setString sres s)
-                                    (convChar sres conv1 s >>
-                                     emit (SetP p cFalse)))
-              (setString sres =<< applyCaseConv (Conv convN) s)
-      return sres
+      tIfP p (tIf (IsStringEmpty s') (setString sres s)
+                                     (convChar conv1 s' >>= setString sres >>
+                                      emit (SetP p cFalse)))
+             (setString sres =<< applyCaseConv (Conv convN) s)
+      return (SVarRef sres)
 
-convChar sres conv s = do
+convChar :: CaseConv -> SVar -> IRM StringExpr
+convChar conv s = do
     -- We've already checked that s is not empty.
     head <- emitString (SSubstring s SIStart (SIOffset 1))
-    tail <- emitString (SSubstring s (SIOffset 1) SIEnd)
-    head' <- emitString (case conv of
-                           Lower -> sLower head
-                           Upper -> sUpper head
-                           _ -> error ("Invalid first-char conversion " ++ show conv))
-    setStringExpr sres (SAppend head' tail)
+    let tail = SSubstring s (SIOffset 1) SIEnd
+    let head' = case conv of
+                  Lower -> sLower head
+                  Upper -> sUpper head
+                  _ -> error ("Invalid first-char conversion " ++ show conv)
+    return (SAppend [head', tail])
 
 tSubs _ _   _      [] = return []
 tSubs m pat cstate (SetCaseConv c:ss) = do
@@ -784,20 +783,19 @@ tSubs m pat cstate (sub:subs) = do
   s' <- applyCaseConv cstate s
   (s':) <$> tSubs m pat cstate subs
 
-tConcat [x] = return x
-tConcat xs  = emitString emptyS >>= go xs
-  where
-    go []     acc = return acc
-    go (x:xs) acc = emit (SetS acc (SAppend acc x)) >> go xs acc
+tConcat :: [StringExpr] -> IRM SVar
+tConcat []  = emitString emptyS
+tConcat [x] = emitString x
+tConcat xs  = emitString (SAppend xs)
 
 tSubst m s sub flags = case flags of
   SubstFirst -> do
     ss <- tSubs m s initCState sub
     -- TODO Analyze the regexp to see if it will always match from the
     -- beginning and/or to the end of the string.
-    prefix <- emitString (SSubstring s SIStart (SIMatchStart m))
-    suffix <- emitString (SSubstring s (SIMatchEnd m) SIEnd)
-    tConcat ((prefix:ss) ++ [suffix])
+    let prefix = SSubstring s SIStart (SIMatchStart m)
+    let suffix = SSubstring s (SIMatchEnd m) SIEnd
+    emitString (SAppend ((prefix:ss) ++ [suffix]))
   SubstNth 1 -> tSubst m s sub SubstFirst
   SubstNth n -> do
     m' <- emitMatch (NextMatch m s)
@@ -810,12 +808,12 @@ tSubst m s sub flags = case flags of
     mnext <- emitMatch (NextMatch m s)
 
     ss <- tSubs m s initCState sub
-    s1 <- tConcat (sres:ss)
+    s1 <- tConcat (SVarRef sres:ss)
 
     hasNextMatch <- finishBlock' (If (IsMatch mnext) hasNextMatch lastMatch)
 
-    mid <- emitString (SSubstring s (SIMatchEnd m) (SIMatchStart mnext))
-    emit (SetS sres (SAppend s1 mid))
+    let mid = SSubstring s (SIMatchEnd m) (SIMatchStart mnext)
+    setString sres (SAppend [SVarRef s1, mid])
     -- TODO Last instance of copy_match, figure out how to remove. E.g.
     -- duplicate the match code so we can leave the next match in m before
     -- looping?
@@ -823,8 +821,8 @@ tSubst m s sub flags = case flags of
 
     lastMatch <- emitBranch' loop
 
-    suffix <- emitString (SSubstring s (SIMatchEnd m) SIEnd)
-    emit (SetS sres (SAppend s1 suffix))
+    let suffix = SSubstring s (SIMatchEnd m) SIEnd
+    setString sres (SAppend [SVarRef s1, suffix])
 
     return sres
 
@@ -895,8 +893,7 @@ usedStrings _ = S.empty
 
 stringExprStrings (SVarRef s) = S.singleton s
 stringExprStrings (STrans _ _ s) = S.singleton s
-stringExprStrings (SAppendNL s t) = S.insert s (S.singleton t)
-stringExprStrings (SAppend s t) = S.insert s (S.singleton t)
+stringExprStrings (SAppend xs) = S.unions (map stringExprStrings xs)
 stringExprStrings (SSubstring s _ _) = S.singleton s
 stringExprStrings (SFormatLiteral _ s) = S.singleton s
 stringExprStrings (SConst _) = S.empty

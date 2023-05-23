@@ -137,9 +137,16 @@ static void set_cstr(string* dst, const char* src, size_t n)
 
 static void append_cstr(string* dst, const char *str, size_t n)
 {
+    assert(dst->buf + dst->len < str || dst->buf > str + n);
     ensure_len(dst, dst->len + n);
     memcpy(dst->buf + dst->len, str, n);
     dst->len += n;
+}
+
+static void append_char(string* dst, char c)
+{
+    ensure_len(dst, dst->len + 1);
+    dst->buf[dst->len++] = c;
 }
 
 static void set_str(string* dst, string* src)
@@ -179,10 +186,13 @@ static void append_str(string* dst, string* b)
     append_cstr(dst, b->buf, b->len);
 }
 
-static void substring(string* dst, string* src, ptrdiff_t i1, ptrdiff_t i2)
+static void append_substr(string* dst, string* src, ptrdiff_t i1, ptrdiff_t i2)
 {
+    assert(dst != src);
+    // TODO Only necessary when the index refers to a group that could be
+    // missing. Do this check at the call site, and only for matchstart/end
+    // where it's possible to have missing values.
     if (i1 < 0 && i2 < 0) {
-        clear_string(dst);
         return;
     }
     assert(0 <= i1);
@@ -191,25 +201,27 @@ static void substring(string* dst, string* src, ptrdiff_t i1, ptrdiff_t i2)
     assert(i2 <= src->len);
     assert(i1 <= i2);
 
-    const size_t n = i2 - i1;
-    ensure_len_discard(dst, n);
-    memcpy(dst->buf, src->buf + i1, n);
-    dst->len = n;
+    append_cstr(dst, src->buf + i1, i2 - i1);
 }
 
-static void trans(string* dst, const char* from, const char* to, string* src)
+static void append_trans(string* dst, const char* from, const char* to, string* src)
 {
-    ensure_len_discard(dst, src->len);
-    assert(strlen(to) >= strlen(from));
+    ensure_len(dst, dst->len + src->len);
+    assert(strlen(to) == strlen(from));
     for (size_t i = 0; i < src->len; i++) {
         char c = src->buf[i];
         const char *p = strchr(from, c);
         if (p) {
             c = to[p - from];
         }
-        dst->buf[i] = c;
+        dst->buf[dst->len++] = c;
     }
-    dst->len = src->len;
+}
+
+static void trans(string* dst, const char* from, const char* to, string* src)
+{
+    clear_string(dst);
+    append_trans(dst, from, to, src);
 }
 
 static void random_string(string* dst)

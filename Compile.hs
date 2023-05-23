@@ -141,7 +141,7 @@ compileInsn :: IR.Insn e x -> Builder
 compileInsn (IR.Label lbl) = label (show lbl)
 compileInsn (IR.Branch l) = gotoL l
 compileInsn (IR.SetP p value) = stmt (pred p <> " = " <> bool value)
-compileInsn (IR.SetS s expr) = stmt (setString s expr)
+compileInsn (IR.SetS s expr) = setString s expr
 compileInsn (IR.SetM m expr) = compileMatch m expr
 compileInsn (IR.If c t f) = cIf (compileCond c) (gotoL t) (gotoL f)
 compileInsn (IR.Listen i maybeHost port) =
@@ -194,26 +194,45 @@ compileInsn (IR.ShellExec svar) = sfun "shell_exec" [string svar]
 setLastRegex re = stmt (lastRegex <> " = &" <> regexfun re)
 
 setString :: IR.SVar -> IR.StringExpr -> Builder
-setString t (IR.SConst s) | C.null s = fun "clear_string" [string t]
-                          | True     = fun "set_str_const" [string t, cstring s, intDec (C.length s)]
-setString t (IR.SVarRef svar) = fun "set_str" [string t, string svar]
-setString t (IR.SRandomString) = fun "random_string" [string t]
+setString t (IR.SConst s) | C.null s = sfun "clear_string" [string t]
+                          | True     = sfun "set_str_const" [string t, cstring s, intDec (C.length s)]
+setString t (IR.SVarRef svar) = sfun "set_str" [string t, string svar]
+setString t (IR.SRandomString) = sfun "random_string" [string t]
 setString t (IR.STrans from to s) =
   -- TODO compile transformations into functions. Might require that we add
   -- statefulness to cache them and to output functions outside of main though.
-  fun "trans" [string t, cstring from, cstring to, string s]
-setString t (IR.SAppendNL a b) = fun "concat_newline" (map string [t, a, b])
-setString t (IR.SAppend a b)
-    | t == a    = fun "append_str" (map string [t, b])
-    | otherwise = fun "concat" (map string [t, a, b])
-setString t (IR.SSubstring s start end) =
-  fun "substring" [string t, string s, startix, endix]
+  sfun "trans" [string t, cstring from, cstring to, string s]
+setString t (IR.SAppend []) = fun "clear_string" [string t]
+setString t (IR.SAppend (x:xs))
+    | x == IR.SVarRef t = appendInPlace t xs
+    | x `elem` xs = error "Unsafe self-append"
+    | otherwise = setString t x <> appendInPlace t xs
+setString t e@(IR.SSubstring _ _ _) =
+  sfun "clear_string" [string t] <> appendExpr t e
+setString t (IR.SFormatLiteral w s) =
+  sfun "format_literal" [string t, intDec w, string s]
+setString t (IR.SGetLineNumber) = sfun "format_int" [string t, lineNumber]
+
+appendInPlace _ []     = mempty
+appendInPlace t (x:xs) = appendExpr t x <> appendInPlace t xs
+
+-- Some duplication between this and setString, but in practice the more
+-- complicated setString expressions are only ever used with setString and
+-- never appended. (Appends generally come from substitutions.)
+appendExpr t (IR.SConst s)
+  | len == 0  = mempty
+  | len == 1  = sfun "append_char" [string t, cchar (C.head s)]
+  | otherwise = sfun "append_cstr" [string t, cstring s, intDec len]
+  where len = C.length s
+appendExpr t (IR.SVarRef x) = sfun "append_str" [string t, string x]
+appendExpr t (IR.SSubstring s start end) =
+  sfun "append_substr" [string t, string s, startix, endix]
   where
       startix = resolveStringIndex s start
       endix = resolveStringIndex s end
-setString t (IR.SFormatLiteral w s) =
-    fun "format_literal" [string t, intDec w, string s]
-setString t (IR.SGetLineNumber) = fun "format_int" [string t, lineNumber]
+appendExpr t (IR.STrans from to s) =
+  sfun "append_trans" [string t, cstring from, cstring to, string s]
+appendExpr _ x = error ("Unimplemented append subexpression: " ++ show x)
 
 resolveStringIndex :: IR.SVar -> IR.SIndex -> Builder
 resolveStringIndex s ix = case ix of

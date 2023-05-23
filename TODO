@@ -53,12 +53,6 @@
 
 - Optimize out concatenation of empty strings
 - Deduplicate substrings in substitutions
-- Better way to handle concatentations without all the temporary strings
-  Maybe AppendS with StringExpr? Then we can emit e.g. `append_substring`.
-- Consider if we should allow ocmposite StringExpr, e.g.
-  SAppend [a,b,SSubstring c s e, ...]
-  Then we can emit one code block with e.g. calculating buffer size and copying
-  stuff into the target.
 - If we have explict append sequences, find adjacent substrings, e.g. in
   `s/.../\1\2\3bar/` you can use a single substring including the prefix of the
   string up to the end of \3, instead of splitting it up before appending.
@@ -66,6 +60,7 @@
   Perhaps only practical on literals?
   Optimizing on regex submatches in general would be useful, but requires more
   information about the parsed regex to figure out the length of a group.
+- Precalculate length of append lists to avoid repeated reallocs
 
 ## Regex
 
