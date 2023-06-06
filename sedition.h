@@ -1,7 +1,7 @@
 #line 2 "sedition.h"
 
 #define _GNU_SOURCE
-#undef NDEBUG
+#define NDEBUG
 
 #include <assert.h>
 #include <ctype.h>
