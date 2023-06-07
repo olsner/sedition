@@ -232,6 +232,7 @@ appendExpr t (IR.SSubstring s start end) =
       endix = resolveStringIndex s end
 appendExpr t (IR.STrans from to s) =
   sfun "append_trans" [string t, cstring from, cstring to, string s]
+appendExpr t (IR.SRandomString) = sfun "append_random_string" [string t]
 appendExpr _ x = error ("Unimplemented append subexpression: " ++ show x)
 
 resolveStringIndex :: IR.SVar -> IR.SIndex -> Builder

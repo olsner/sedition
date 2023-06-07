@@ -621,6 +621,12 @@ test_sedition()
         echo "FAIL: Should be 32 random characters, got $len"
         exit 1
     fi
+    echo | $SED -e 'G yhjulwwiefzojcbxybbruweejw' >random1
+    echo | $SED -e 'G yhjulwwiefzojcbxybbruweejw' >random2
+    if cmp -s random1 random2; then
+        echo "FAIL: Same random number twice (big G)"
+        exit 1
+    fi
 }
 
 test_error()

@@ -56,12 +56,14 @@ data StringExpr
   deriving (Show,Eq)
 
 emptyS = SConst ""
+newline = SConst "\n"
 -- TODO Very inefficient with the current implementation(s) of STrans, but that
 -- should be optimized in general and might end up just as efficient as using
 -- toupper/tolower. (which might not even be all that good anyway.)
 sUpper = STrans (C.pack ['a'..'z']) (C.pack ['A'..'Z'])
 sLower = STrans (C.pack ['A'..'Z']) (C.pack ['a'..'z'])
-sAppendNL a b = SAppend [SVarRef a, SConst "\n", SVarRef b]
+sAppendVarsNL a b = SAppend [SVarRef a, newline, SVarRef b]
+sAppendNL a b = SAppend [a, newline, b]
 sAppend a b = SAppend [SVarRef a, SVarRef b]
 
 data SIndex
@@ -283,7 +285,8 @@ getExternalFD path write = do
     -- Negative FD's for external files
     nextFd = negate . succ . M.size
 
-setPattern s = copyString sPattern s >> emit (SetP pHasPattern cTrue)
+setPattern s = copyString sPattern s >> setHasPattern
+setHasPattern = emit (SetP pHasPattern cTrue)
 
 addLabelMapping name l = modify $
     \state -> state { sourceLabels = M.insert name l (sourceLabels state) }
@@ -380,7 +383,7 @@ toIR autoprint ere ipc seds = evalState go (startState autoprint ere ipc)
 checkQueuedOutput =
   tWhenP pHasQueuedOutput $ do
     emit (Print 0 sOutputQueue)
-    copyString sOutputQueue =<< emitString emptyS
+    setString sOutputQueue emptyS
     emit (SetP pHasQueuedOutput cFalse)
 
 openFile (path, write) fd = emit (OpenFile fd write path)
@@ -430,21 +433,16 @@ tProgram seds = mdo
 
   line <- finishBlock' (If (AtEOF 0) exit line)
 
-  do
-    line <- newString
-    emit (Read line 0)
-    setPattern line
-
+  emit (Read sPattern 0)
+  setHasPattern
   emit (SetP pPreFirst cFalse)
   emit (SetP pRunNormal cTrue)
 
   intr <- emitBranch' start
 
-  msg <- newString
-  emit (GetMessage msg)
   -- Update pattern variable for matching but don't set pHasPattern in IPC
   -- branch, to avoid printing it at the end of the loop.
-  copyString sPattern msg
+  emit (GetMessage sPattern)
 
   emit (SetP pIntr True)
   emit (SetP pPreFirst False)
@@ -556,11 +554,14 @@ tSed (Sed (Between start end) (AST.Change repl)) = do
     tSed (Sed (Between start end) AST.Delete)
 tSed (Sed cond x) = tWhenP pRunNormal $ withCond cond $ tCmd x
 
-readString :: Int -> IRM SVar
-readString fd = do
-    s <- newString
-    emit (Read s fd)
-    return s
+readString :: SVar -> Int -> IRM ()
+readString s fd = emit (Read s fd)
+
+readStringA :: SVar -> Int -> IRM ()
+readStringA s fd = do
+    line <- newString
+    readString line fd
+    setString s (sAppendVarsNL s line)
 
 tCmd :: AST.Cmd -> IRM ()
 tCmd (AST.Block xs) = tSeds xs
@@ -581,14 +582,13 @@ tCmd (AST.Next fd) = do
     printIfAuto
     checkQueuedOutput
     setLastSubst False
-    line <- readString fd
-    setPattern line
+    readString sPattern fd
+    setHasPattern
 tCmd (AST.NextA fd) = do
     checkQueuedOutput
     setLastSubst False
-    line <- readString fd
-    tmp <- emitString (sAppendNL sPattern line)
-    tIfP pHasPattern (setPattern tmp) (setPattern line)
+    tIfP pHasPattern (readStringA sPattern fd)
+                     (readString sPattern fd >> setHasPattern)
 tCmd (AST.Listen fd host port) = emit (Listen fd host port)
 tCmd (AST.Accept sfd fd) = emit (Accept sfd fd)
 tCmd (AST.Label name) = do
@@ -613,8 +613,7 @@ tCmd (AST.Fork sed) = mdo
   return ()
 
 tCmd (AST.Clear) = do
-    t <- emitString emptyS
-    copyString sPattern t
+    setString sPattern emptyS
     emit (SetP pHasPattern cFalse)
 tCmd (AST.Change s) = do
     emitCString s >>= \s -> emit (Print 0 s)
@@ -626,10 +625,12 @@ tCmd (AST.Subst mre sub flags actions) = do
   m <- tCheckMatch =<< compileRE mre
   tWhen (IsMatch m) $ do
     setLastSubst True
+    -- temp string necessary since original pattern space is input to subst
     s <- tSubst m sPattern sub flags
     setPattern s
     tSubstAction actions s
 tCmd (AST.Trans from to) = do
+    -- temp string necessary since it's an input (though this could be safe)
     s <- emitString (STrans from to sPattern)
     setPattern s
 tCmd (AST.Hold maybeReg) = do
@@ -637,35 +638,32 @@ tCmd (AST.Hold maybeReg) = do
     copyString space sPattern
 tCmd (AST.HoldA maybeReg) = do
     space <- getHoldMapping maybeReg
-    tmp2 <- emitString (sAppendNL space sPattern)
-    copyString space tmp2
+    setString space (sAppendVarsNL space sPattern)
 
 tCmd (AST.Get (Just "yhjulwwiefzojcbxybbruweejw")) = do
-    temp <- emitString SRandomString
-    setPattern temp
+    setString sPattern SRandomString
+    setHasPattern
 tCmd (AST.GetA (Just "yhjulwwiefzojcbxybbruweejw")) = do
-    temp <- emitString SRandomString
-    tmp2 <- emitString (sAppendNL sPattern temp)
-    copyString sPattern tmp2
+    setString sPattern (sAppendNL (SVarRef sPattern) SRandomString)
 
 tCmd (AST.Get maybeReg) = setPattern =<< getHoldMapping maybeReg
 tCmd (AST.GetA maybeReg) = do
     space <- getHoldMapping maybeReg
-    tmp2 <- emitString (sAppendNL sPattern space)
-    copyString sPattern tmp2
+    setString sPattern (sAppendVarsNL sPattern space)
 tCmd (AST.Exchange maybeReg) = do
     space <- getHoldMapping maybeReg
+    -- TODO Add swap string instruction?
     tmp <- emitString (SVarRef space)
     copyString space sPattern
     copyString sPattern tmp
 tCmd (AST.Insert s) = emitCString s >>= \s -> emit (Print 0 s)
-tCmd (AST.Append s) = tAppendOutputQueue =<< emitCString s
+tCmd (AST.Append s) = tAppendOutputQueue (SConst s)
 tCmd (AST.ReadFile path) = do
     fd <- getExternalFD path False
     tWhenNot (AtEOF fd) $ do
         s <- newString
         emit (ReadFile s fd)
-        tAppendOutputQueue s
+        tAppendOutputQueue (SVarRef s)
 tCmd (AST.WriteFile path) = do
     fd <- getExternalFD path True
     emit (Print fd sPattern)
@@ -680,12 +678,12 @@ tAppendOutputQueue s = tIfP pHasQueuedOutput ifTrue ifFalse
   where
     -- already set to true, so no need to update predicate. Just append to
     -- the queue.
-    ifTrue = copyString sOutputQueue =<< emitString (sAppendNL sOutputQueue s)
+    ifTrue = setString sOutputQueue (sAppendNL (SVarRef sOutputQueue) s)
     -- If there's no queued output yet, we know we can simply replace the
     -- queued output with a constant.
     ifFalse = do
         emit (SetP pHasQueuedOutput cTrue)
-        copyString sOutputQueue s
+        setString sOutputQueue s
 
 tSubstAction SActionNone _ = return ()
 tSubstAction SActionExec res = emit (ShellExec res)

@@ -224,17 +224,23 @@ static void trans(string* dst, const char* from, const char* to, string* src)
     append_trans(dst, from, to, src);
 }
 
-static void random_string(string* dst)
+static void append_random_string(string* dst)
 {
     uint8_t temp[16];
     ssize_t res = getrandom(temp, sizeof(temp), 0);
     assert(res == sizeof(temp));
 
-    ensure_len_discard(dst, 2 * sizeof(temp) + 1);
+    char buf[33];
     for (size_t i = 0; i < sizeof(temp); i++) {
-        snprintf(dst->buf + 2 * i, 3, "%02x", temp[i]);
+        snprintf(buf + 2 * i, 3, "%02x", temp[i]);
     }
-    dst->len = 2 * sizeof(temp);
+    append_cstr(dst, buf, 32);
+}
+
+static void random_string(string* dst)
+{
+    clear_string(dst);
+    append_random_string(dst);
 }
 
 static void format_literal(string* dst, int width, string* s)
