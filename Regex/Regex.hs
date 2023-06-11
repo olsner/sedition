@@ -4,6 +4,7 @@ module Regex.Regex (
     parseString, parseOnly,
     Regex(..),
     reString,
+    ereSpecialChars,
     tdfa2cCompatible,
     anchoredAtStart,
     anchoredAtEnd,
@@ -24,6 +25,7 @@ import Text.Trifecta hiding (parseString, brackets)
 data Regex
   = Any
   | Char Char
+  | Literal String
   | CClass [Char]
   | CNotClass [Char]
   -- Min repeats and max repeats (Nothing for unlimited)
@@ -40,17 +42,21 @@ data Regex
 instance Semigroup Regex where
   Empty     <> y         = y
   x         <> Empty     = x
-  Concat xs <> Concat ys = Concat (xs ++ ys)
-  Concat xs <> y         = Concat (xs ++ [y])
-  x         <> Concat ys = Concat (x:ys)
-  x         <> y         = Concat [x, y]
+  Concat xs <> Concat ys = rconcat (xs ++ ys)
+  Concat xs <> y         = rconcat (xs ++ [y])
+  x         <> Concat ys = rconcat (x:ys)
+  x         <> y         = rconcat [x, y]
 
 -- Assumes that Concat is never used elsewhere (i.e. this is a smart constructor
 -- for Concat), so there can't be nested concatenations to process here.
 rconcat :: [Regex] -> Regex
 rconcat [] = Empty
 rconcat [x] = x
-rconcat xs = Concat xs
+rconcat (Char c1:Char c2:xs) = rconcat (Literal [c1,c2]:xs)
+rconcat (Literal s:Char c:xs) = rconcat (Literal (s ++ [c]):xs)
+rconcat (x:xs) | Concat xs' <- y = Concat (x:xs')
+               | otherwise       = Concat [x,y]
+               where y = rconcat xs
 
 ror [] = Empty
 ror [a] = a
@@ -180,6 +186,7 @@ reString Any                = "."
 reString (Char c)
     | c `elem` ereSpecialChars = ['\\', c]
     | otherwise             = [c]
+reString (Literal s)        = concatMap (reString . Char) s
 -- TODO ] must come first, - must be last, ^ can be anywhere except first.
 reString (CClass cs)        = "[" ++ shuffleClass cs ++ "]"
 reString (CNotClass cs)     = "[^" ++ shuffleClass cs ++ "]"

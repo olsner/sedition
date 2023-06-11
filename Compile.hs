@@ -265,8 +265,12 @@ compileRE r@IR.RE{..} = wrapper body
              | otherwise   = reUsedTags
     body | needRegexec = regexec
          | testCompare = match_for_compare <> tdfa2c re usedTags <> compare_matches
+         | Regex.Literal s <- re = literal (C.pack s)
+         | Regex.Char c    <- re = literalChar c
          | otherwise   = tdfa2c re usedTags
     re = Regex.parseString ere s
+    isLiteral | Regex.Literal _ <- re = True
+              | otherwise             = False
     needRegexec = forceRegcomp || not (Regex2C.isCompatible re)
     res = C.pack $ Regex.reString re
     wrapper b =
@@ -274,10 +278,13 @@ compileRE r@IR.RE{..} = wrapper body
             "(match_t* m, string* s, const size_t orig_offset) {\n" <>
         comment description <>
         comment ("Used tags: " <> showB reUsedTags) <>
+        (if isLiteral then comment ("Literal string: " <> showB re) else "") <>
         "bool result = false;\n" <> b <> "return result;\n}\n"
     match m = fun "match_regexp" [m, "s", "orig_offset", regex r]
     -- regcomp is run at start of main so we just need to forward the arguments.
     regexec = stmt ("result = " <> match "m")
+    literal s = stmt ("result = " <> fun "match_literal" ["m", "s", "orig_offset", cstring s, intDec (C.length s)])
+    literalChar c = stmt ("result = " <> fun "match_char" ["m", "s", "orig_offset", intDec (fromEnum c)])
     match_for_compare =
         stmt "match_t m2" <>
         sfun "clear_match" ["&m2"] <>
@@ -286,8 +293,11 @@ compileRE r@IR.RE{..} = wrapper body
 
     description =
         (if ere then "ERE: "  else "BRE: ") <> cstring s <>
-        " -> ERE: " <> cstring res <>
-        (if needRegexec then " (using regcomp)" else " (using Regex2C)")
+        " -> ERE: " <> cstring res <> " (using " <> engineName <> ")"
+
+    engineName | needRegexec = "regexec"
+               | isLiteral = "memmem"
+               | otherwise = "Regex2C"
 
 tdfa2c re used =
     (if testCompare then sfun "clear_tags" ["m"] else mempty) <>

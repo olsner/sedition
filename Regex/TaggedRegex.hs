@@ -33,6 +33,8 @@ instance Show Tag where
 
 -- Convenient for the TNFA conversion, but the Eps transition is not used here.
 -- Wouldn't be too much work to translate in TNFA and have distinct types...
+-- We may want to keep literal in TaggedRegex too, and TNFA should probably
+-- not have that.
 data TNFATrans
   = BOL
   | Any
@@ -57,7 +59,8 @@ instance Show TaggedRegex where
   show (Term BOL) = "^"
   show (Term Any) = "."
   show (Term EOL) = "$"
-  show (Term (Symbol c)) = show c
+  show (Term (Symbol c)) | c `elem` Regex.ereSpecialChars = ['\\', c]
+                         | otherwise = [c]
   show (Term t) = "(" ++ show t ++ ")"
   show (TagTerm t) = show t
   show (Cat x y) = concatMap show $ catList (Cat x y)
@@ -105,6 +108,7 @@ tagRegex re = evalState (go (Regex.Group re)) 0
   where
     go Regex.Empty = return Empty
     go Regex.Any = return (Term Any)
+    go (Regex.Literal xs) = return (foldr1 cat (map (Term . Symbol) xs))
     go (Regex.Char c) = return (Term (Symbol c))
     go (Regex.CClass cs) = return (Term (CClass cs))
     go (Regex.CNotClass cs) = return (Term (CNotClass cs))

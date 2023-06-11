@@ -401,6 +401,28 @@ static bool match_regexp(match_t* m, string* s, size_t offset, re_t* regex)
     return res == 0;
 }
 
+static bool match_literal(match_t* m, string* s, size_t offset,
+                          const char* needle, size_t needle_len)
+{
+    const void* res = memmem(s->buf + offset, s->len - offset,
+                             needle, needle_len);
+    if (res) {
+        m->tags[0] = (const char*)res - s->buf;
+        m->tags[1] = m->tags[0] + needle_len;
+    }
+    return res != NULL;
+}
+
+static bool match_char(match_t* m, string* s, size_t offset, char c)
+{
+    const void* res = memchr(s->buf + offset, c, s->len - offset);
+    if (res) {
+        m->tags[0] = (const char*)res - s->buf;
+        m->tags[1] = m->tags[0] + 1;
+    }
+    return res != NULL;
+}
+
 static bool next_match(match_t* dst, match_t* src, regex_match_fun_t fun, string* s)
 {
     size_t offset = src->tags[1];

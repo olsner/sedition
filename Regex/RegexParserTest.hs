@@ -4,6 +4,7 @@ module Main (main) where
 
 import qualified Data.ByteString.Char8 as C
 import Data.List (nub, sort)
+import Data.String
 
 import System.Exit
 
@@ -14,7 +15,7 @@ import Regex.Regex
 data Dialect = BRE | ERE | Both deriving (Show,Ord,Eq)
 
 -- Abbreviations for reference results
-literal xs = Concat (map Char xs)
+literal xs = Literal xs
 star = Repeat 0 Nothing
 plus = Repeat 1 Nothing
 rep min max = Repeat min (Just max)
@@ -29,6 +30,8 @@ tests =
   , (Both, "foo", literal "foo")
   , (Both, "/", Char '/')
   , (Both, "", Empty)
+  -- Literal recognition
+  , (Both, "foo.bar", Concat [literal "foo", Any, literal "bar"])
 
   -- BRE doesn't have alternation, but we add it anyway.
   , (BRE, "a\\|b", Or [Char 'a', Char 'b'])
@@ -52,7 +55,7 @@ tests =
   , (Both, "[a^]", CClass "^a")
   , (Both, "[^^]", CNotClass "^")
   -- Escaped bracket in bracket should end it, backslash is not special
-  , (Both, "[\\]/]f", Concat (CClass "\\" : map Char "/]f"))
+  , (Both, "[\\]/]f", Concat [CClass "\\", literal "/]f"])
   , (Both, "[\\]", CClass "\\")
   -- Escaped brackets otherwise should be escaped?
   , (Both, "\\[", Char '[')
@@ -110,7 +113,7 @@ tests =
   -- Something from dc.sed (it uses '}' instead of 'Z' as the end of range, but
   -- we don't yet have complete parsing of brackets that contain ']', which is
   -- in that range...)
-  , (BRE, "|?#[\t -Z]*", Concat (map Char "|?#" ++ [star (CClass tabAndSpaceToZ)]))
+  , (BRE, "|?#[\t -Z]*", Concat [literal "|?#", star (CClass tabAndSpaceToZ)])
   , (BRE, "[ -Z]", (CClass spaceToZ))
   , (BRE, "[\t -Z]", (CClass tabAndSpaceToZ))
   , (BRE, "[\t }]", (CClass "\t }"))
@@ -119,7 +122,7 @@ tests =
   , (BRE, "[\t]", (CClass "\t"))
 
   -- A dash first is also a literal '-' rather than a range...
-  , (BRE, "|?!*[-+*/%^<>=]", Concat [Char '|', Char '?', star (Char '!'),
+  , (BRE, "|?!*[-+*/%^<>=]", Concat [literal "|?", star (Char '!'),
             CClass "%*+-/<=>^"])
 
   -- Not actually in BRE or ERE
@@ -128,7 +131,7 @@ tests =
 
   -- Some BRE oddities and special cases
   -- * first is a character, not special
-  , (BRE, "*s", Concat [Char '*', Char 's'])
+  , (BRE, "*s", literal "*s")
   , (BRE, "*\\|s", Or [Char '*', Char 's'])
   , (BRE, "*\\|^", Or [Char '*', Char '^'])
   , (BRE, "^*", Concat [AnchorStart, Char '*'])
@@ -138,9 +141,9 @@ tests =
   -- start/end of the regular expression.
   -- ERE gives ^ and $ their special meanings wherever they appear (even if
   -- that means they will never match).
-  , (BRE, "a^", Concat [Char 'a', Char '^'])
+  , (BRE, "a^", literal "a^")
   , (BRE, "a^*", Concat [Char 'a', star (Char '^')])
-  , (BRE, "$a", Concat [Char '$', Char 'a'])
+  , (BRE, "$a", literal "$a")
   , (BRE, "$\\|a", Or [Char '$', Char 'a'])
   , (BRE, "$\\{1,3\\}", Repeat 1 (Just 3) (Char '$'))
   , (BRE, "$*", star (Char '$'))

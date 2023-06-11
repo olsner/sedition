@@ -62,12 +62,20 @@
   2. Remove all transitions to failed states
   3. Remove failed states themselves (unless that happens automatically when
      they are not mentioned and have no transitions?)
-* Recognize literals and emit special code (or at least make TNFA/TDFA stuff
-  faster - the madding gnused test is quite slow)
-  - Start with whole regex being a literal?
+* Handle literals in TNFA/TDFA to make it more efficient (e.g. madding.sed)
+  - Doesn't seem feasible to keep literals through TNFA construction as they
+    would need to be split
+  - Rather recognize in TDFA? that there's a path where only one character can
+    match, and then you can string together more of them. Or even do it as an
+    optimization on the IR?
+  - Emit memcmp to match a long-enough literal
 * TNFA minimization - might make TDFA generation faster
 * TDFA minimization - combine equivalent states
 * More efficient searching:
+  - If regex starts with a single character, use memchr
+  - If regex starts with a literal, use memmem for initial guess/skip
+  - In a state where we match something like .*literal or .*char we can skip
+    with memchr/memmem
   - Fancy: something with the start-of-match tag - "abandon" states where the
     start of match tag is already set but would be moved forward. Prototype in
     SimulateTNFA, then see if the logic can be ported to the TDFA construction?
@@ -76,11 +84,8 @@
     state and can look for e.g. ".*re".
     This seemed to be a bit slower though. I think because there's no support
     for non-greedy .* and returning shortest instead of longest match.
-
-* Don't use start/end tags for anchored regexes
-  On a higher level than regex compilation - by replacing tag references with
-  0/end of string in substrings, the tags will end up unused and the regular
-  optimizations apply.
+* Do more with memmem - e.g. precalculate tables and constants, check for
+  string search algorithms with more expensive precalculation.
 
 ### Done
 
