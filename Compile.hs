@@ -205,7 +205,7 @@ setString t (IR.STrans from to s) =
 setString t (IR.SAppend []) = fun "clear_string" [string t]
 setString t (IR.SAppend (x:xs))
     | x == IR.SVarRef t = appendInPlace t xs
-    | x `elem` xs = error "Unsafe self-append"
+    | IR.SVarRef t `elem` xs = error ("Unsafe self-append: " ++ show t ++ " += " ++ show (x:xs))
     | otherwise = setString t x <> appendInPlace t xs
 setString t e@(IR.SSubstring _ _ _) =
   sfun "clear_string" [string t] <> appendExpr t e
