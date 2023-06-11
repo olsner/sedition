@@ -43,7 +43,9 @@ mapRename new old
 transferM :: MVar -> MatchExpr -> LiveMatchFact -> LiveMatchFact
 transferM t (Match _ _) = mapDelete t
 -- We have a separate pass that removes all resolvable LastRegex references,
--- but if that fails we'll just skip this optimization pass for the program.
+-- but if that "fails" (i.e. the sed program actually uses dynamic LastRegex
+-- references that we can't optimize away), we'll just skip this optimization
+-- pass for the program.
 -- See Optimize.hs.
 transferM _ (MatchLastRE _) = error "Can't optimize LiveMatch with MatchLastRE"
 transferM t (NextMatch m _) = mapSetInsert m endOfMatch . mapRename m t

@@ -48,8 +48,12 @@ typedef struct string string;
 
 #define MAXGROUP 9
 #define MAXTAGS (2 * (MAXGROUP + 1))
-typedef ptrdiff_t tags_t[MAXTAGS];
-typedef bool regex_match_fun_t(tags_t, string*, size_t);
+struct match_t {
+    ptrdiff_t tags[MAXTAGS];
+};
+typedef struct match_t match_t;
+typedef match_t* tags_t;
+typedef bool regex_match_fun_t(match_t*, string*, size_t);
 typedef regex_t re_t;
 
 static int lineNumber;
@@ -301,8 +305,8 @@ static void free_regexp(regex_t* re)
 }
 
 static void compare_regexp_matches(
-        bool ref_match, tags_t ref,
-        bool match, tags_t m,
+        bool ref_match, match_t* ref,
+        bool match, match_t* m,
         string* s, size_t offset,
         const char *function, const char *original_re)
 {
@@ -315,10 +319,11 @@ static void compare_regexp_matches(
         diff = true;
     } else if (ref_match) {  // Only compare groups on match
         for (int i = 0; i < MAXTAGS; i += 2) {
-            if (ref[i] != m[i] || ref[i + 1] != m[i + 1]) {
+            if (ref->tags[i] != m->tags[i] || ref->tags[i + 1] != m->tags[i + 1]) {
                 fprintf(stderr, "%s: group %d should be %td..%td, not %td..%td\n",
                         function, i / 2,
-                        ref[i], ref[i + 1], m[i], m[i + 1]);
+                        ref->tags[i], ref->tags[i + 1],
+                        m->tags[i], m->tags[i + 1]);
                 diff = true;
             }
         }
@@ -356,19 +361,19 @@ static void enable_stats_on_sigint() {
 #endif
 }
 
-static void clear_match(tags_t m)
+static void clear_match(match_t* m)
 {
     // Since regexec seems to set all unused matches to -1, do the same for
     // compare_regexp_matches.
-    memset(m, 0xff, sizeof(tags_t));
+    memset(&m->tags, 0xff, sizeof(m->tags));
 }
 
-static void copy_match(tags_t dst, tags_t src)
+static void copy_match(match_t* dst, match_t* src)
 {
-    memcpy(dst, src, sizeof(tags_t));
+    memcpy(dst, src, sizeof(match_t));
 }
 
-static bool match_regexp(tags_t m, string* s, size_t offset, re_t* regex)
+static bool match_regexp(match_t* m, string* s, size_t offset, re_t* regex)
 {
     // Stop matching when we've consumed the whole string, but allow a zero
     // length match if it comes first?
@@ -390,24 +395,24 @@ static bool match_regexp(tags_t m, string* s, size_t offset, re_t* regex)
         abort();
     }
     for (int i = 0; i <= MAXGROUP; i++) {
-        m[2 * i + 0] = tmp_matches[i].rm_so;
-        m[2 * i + 1] = tmp_matches[i].rm_eo;
+        m->tags[2 * i + 0] = tmp_matches[i].rm_so;
+        m->tags[2 * i + 1] = tmp_matches[i].rm_eo;
     }
     return res == 0;
 }
 
-static bool next_match(tags_t dst, tags_t src, regex_match_fun_t fun, string* s)
+static bool next_match(match_t* dst, match_t* src, regex_match_fun_t fun, string* s)
 {
-    size_t offset = src[1];
+    size_t offset = src->tags[1];
     // Try to handle regexpes that match the empty string. We should try every
     // position and also try at the end of the string.
-    if (src[0] == offset && offset < s->len) {
+    if (src->tags[0] == offset && offset < s->len) {
         offset++;
     }
     return fun(dst, s, offset);
 }
 
-static void print_match(bool res, tags_t m, string* s)
+static void print_match(bool res, match_t* m, string* s)
 {
     if (!res) {
         printf("\"%.*s\": NO MATCH\n", (int)s->len, s->buf);
@@ -415,15 +420,15 @@ static void print_match(bool res, tags_t m, string* s)
     }
     printf("\"%.*s\" MATCHED:\n", (int)s->len, s->buf);
     for (int i = 0; i < MAXTAGS; i += 2) {
-        if (i == 0 || (m[i] >= 0 && m[i + 1] >= 0)) {
-            printf("\t%d: %td..%td\n", i / 2, m[i], m[i + 1]);
-            if (m[i] > m[i + 1]) {
+        if (i == 0 || (m->tags[i] >= 0 && m->tags[i + 1] >= 0)) {
+            printf("\t%d: %td..%td\n", i / 2, m->tags[i], m->tags[i + 1]);
+            if (m->tags[i] > m->tags[i + 1]) {
                 printf("ERROR! starts after end?\n");
             }
-            if (m[i] > s->len) {
+            if (m->tags[i] > s->len) {
                 printf("ERROR! match starts outside string?\n");
             }
-            if (m[i + 1] > s->len) {
+            if (m->tags[i + 1] > s->len) {
                 printf("ERROR! match ends outside string?\n");
             }
         }

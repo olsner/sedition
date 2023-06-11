@@ -36,7 +36,7 @@ yydebug fmt args = sfun "YYDEBUG" (fmt : args)
 tagix (T t) = intDec t
 possibleTag (T t) = t < 20
 
-matchFromTag (t,val) | possibleTag t = stmt ("m[" <> tagix t <> "] = " <> tagValue val)
+matchFromTag (t,val) | possibleTag t = stmt ("m->tags[" <> tagix t <> "] = " <> tagValue val)
                      | otherwise = trace "found an unoptimized tag that can't be used by match" mempty -- skip all impossible tags
 
 debugTag t = yydebug ("\"match[" <> tagix t <> "] = %td\\n\"") ["m[" <> tagix t <> "]"]
@@ -60,10 +60,10 @@ emitCases (cs, label) = foldMap emitCase cs <> gotoL label
 
 -- Calling convention for matcher functions:
 -- 
--- static bool FUN(tags_t* m, string* s, const size_t orig_offset)
+-- static bool FUN(match_t* m, string* s, const size_t orig_offset)
 -- struct string { char* buf; size_t len; size_t alloc; };
 -- typedef ptrdiff_t tags_t[20]
--- where regmatch_t has rm_so and rm_eo, corresponding to the even/odd tag
+-- where match_t has an array of tags (with 20 entries)
 -- orig_offset is > 0 when repeating a match for a global replace
 --
 -- Tags are "tX" (offsets in string), registers are "rX" (pointers in string).

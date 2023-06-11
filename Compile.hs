@@ -40,7 +40,7 @@ programHeader ofile program =
     -- with local variables might not apply anyway.) Other variables are local
     -- to allow the C compiler more freedom.
     foldMap (declare "string" stringvar) strings <>
-    foldMap (declare "tags_t" match) matches <>
+    foldMap (declare "match_t" match) matches <>
     foldMap (declare "regex_match_fun_t*" matchfun) matches <>
     foldMap (init "bool" pred "false") preds <>
     foldMap (init "FILE*" infd "NULL") files <>
@@ -97,7 +97,7 @@ string (IR.SVar s) = "&S" <> intDec s
 stringvar (IR.SVar s) = "S" <> intDec s
 pred (IR.Pred p) = "P" <> intDec p
 match (IR.MVar m) = "M" <> intDec m
-matchref (IR.MVar m) = "M" <> intDec m
+matchref (IR.MVar m) = "&M" <> intDec m
 matchfun (IR.MVar m) = "MF" <> intDec m
 mpred (IR.MVar m) = "MP" <> intDec m
 infd i = "inF" <> idIntDec i
@@ -245,8 +245,8 @@ resolveStringIndex s ix = case ix of
   IR.SIGroupStart m i -> groupStart m i
   IR.SIGroupEnd m i -> groupEnd m i
   where
-    groupStart m i = match m <> "[" <> intDec (2 * i) <> "]"
-    groupEnd m i = match m <> "[" <> intDec (2 * i + 1) <> "]"
+    groupStart m i = match m <> ".tags[" <> intDec (2 * i) <> "]"
+    groupEnd m i = match m <> ".tags[" <> intDec (2 * i + 1) <> "]"
 
 testCompare = False
 
@@ -271,7 +271,7 @@ compileRE r@IR.RE{..} = wrapper body
     res = C.pack $ Regex.reString re
     wrapper b =
         "NOINLINE static bool " <> regexfun r <>
-            "(tags_t m, string* s, const size_t orig_offset) {\n" <>
+            "(match_t* m, string* s, const size_t orig_offset) {\n" <>
         comment description <>
         comment ("Used tags: " <> showB reUsedTags) <>
         "bool result = false;\n" <> b <> "return result;\n}\n"
@@ -279,8 +279,8 @@ compileRE r@IR.RE{..} = wrapper body
     -- regcomp is run at start of main so we just need to forward the arguments.
     regexec = stmt ("result = " <> match "m")
     match_for_compare =
-        stmt "tags_t m2" <>
-        sfun "clear_tags" ["m2"] <>
+        stmt "match_t m2" <>
+        sfun "clear_match" ["&m2"] <>
         stmt ("const bool result2 = " <> match "&m2")
     compare_matches = sfun "compare_regexp_matches" ["result2", "&m2", "result", "m", "s", "orig_offset", "__PRETTY_FUNCTION__", cstring res]
 
