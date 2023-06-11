@@ -45,6 +45,7 @@ executable sedition
     other-modules:    Parser AST Bus IR
                       Collections
                       Optimize
+                      Optimize.AnchoredMatch
                       Optimize.ConstPred
                       Optimize.RedundantBranches
                       Optimize.LivePred

@@ -4,7 +4,10 @@ module Regex.Regex (
     parseString, parseOnly,
     Regex(..),
     reString,
-    tdfa2cCompatible
+    tdfa2cCompatible,
+    anchoredAtStart,
+    anchoredAtEnd,
+    canMatch
     ) where
 
 import Control.Applicative
@@ -212,6 +215,39 @@ hasBackrefs (Concat rs)     = or (map hasBackrefs rs)
 hasBackrefs (Or rs)         = or (map hasBackrefs rs)
 hasBackrefs (BackRef _)     = True
 hasBackrefs _               = False
+
+-- Doesn't currently need to look inside composite regexes, since it's only
+-- used by anchoredAtEnd. Could be more sophisticated since there are infinite
+-- ways to write a regex that matches anything. Perhaps this could be done in
+-- the TNFA or TDFA stage to unify some of the ways?
+matchesAnyForever (Repeat 0 Nothing Any) = True
+matchesAnyForever _ = False
+
+-- Anchored at start. Includes starts-with-wildcard because the longest-match
+-- rule means that something like .*foo will match up until the *last* foo.
+anchoredAtStart AnchorStart = True
+anchoredAtStart (Group re)  = anchoredAtStart re
+-- TODO Handle repeats and concatenations where we *eventually* get to an
+-- anchored regexp after matching zero characters. e.g. (^)+ matches at least
+-- one anchor, .*^foo matches ^foo after a silly zero-length match, but (^)*
+-- might not require the anchor to match. For now, only look at the very
+-- start in the simplest way.
+anchoredAtStart (Concat xs) = anchoredAtStart (head xs)
+anchoredAtStart (Or xs)     = all anchoredAtStart xs
+anchoredAtStart re          = matchesAnyForever re
+
+-- Anchored at the end, *or* ends with a wildcard match (in all branches).
+anchoredAtEnd AnchorEnd   = True
+anchoredAtEnd (Group re)  = anchoredAtEnd re
+-- TODO Handle repeats and concatenations similarly to ^ above, but backwards.
+anchoredAtEnd (Concat xs) = anchoredAtEnd (last xs)
+anchoredAtEnd (Or xs)     = all anchoredAtEnd xs
+anchoredAtEnd re          = matchesAnyForever re
+
+-- Look for impossibilities, like anchors after something must have consumed
+-- characters.
+canMatch :: Regex -> Bool
+canMatch _ = True
 
 tdfa2cCompatible re = not (hasBackrefs re)
 

@@ -13,6 +13,7 @@ import Optimize.LivePred (livePredPass)
 import Optimize.LiveString (liveStringPass)
 --import Optimize.SameString (sameStringPass)
 import Optimize.RedundantBranches (redundantBranchesPass)
+import Optimize.AnchoredMatch (anchoredMatchPass)
 import Optimize.LiveMatch (liveMatchPass, canApplyLiveMatch)
 import Optimize.LiveLastRegex (liveLastRegexPass, constLastRegexPass)
 
@@ -54,6 +55,8 @@ optimizeOnce entry program = do
     analyzeAndRewriteFwd constLastRegexPass entries program mapEmpty
   program <- tracePass "liveLastRegex" $
     analyzeAndRewriteBwd liveLastRegexPass entries program mapEmpty
+  program <- tracePass "anchoredMatch" $
+    analyzeAndRewriteFwd anchoredMatchPass entries program mapEmpty
   program <-
     if canApplyLiveMatch program
       then tracePass "liveMatch" $

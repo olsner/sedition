@@ -101,6 +101,7 @@ liveMatch = deepBwdRw rw
           then replace [SetM m (Match s re{ reUsedTags = used })]
           else return Nothing
       | otherwise = remove
+    rw (SetM m _) f | Nothing <- mapLookup m f = remove
     rw _ _ = return Nothing
 
 interesting (SetM _ _) = True

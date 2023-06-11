@@ -40,10 +40,6 @@
 
 ## "Advanced"
 
-* Use knowledge of regex to eliminate useless next-match calls
-  - anchored at start: can't match again
-  - anchored at end: first match will contain the end of the string
-  - matches any suffix / ends with .*: first match will match all
 * Track matched regexes until pattern space changes, check for equivalent
   regexes as well as impossible matches.
 * Combine multiple regexes into a "switch" thing whenever there are multiple
@@ -51,15 +47,12 @@
 
 ## String operations
 
-- Optimize out concatenation of empty strings
 - Deduplicate substrings in substitutions
-- If we have explict append sequences, find adjacent substrings, e.g. in
-  `s/.../\1\2\3bar/` you can use a single substring including the prefix of the
-  string up to the end of \3, instead of splitting it up before appending.
 - Optimize out IsEmptyString used by case conversion
   Perhaps only practical on literals?
   Optimizing on regex submatches in general would be useful, but requires more
   information about the parsed regex to figure out the length of a group.
+- Optimize out concatenation of empty strings
 - Precalculate length of append lists to avoid repeated reallocs
 
 ## Regex
@@ -71,6 +64,7 @@
      they are not mentioned and have no transitions?)
 * Recognize literals and emit special code (or at least make TNFA/TDFA stuff
   faster - the madding gnused test is quite slow)
+  - Start with whole regex being a literal?
 * TNFA minimization - might make TDFA generation faster
 * TDFA minimization - combine equivalent states
 * More efficient searching:
@@ -97,6 +91,11 @@
   - Split up state entry point to have one without range check
   - When transitioning to a state with a lower minLength, skip check
   - Precalculate minLength and store in TDFA
+* Use knowledge of regex to eliminate useless next-match calls
+  - anchored at start: can't match again
+  - anchored at end: first match will contain the end of the string
+  - matches any suffix / ends with .*: first match will match all
+  - also when matching any prefix
 
 ### Abandoned
 
