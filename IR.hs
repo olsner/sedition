@@ -806,12 +806,11 @@ tSubst m s sub flags = case flags of
     mnext <- emitMatch (NextMatch m s)
 
     ss <- tSubs m s initCState sub
-    s1 <- tConcat (SVarRef sres:ss)
 
     hasNextMatch <- finishBlock' (If (IsMatch mnext) hasNextMatch lastMatch)
 
     let mid = SSubstring s (SIMatchEnd m) (SIMatchStart mnext)
-    setString sres (SAppend [SVarRef s1, mid])
+    setString sres (SAppend (SVarRef sres:ss ++ [mid]))
     -- TODO Last instance of copy_match, figure out how to remove. E.g.
     -- duplicate the match code so we can leave the next match in m before
     -- looping?
@@ -820,7 +819,7 @@ tSubst m s sub flags = case flags of
     lastMatch <- emitBranch' loop
 
     let suffix = SSubstring s (SIMatchEnd m) SIEnd
-    setString sres (SAppend [SVarRef s1, suffix])
+    setString sres (SAppend (SVarRef sres:ss ++ [suffix]))
 
     return sres
 
