@@ -8,14 +8,14 @@ module Regex.SimulateTNFA where
 import Control.Applicative
 
 import Data.List (find, intercalate, sort)
-import Data.Map (Map)
+-- import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Set (Set)
 import qualified Data.Set as S
 
 import Debug.Trace
 
-import Regex.TaggedRegex
+import Regex.TaggedRegex hiding (Term(..))
 import Regex.TNFA
 
 testTNFASimulation :: String -> String -> Maybe TagMap

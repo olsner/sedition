@@ -23,8 +23,8 @@ import Data.Either (partitionEithers)
 
 import qualified CharMap as CM
 import CharMap (CharMap)
-import Regex.TaggedRegex hiding (Prio)
-import Regex.TNFA (genTNFA, TNFA(..))
+import Regex.TaggedRegex hiding (Term(..))
+import Regex.TNFA (genTNFA, TNFA(..), TNFATrans(..), Tag(..))
 import qualified Regex.TNFA as TNFA
 import Regex.SimulateTNFA (matchTerm)
 

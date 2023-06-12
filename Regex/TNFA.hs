@@ -14,7 +14,26 @@ import qualified Data.Set as S
 
 -- import Debug.Trace
 
-import Regex.TaggedRegex
+import Regex.TaggedRegex hiding (Term(..))
+import qualified Regex.TaggedRegex as TR
+
+newtype Prio = P Int deriving (Show, Ord, Eq)
+
+data Tag = NoTag | UnTag TagId | Tag TagId deriving (Ord, Eq)
+instance Show Tag where
+  show NoTag = "e"
+  show (Tag (T x)) = 't' : show x
+  show (UnTag (T x)) = '-' : 't' : show x
+
+data TNFATrans
+  = BOL
+  | Any
+  | EOL
+  | Symbol Char
+  | CClass [Char]
+  | CNotClass [Char]
+  | Eps Prio Tag
+  deriving (Show, Ord, Eq)
 
 newtype StateId = S Int deriving (Ord, Eq)
 instance Show StateId where
@@ -25,6 +44,14 @@ symbolTrans (Eps _ _) = False
 symbolTrans BOL = False
 symbolTrans EOL = True -- symbol in TDFA, epsilon in SimulateTNFA
 symbolTrans _ = True
+
+tnfaTransFromTerm TR.BOL = BOL
+tnfaTransFromTerm TR.Any = Any
+tnfaTransFromTerm TR.EOL = EOL
+tnfaTransFromTerm (TR.Symbol c) = Symbol c
+tnfaTransFromTerm (TR.CClass cs) = CClass cs
+tnfaTransFromTerm (TR.CNotClass cs) = CNotClass cs
+tnfaTransFromTerm (TR.Literal s) = error "Need to expand literals before here!"
 
 data TNFA = TNFA {
     tnfaStartState :: StateId,
@@ -116,7 +143,11 @@ nfa :: StateId -> TaggedRegex -> GenTNFA NFA
 nfa finalState re =
   case re of
     Empty -> return (NFA finalState finalState [])
-    Term term -> trans term finalState
+    TR.Term (TR.Literal []) -> return (NFA finalState finalState [])
+    TR.Term (TR.Literal (x:xs)) ->
+      nfa finalState (Cat (TR.Term (TR.Symbol x))
+                          (TR.Term (TR.Literal xs)))
+    TR.Term term -> trans (tnfaTransFromTerm term) finalState
     TagTerm t -> tag finalState (P 1) t
     Cat x y -> do
       q2 <- nfa finalState y

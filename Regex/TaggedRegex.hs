@@ -20,34 +20,23 @@ import qualified Data.Map as M
 import Regex.Regex (Regex)
 import qualified Regex.Regex as Regex
 
-newtype Prio = P Int deriving (Show, Ord, Eq)
-
 newtype TagId = T Int deriving (Ord, Eq)
 instance Show TagId where
   show (T x) = 't' : show x
-data Tag = NoTag | UnTag TagId | Tag TagId deriving (Ord, Eq)
-instance Show Tag where
-  show NoTag = "e"
-  show (Tag (T x)) = 't' : show x
-  show (UnTag (T x)) = '-' : 't' : show x
 
--- Convenient for the TNFA conversion, but the Eps transition is not used here.
--- Wouldn't be too much work to translate in TNFA and have distinct types...
--- We may want to keep literal in TaggedRegex too, and TNFA should probably
--- not have that.
-data TNFATrans
+data Term
   = BOL
   | Any
   | EOL
   | Symbol Char
+  | Literal String
   | CClass [Char]
   | CNotClass [Char]
-  | Eps Prio Tag
   deriving (Show, Ord, Eq)
 
 data TaggedRegex
   = Empty
-  | Term TNFATrans
+  | Term Term
   | TagTerm TagId
   | Cat TaggedRegex TaggedRegex
   | Or TaggedRegex TaggedRegex
@@ -61,6 +50,7 @@ instance Show TaggedRegex where
   show (Term EOL) = "$"
   show (Term (Symbol c)) | c `elem` Regex.ereSpecialChars = ['\\', c]
                          | otherwise = [c]
+  show (Term (Literal s)) = show s
   show (Term t) = "(" ++ show t ++ ")"
   show (TagTerm t) = show t
   show (Cat x y) = concatMap show $ catList (Cat x y)
@@ -108,8 +98,8 @@ tagRegex re = evalState (go (Regex.Group re)) 0
   where
     go Regex.Empty = return Empty
     go Regex.Any = return (Term Any)
-    go (Regex.Literal xs) = return (foldr1 cat (map (Term . Symbol) xs))
     go (Regex.Char c) = return (Term (Symbol c))
+    go (Regex.Literal s) = return (Term (Literal s))
     go (Regex.CClass cs) = return (Term (CClass cs))
     go (Regex.CNotClass cs) = return (Term (CNotClass cs))
     go Regex.AnchorStart = return (Term BOL)
@@ -174,6 +164,7 @@ fixedTags t d k = go
     go (Term EOL) | Nothing <- t =
         return (Just (EndOfMatch 0), Just 0, k)
     go (Term EOL) = return (t, d, k)
+    go (Term (Literal s)) = return (t, (+ length s) <$> d, (+ length s) <$> k)
     go (Term _) = return (t, succ <$> d, succ <$> k)
     go (Or x y) = do
       (_,_,k1) <- fixedTags Nothing Nothing (Just 0) x
