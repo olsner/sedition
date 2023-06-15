@@ -7,6 +7,7 @@ module Regex.TNFA where
 
 import Control.Monad.Trans.State.Strict
 
+import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
 import Data.Set (Set)
@@ -51,12 +52,12 @@ tnfaTransFromTerm TR.EOL = EOL
 tnfaTransFromTerm (TR.Symbol c) = Symbol c
 tnfaTransFromTerm (TR.CClass cs) = CClass cs
 tnfaTransFromTerm (TR.CNotClass cs) = CNotClass cs
-tnfaTransFromTerm (TR.Literal s) = error "Need to expand literals before here!"
+tnfaTransFromTerm (TR.Literal _) = error "Need to expand literals before here!"
 
 data TNFA = TNFA {
     tnfaStartState :: StateId,
     tnfaFinalState :: StateId,
-    tnfaTrans :: [(StateId, TNFATrans, StateId)],
+    tnfaTrans :: Map StateId [(TNFATrans, StateId)],
     -- TODO This is just attached after construction. We want to bundle it for
     -- following steps, but maybe that means the construction should stop using
     -- the same data type?
@@ -75,10 +76,10 @@ data NFA = NFA { nfaStartState :: StateId, nfaFinalState :: StateId,
            deriving (Show, Ord, Eq)
 
 allTags :: TNFA -> Set TagId
-allTags TNFA{..} = S.fromList (mapMaybe tag tnfaTrans)
+allTags TNFA{..} = S.fromList (concatMap (mapMaybe tag) (M.elems tnfaTrans))
   where
-    tag (_,Eps _ (Tag t),_) = Just t
-    tag (_,Eps _ (UnTag t),_) = Just t
+    tag (Eps _ (Tag t),_) = Just t
+    tag (Eps _ (UnTag t),_) = Just t
     tag _ = Nothing
 
 instance Semigroup NFA where
@@ -181,7 +182,7 @@ genTNFA :: (TaggedRegex, FixedTagMap) -> TNFA
 genTNFA (re, m) = TNFA {
     tnfaStartState = nfaStartState,
     tnfaFinalState = nfaFinalState,
-    tnfaTrans = nfaTrans,
+    tnfaTrans = multiMapFromList [(s,(t,p)) | (s,t,p) <- nfaTrans],
     tnfaTagMap = m,
     tnfaClosedStates = closedStates }
   where
@@ -189,13 +190,18 @@ genTNFA (re, m) = TNFA {
     closedStates = S.insert nfaFinalState $
         S.fromList [s | (s,t,_) <- nfaTrans, symbolTrans t]
 
+multiMapFromList :: Ord a => [(a,b)] -> Map a [b]
+multiMapFromList ts = foldr prepend M.empty ts
+  where
+    prepend (s,t) m = M.insert s (t : M.findWithDefault [] s m) m
+
 tnfaStates TNFA{..} = go S.empty [tnfaStartState]
   where
     go seen (s:ss)
         | not (S.member s seen) = s : go (S.insert s seen) (ss ++ nextStates s)
         | otherwise = go seen ss
     go _ [] = []
-    nextStates s = [p | (q,_,p) <- tnfaTrans, q == s]
+    nextStates s = [p | (_,p) <- M.findWithDefault [] s tnfaTrans]
 
 -- Test functions
 
@@ -208,7 +214,7 @@ prettyStates tnfa@TNFA{..} = foldMap showState ss <> fixedTags <> "\n"
     showHeader s | s == tnfaFinalState = "FINAL " ++ show s ++ ":\n"
     showHeader s = "State " ++ show s ++ ":\n"
     showTrans s = concat ["  " ++ show t ++ " => " ++ show p ++ "\n"
-                            | (q,t,p) <- tnfaTrans, q == s]
+                            | (t,p) <- M.findWithDefault [] s tnfaTrans]
     fixedTags | M.null tnfaTagMap = "(No fixed tags)"
               | otherwise = "Fixed tags:\n" ++
         concat [ "  " ++ show t ++ " <- " ++ show ft ++ "\n"

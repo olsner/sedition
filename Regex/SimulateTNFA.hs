@@ -73,9 +73,10 @@ matchTerm BOL _ = False
 matchTerm EOL _ = False
 
 stepOnSymbol :: TNFA -> ConfigMap -> Char -> ConfigMap
-stepOnSymbol tnfa c x = [(p, m) | (s,m) <- c,
-                                  (q,a,p) <- tnfaTrans tnfa,
-                                  s == q, matchTerm a x]
+stepOnSymbol TNFA{..} c x =
+  [(p, m) | (s,m) <- c,
+            (a,p) <- M.findWithDefault [] s tnfaTrans,
+            matchTerm a x]
 
 -- Depth-first search of the epsilon closure(s) of incoming states. Intuitively
 -- this is because of priority - we visit the highest-priority states first and
@@ -88,7 +89,7 @@ epsilonClosure TNFA{..} c k eol = go c S.empty []
     go [] _ c = possibleStates c
     go ((q,m):xs) added c = go (ys ++ xs) (S.insert q added) (c ++ [(q,m)])
       where
-        epsts = sort [(prio,t,p) | (s,Eps prio t,p) <- tnfaTrans, s == q]
+        epsts = sort [(prio,t,p) | (Eps prio t,p) <- transFrom q]
         ys = [ (p,m') | (_,t,p) <- epsts,
                         not (S.member p added),
                         let !m' = updateTag t m ] ++
@@ -96,9 +97,10 @@ epsilonClosure TNFA{..} c k eol = go c S.empty []
         updateTag (Tag t) m = M.insert t k m
         updateTag (UnTag t) m = M.delete t m
         updateTag NoTag m = m
-        anchors = [p | eol, (s,EOL,p) <- tnfaTrans, s == q] ++
-                  [p | bol, (s,BOL,p) <- tnfaTrans, s == q]
+        anchors = [p | eol, (EOL,p) <- transFrom q] ++
+                  [p | bol, (BOL,p) <- transFrom q]
     possibleStates = filter ((`S.member` tnfaClosedStates) . fst)
+    transFrom s = M.findWithDefault [] s tnfaTrans
 
 finalState :: TNFA -> Int -> ConfigMap -> FinalState
 finalState TNFA{..} k = ((k,) <$> snd <$>) . find (\(q,_) -> q == tnfaFinalState)

@@ -75,13 +75,15 @@ type Closure = [(Prio, Map TagId RegId, History, History)]
 type StateClosure = [(Prio, Map TagId RegId, History)]
 
 type TDFAState = (StateClosure, Prec)
+type MapStateKey = (Prec, Set (Prio, History))
 
 -- State for determinization process
 data DetState = DetState {
   tags :: Set TagId,
   finalRegisters :: Map TagId RegId,
-  revStateMap :: Map TDFAState StateId,
   stateMap :: Map StateId TDFAState,
+  revStateMap :: Map TDFAState StateId,
+  mappableStateMap :: Map MapStateKey (Set StateId),
   transitions :: [(StateId, (Char, (StateId, RegOps)))],
   eolTransitions :: [(StateId, RegOps)],
   tagRHSMap :: Map (TagId,RegRHS) RegId,
@@ -94,8 +96,9 @@ initState :: TNFA -> DetState
 initState tnfa = DetState {
     tags = tags,
     finalRegisters = M.fromList (zip (S.toList tags) (map R [0..])),
-    revStateMap = M.empty,
     stateMap = M.empty,
+    revStateMap = M.empty,
+    mappableStateMap = M.empty,
     transitions = [],
     eolTransitions = [],
     tagRHSMap = M.empty,
@@ -116,7 +119,12 @@ setState :: StateId -> (StateClosure, Prec) -> GenTDFA ()
 setState k v =
     modify (\s@DetState{..} -> s {
         stateMap = M.insert k v stateMap,
-        revStateMap = M.insert v k revStateMap })
+        revStateMap = M.insert v k revStateMap,
+        mappableStateMap = M.insertWith S.union (stateMapKey v) (S.singleton k) mappableStateMap })
+
+stateMapKey :: TDFAState -> MapStateKey
+stateMapKey (s,p) = (p, S.fromList (map fst substates))
+  where substates = map (\(q,r,h) -> ((q,h),r)) s
 
 getState :: StateId -> GenTDFA TDFAState
 getState k = gets (fromJust . M.lookup k . stateMap)
@@ -223,8 +231,7 @@ bijectionRemove x (fwd, rev)
 -- from 'u' to 't'. 'u' has the same tag/register mappings as before, 's' will
 -- not exist and 't' is not modified.
 mapState :: Set TagId -> RegOps -> TDFAState -> TDFAState -> Maybe RegOps
-mapState allTags ops (s,p) (t,q)
-    | statesMappable, p == q = do
+mapState allTags ops (s,_) (t,_) = do
         -- trace ("mappable?\n   " ++ show (s,p) ++ "\n<> " ++ show (t,q)
         --        ++ " | " ++ show ops) $ return ()
         subMappings <- mappedRegs
@@ -235,12 +242,10 @@ mapState allTags ops (s,p) (t,q)
         let ops' = topo_sort (copyOps copyMappings ++ adjustOps (bijectionFwd allMappings))
         --trace ("Mapped ops: " ++ show ops ++ " -> " ++ show ops') $ return ()
         return ops'
-    | otherwise = Nothing
   where
     substates = M.fromList . map (\(q,r,h) -> ((q,h),r))
     s_regs = substates s
     t_regs = substates t
-    statesMappable = M.keysSet s_regs == M.keysSet t_regs
     mappedRegs = M.elems <$> unionWithMaybe mapRegs s_regs t_regs
     mapRegs :: (Prio, History) -> Map TagId RegId -> Map TagId RegId -> Maybe (Bijection RegId)
     mapRegs k xs ys = mapTags (unsetTags k) xs ys
@@ -278,12 +283,17 @@ maybeHead [] = Nothing
 
 findMapState :: TDFAState -> RegOps -> GenTDFA (Maybe (StateId, RegOps))
 findMapState new ops = do
-  states <- gets (M.toList . stateMap)
   allTags <- gets tags
-  return (maybeHead (mapMaybe (tryMapState allTags) states))
+  mappableStates <- gets (M.lookup (stateMapKey new) . mappableStateMap)
+  case mappableStates of
+    Nothing -> return Nothing
+    Just stateIds -> do
+      states <- mapM (\i -> (i,) <$> getState i) (S.toList stateIds)
+      return (maybeHead (mapMaybe (tryMapState allTags) states))
   where
     tryMapState allTags (id, s) = do
       (id,) <$> mapState allTags ops new s
+
 
 -- 1. Find exact match and return existing state id
 -- 2. Look through all states to find mappable state
@@ -326,14 +336,16 @@ epsilonClosure bol TNFA{..} = possibleStates . go S.empty []
     go _     c []               = reverse c
     go added c (s@(q,r,h,l):xs) = go (S.insert q added) (s:c) (ys ++ xs)
       where
-        epst = sort [(prio,t,p) | (s,Eps prio t,p) <- tnfaTrans, s == q]
+        epst = sort [(prio,t,p) | (Eps prio t,p) <- transFrom q]
         ys = [ (p,r,h,appendHistory l t) | (_,t,p) <- epst,
                                            not (S.member p added) ]
              ++ [ (p,r,h,l) | p <- anchors, not (S.member p added) ]
         eol = False -- Should this really be handled here?
-        anchors = [p | eol, (s,EOL,p) <- tnfaTrans, s == q] ++
-                  [p | bol, (s,BOL,p) <- tnfaTrans, s == q]
+        anchors = [p | eol, (EOL,p) <- transFrom q] ++
+                  [p | bol, (BOL,p) <- transFrom q]
+
     possibleStates = filter (\(q,_,_,_) -> q `S.member` tnfaClosedStates)
+    transFrom s = M.findWithDefault [] s tnfaTrans
 
 
 forEachTag :: (TagId -> GenTDFA a) -> GenTDFA [a]
@@ -358,8 +370,9 @@ visitStates tnfa ss = do
   newStates <- concatMapM (visitState tnfa) ss
   visitStates tnfa newStates
 
-nextSymbols :: TNFA -> Set TNFA.StateId -> [Char]
-nextSymbols TNFA{..} s = collectSymbols [t | (q,t,_) <- tnfaTrans, S.member q s]
+nextSymbols :: TNFA -> [TNFA.StateId] -> [Char]
+nextSymbols TNFA{..} qs =
+  collectSymbols [t | q <- qs, (t,_) <- M.findWithDefault [] q tnfaTrans ]
 
 collectSymbols :: [TNFATrans] -> [Char]
 collectSymbols ts = S.toList . S.unions $ map chars ts
@@ -408,7 +421,7 @@ visitState tnfa s = do
     -- trace ("visitState " ++ show s) $ return ()
     (clos, prec) <- getState s
     prevStates <- gets (M.keysSet . stateMap)
-    let as = nextSymbols tnfa (S.fromList [q | (q,_,_) <- clos])
+    let as = nextSymbols tnfa [q | (q,_,_) <- clos]
     ss <- forM as $ \a -> do
         (c', o) <- addStateForReach tnfa (stepOnSymbol tnfa prec a clos)
         (s', o) <- addState c' o
@@ -442,17 +455,18 @@ stepOnSymbol :: TNFA -> Prec -> Char -> StateClosure -> Closure
 stepOnSymbol TNFA{..} prec c clos = go (sortByPrec prec clos)
   where
     go [] = []
-    go ((q,r,l):xs) = [(p,r,l,emptyHistory) | (_,_,p) <- transitions q] ++ go xs
-    transitions q = filter (isTransition q) tnfaTrans
-    isTransition q (q', t, _) = q == q' && matchTerm t c
+    go ((q,r,l):xs) = [(p,r,l,emptyHistory) | (_,p) <- transitions q] ++ go xs
+    transitions q = filter isTransition (M.findWithDefault [] q tnfaTrans)
+    isTransition (t, _) = matchTerm t c
 
 stepOnEOL :: TNFA -> Prec -> StateClosure -> Closure
 stepOnEOL TNFA{..} prec clos = go (sortByPrec prec clos)
   where
     go [] = []
-    go ((q,r,l):xs) = [(p,r,l,emptyHistory) | (_,_,p) <- transitions q] ++ go xs
-    transitions q = filter (isTransition q) tnfaTrans
-    isTransition q (q', t, _) = q == q' && t == EOL
+    go ((q,r,l):xs) = [(p,r,l,emptyHistory) | (_,p) <- transitions q] ++ go xs
+    transitions q = filter isTransition (M.findWithDefault [] q tnfaTrans)
+    isTransition (EOL, _) = True
+    isTransition _ = False
 
 finalRegOps tnfa s = do
   (state,_) <- getState s
@@ -593,13 +607,15 @@ multiMapFromList ts = foldr prepend M.empty ts
 genTDFA :: TNFA -> TDFA
 genTDFA tnfa = evalState (determinize tnfa) (initState tnfa)
 
+-- TODO Cache in TDFA struct
 tdfaStates :: TDFA -> [StateId]
-tdfaStates tdfa@TDFA{..} = go S.empty [tdfaStartState, tdfaStartStateNotBOL]
+tdfaStates tdfa@TDFA{..} = go S.empty (S.fromList [tdfaStartState, tdfaStartStateNotBOL])
   where
-    go seen (s:ss)
-      | not (S.member s seen) = s : go (S.insert s seen) (ss ++ nextStates tdfa s)
-      | otherwise = go seen ss
-    go _ [] = []
+    go seen todo
+      | S.null todo = S.toList seen
+      | (s, todo') <- S.deleteFindMin todo =
+        go (S.insert s seen) (S.union todo' (newTodo s))
+      where newTodo s = S.fromList (nextStates tdfa s) `S.difference` seen
 
 nextStates TDFA{..} s = map fst (CM.elems (getTrans s))
   where
@@ -692,24 +708,21 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
 -- Minimum length to an accepting state. If there aren't this many characters
 -- left in the string it cannot match from here.
 minLengths :: TDFA -> Map StateId Int
-minLengths tdfa@TDFA{..} = go ss (M.map (const 0) (tdfaFinalFunction `M.union` tdfaEOL `M.union` tdfaFallbackFunction)) True
+minLengths tdfa@TDFA{..} = go' M.empty 0 (M.keysSet (tdfaFinalFunction `M.union` tdfaEOL `M.union` tdfaFallbackFunction))
   where
-    -- Iterate until there are no new states added. Any remaining unadded
-    -- states are failed states. (We should have something for that as well...
-    -- No use matching when there are no paths to success.)
-    go []     known False = known
-    go []     known True = go ss known False
-    go (x:xs) known added | x `M.member` known = go xs known added
-                          | done = go xs known' True
-                          | otherwise = go xs known added
+    -- States in "new" are newly discovered states at distance "dist" from a
+    -- final state. Start at dist = 0 with the final states, than increase
+    -- distance by one and add all previous states (that we haven't already
+    -- seen).
+    go' res dist new | S.null new = res
+                     | otherwise  = go' res' (dist + 1) new'
       where
-        ts = nextStates tdfa x
-        done = not (null dists)
-        dists = catMaybes [M.lookup t known | t <- ts]
-        minDist = 1 + minimum dists
-        known' | null dists = known
-               | otherwise  = M.insert x minDist known
-    ss = tdfaStates tdfa
+        res' = res `M.union` M.fromSet (const dist) new
+        new' = S.unions (map ps (S.toList new)) `S.difference` M.keysSet res'
+        ps s = M.findWithDefault S.empty s allPrevStates
+
+    ss = S.fromList (tdfaStates tdfa)
+    allPrevStates = M.map S.fromList $ multiMapFromList [(next, prev) | prev <- S.toList ss, next <- nextStates tdfa prev]
 
 testTDFA :: String -> IO ()
 testTDFA = putStr . prettyStates . genTDFA . genTNFA . testTagRegex
