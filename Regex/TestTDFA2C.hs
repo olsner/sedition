@@ -30,10 +30,8 @@ import GenC
 
 doSimulateTDFA tdfa s = print (runTDFA True tdfa s)
 
-tdfa2c = genC . fst . optimize 10000 . genIR
-
-compileTDFA tdfa output = C.writeFile output . toByteString $
-    programHeader output <> tdfa2c tdfa <> programFooter
+compileIR ir output = C.writeFile output . toByteString $
+    programHeader output <> genC ir <> programFooter
 
 -- TODO Add flags to control gcc optimization/debug settings.
 compileC cFile exeFile defines =
@@ -83,11 +81,14 @@ data Options = Options
   , dumpParse :: Bool
   , dumpTNFA :: Bool
   , dumpTDFA :: Bool
+  , dumpIRPre :: Bool
+  , dumpIR :: Bool
   , timeIt :: Bool
   , runIt :: Bool
   , compileIt :: Bool
   , defines :: [String]
   , strings :: [String]
+  , fuel :: Int
   } deriving (Show, Eq)
 defaultOptions = Options
     { extendedRegexps = False
@@ -96,15 +97,19 @@ defaultOptions = Options
     , dumpParse = False
     , dumpTNFA = False
     , dumpTDFA = False
+    , dumpIRPre = False
+    , dumpIR = False
     , timeIt = False
     , runIt = True
     , compileIt = False
+    , fuel = 100000
     , defines = []
     , strings = [] }
 addString s o = o { strings = s : strings o }
 setCOutputFile f o = o { cOutputFile = f }
 setExeOutputFile f o = o { exeOutputFile = f }
 addDefine f o = o { defines = f : defines o }
+setFuel f o = o { fuel = f }
 
 tdfa2cOptions =
   [ Option ['r', 'E'] ["regexp-extended"] (NoArg $ \o -> o { extendedRegexps = True }) "Use extended regexps"
@@ -113,9 +118,12 @@ tdfa2cOptions =
   , Option [] ["dump-parse"] (NoArg $ \o -> o { dumpParse = True }) "parse and print the parsed regex"
   , Option [] ["dump-tnfa"] (NoArg $ \o -> o { dumpTNFA = True }) "show the TNFA state machine"
   , Option [] ["dump-tdfa"] (NoArg $ \o -> o { dumpTDFA = True }) "show the TDFA state machine"
+  , Option [] ["dump-ir-pre"] (NoArg $ \o -> o { dumpIRPre = True }) "show the unoptimized intermediate representation"
+  , Option [] ["dump-ir"] (NoArg $ \o -> o { dumpIR = True }) "show the optimized intermediate representation"
   , Option ['o'] ["c-output"] (ReqArg setCOutputFile "C_FILE") "Path to compiled C output file."
   , Option ['x'] ["exe"] (ReqArg setExeOutputFile "EXEC_FILE") "Path to compiled executable."
   , Option ['D'] [] (ReqArg addDefine "MACRO") "Add macro to C compilation"
+  , Option ['O'] ["opt-fuel"] (ReqArg (setFuel . read) "FUEL") "override amount of optimization fuel for optimizations. -O0 to disable optimizations."
   ]
 
 do_main args = do
@@ -130,7 +138,7 @@ do_main args = do
 
   tStartParse <- timestamp
   let re = fixTags . tagRegex . parseString extendedRegexps . C.pack $ regex
-  tEndParse <- re `seq` timestamp
+  tEndParse <- length (show re) `seq` timestamp
 
   when dumpParse $ do
     hPrint stderr re
@@ -138,7 +146,7 @@ do_main args = do
 
   tStartTNFA <- timestamp
   let tnfa = genTNFA re
-  tEndTNFA <- tnfa `seq` timestamp
+  tEndTNFA <- length (show tnfa) `seq` timestamp
 
   when dumpTNFA $ do
       hPutStrLn stderr (TNFA.prettyStates tnfa)
@@ -146,7 +154,7 @@ do_main args = do
 
   tStartTDFA <- timestamp
   let tdfa = genTDFA tnfa
-  tEndTDFA <- tdfa `seq` timestamp
+  tEndTDFA <- length (show tdfa) `seq` timestamp
 
   when dumpTDFA $ do
       hPutStr stderr (TDFA.prettyStates tdfa)
@@ -156,18 +164,31 @@ do_main args = do
     reportTime "TNFA" tStartTNFA tEndTNFA
     reportTime "TDFA" tStartTDFA tEndTDFA
 
-  -- TODO Always go from TDFA to IR and optimize (with control of fuel), then
-  -- either use RunIR or compile it to C.
-  -- TODO Also add pre- and post-opt dumps of IR.
-
   when (dumpTDFA || dumpTNFA) exitSuccess
 
-  -- TODO Add dumpIR and dumpC options
+  tStartGen <- timestamp
+  let ir = genIR tdfa
+  when dumpIRPre $ do
+    hPrint stderr ir
+  tEndGen <- show ir `seq` timestamp
+
+  tStartOpt <- timestamp
+  let (optimized, fuelRemaining) = optimize fuel ir
+  when dumpIR $ do
+    hPrint stderr optimized
+    hPutStrLn stderr (show fuelRemaining ++ " fuel remaining")
+  tEndOpt <- show optimized `seq` timestamp
+
+  when timeIt $ do
+    reportTime "Generate IR" tStartGen tEndGen
+    reportTime "Optimize IR" tStartOpt tEndOpt
+
+  when (dumpIRPre || dumpIR) exitSuccess
 
   flip catch exitWith $ do
     when compileIt $ do
       tCompileStart <- timestamp
-      compileTDFA tdfa cOutputFile
+      compileIR optimized cOutputFile
       tCompileEnd <- timestamp
 
       when timeIt $ do
