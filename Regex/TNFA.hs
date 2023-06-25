@@ -1,4 +1,4 @@
-{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE RecordWildCards,RecursiveDo #-}
 
 -- Based on https://arxiv.org/pdf/2206.01398.pdf, "A Closer Look at TDFA"
 -- Conversion of tagged regex to Tagged Non-Deterministic Finite Automata.
@@ -96,7 +96,7 @@ type GenTNFA a = State Int a
 ntags :: StateId -> NFA -> GenTNFA NFA
 ntags finalState nfa = go (nfaTrans nfa)
   where
-    go []     = return (NFA finalState finalState [])
+    go []     = return (emptyNFA finalState)
     go ((_,Eps p (Tag tag),_):xs) = do
         q2 <- go xs
         q1 <- trans (Eps p (UnTag tag)) (nfaStartState q2)
@@ -140,40 +140,43 @@ orNFA finalState x y = do
           eps s0 (nfaStartState q1') (P 2) <>
           qN)
 
+emptyNFA :: StateId -> NFA
+emptyNFA s = NFA s s []
+
 nfa :: StateId -> TaggedRegex -> GenTNFA NFA
 nfa finalState re =
   case re of
-    Empty -> return (NFA finalState finalState [])
-    TR.Term (TR.Literal []) -> return (NFA finalState finalState [])
+    Empty -> return (emptyNFA finalState)
+    TR.Term (TR.Literal []) -> return (emptyNFA finalState)
     TR.Term (TR.Literal (x:xs)) ->
       nfa finalState (Cat (TR.Term (TR.Symbol x))
                           (TR.Term (TR.Literal xs)))
     TR.Term term -> trans (tnfaTransFromTerm term) finalState
     TagTerm t -> tag finalState (P 1) t
-    Cat x y -> do
-      q2 <- nfa finalState y
+    Cat x y -> mdo
       q1 <- nfa (nfaStartState q2) x
+      q2 <- nfa finalState y
       return (q1 <> q2)
     (Or x y) -> orNFA finalState x y
-    (Repeat 0 m x) -> do
+    (Repeat 0 m x) -> mdo
         m1@(NFA q1 _ _) <- nfa finalState (Repeat 1 m x)
         m1'@(NFA q1' _ _) <- ntags finalState m1
         q0 <- newState
         return (eps q0 q1 (P 1) <> eps q0 q1' (P 2) <> m1' <> m1)
-    (Repeat 1 Nothing x) -> do
-        q1 <- newState
+    (Repeat 1 Nothing x) -> mdo
         m1@(NFA q0 _ _) <- nfa q1 x
+        q1 <- newState
         return (m1 <> eps q1 q0 (P 1) <> eps q1 finalState (P 2))
     (Repeat 1 (Just 1) x) -> nfa finalState x
-    (Repeat 1 (Just m) x) -> do
-        m2@(NFA q1 _ _) <- nfa finalState (Repeat 1 (Just (pred m)) x)
+    (Repeat 1 (Just m) x) -> mdo
         m1@(NFA _ q2 _) <- nfa q1 x
+        m2@(NFA q1 _ _) <- nfa finalState (Repeat 1 (Just (pred m)) x)
         return (m1 <> m2 <>
                 eps q1 q2 (P 2) <>
                 eps q1 finalState (P 1))
-    (Repeat n m x) -> do
-        q2 <- nfa finalState (Repeat (pred n) (pred <$> m) x)
+    (Repeat n m x) -> mdo
         q1 <- nfa (nfaStartState q2) x
+        q2 <- nfa finalState (Repeat (pred n) (pred <$> m) x)
         return (q1 <> q2)
 
 -- API?
@@ -186,7 +189,7 @@ genTNFA (re, m) = TNFA {
     tnfaTagMap = m,
     tnfaClosedStates = closedStates }
   where
-    NFA{..} = evalState (nfa (S 0) re) 1
+    NFA{..} = evalState (mdo { m <- nfa f re ; f <- newState; return m }) 0
     closedStates = S.insert nfaFinalState $
         S.fromList [s | (s,t,_) <- nfaTrans, symbolTrans t]
 

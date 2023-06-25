@@ -1,6 +1,7 @@
 {-# LANGUAGE GADTs #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE ScopedTypeVariables, RankNTypes #-}
 
 module Regex.CompileIR where
 
@@ -93,7 +94,7 @@ genC program@Program{..} =
     blockComment "Jump to entry point" <>
     gotoL entryPoint <>
     blockComment "Basic blocks" <>
-    foldGraphNodes foldEmitInsn programGraph mempty <>
+    postOrderFoldGraphNodes foldEmitInsn program mempty <>
     blockComment "Exit point" <>
     label "end" <>
     sfun "YYSTATS" ["matched", "result"] <>
@@ -116,6 +117,13 @@ isCompatible = Regex.tdfa2cCompatible
 
 testTDFA2C :: String -> IO ()
 testTDFA2C = C.putStrLn . tdfa2c Nothing . Regex.parseString True . C.pack
+
+postOrderFoldGraphNodes ::
+  forall a . Monoid a => (forall e x . Insn e x -> a -> a) -> Program -> a -> a
+postOrderFoldGraphNodes f Program{..} e = foldMap f' (postorder_dfs g) e
+  where g = mkLast (Branch entryPoint) H.|*><*| programGraph
+        f' :: Block Insn e x -> IndexedCO e a a -> IndexedCO x a a
+        f' = foldBlockNodesF f
 
 foldEmitInsn :: Insn e x -> Builder -> Builder
 foldEmitInsn insn = (<> emitInsn insn)

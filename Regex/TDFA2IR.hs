@@ -118,8 +118,10 @@ mkSwitch table def | CM.isComplete table = TotalSwitch table
 
 emitState :: TDFA -> StateId -> IRM ()
 emitState TDFA{..} s = mdo
-  matchL <- gets matchLabel
+  body <- labelBlock (debug ("state " ++ show s) H.<*> yystats "visited_chars" 1 H.<*> switch)
+  switch <- emitTrans nocheckStates trans defaultLabel
 
+  matchL <- gets matchLabel
   fallbackLabel <- labelBlock (fallbackRegOps matchL)
   eolLabel <- labelBlock (eolRegOps matchL)
   entryLabel <- getLabel (s, Checked)
@@ -139,8 +141,6 @@ emitState TDFA{..} s = mdo
                                      goto matchL)
                     else return failLabel
   failLabel <- labelBlock (debug ("default-transition from non-final " ++ show s) H.<*> gofail)
-  switch <- emitTrans nocheckStates trans defaultLabel
-  body <- labelBlock (debug ("state " ++ show s) H.<*> yystats "visited_chars" 1 H.<*> switch)
   return ()
   where
     trans = M.findWithDefault CM.empty s tdfaTrans
@@ -176,19 +176,19 @@ emitState TDFA{..} s = mdo
 
 emitIR :: TDFA -> IRM Program
 emitIR tdfa@TDFA{..} = mdo
-  setMatchLabel matchLabel
+  entry <- labelBlock (mkMiddles [SaveCursor, SetFallback failLabel] H.<*>
+    mkLast (IfBOL startLabelBOL startNotBOL))
 
-  mapM_ (emitState tdfa) (tdfaStates tdfa)
-  matchLabel <- labelBlock (mkLast (Match finalTagRegMap))
+  setMatchLabel matchLabel
 
   startLabelNotBOL <- getLabel (tdfaStartStateNotBOL, Checked)
   startLabelBOL <- getLabel (tdfaStartState, Checked)
 
+  mapM_ (emitState tdfa) (tdfaStates tdfa)
+  matchLabel <- labelBlock (mkLast (Match finalTagRegMap))
+
   let startNotBOL | onlyMatchAtBOL = justFail
                   | otherwise      = startLabelNotBOL
-
-  entry <- labelBlock (mkMiddles [SaveCursor, SetFallback failLabel] H.<*>
-    mkLast (IfBOL startLabelBOL startNotBOL))
 
   -- We get here if we reach the original fallback, i.e. we reach a state where
   -- it's impossible to match the rest of the string.
