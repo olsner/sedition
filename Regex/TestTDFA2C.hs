@@ -20,6 +20,7 @@ import Text.Printf
 
 import Regex.Regex (parseString)
 import Regex.SimulateTDFA
+import Regex.SimulateTNFA
 import Regex.TaggedRegex
 import Regex.TNFA as TNFA
 import Regex.TDFA as TDFA
@@ -29,6 +30,8 @@ import Regex.OptimizeIR (optimize)
 import GenC
 
 doSimulateTDFA tdfa s = print (runTDFA True tdfa s)
+
+doSimulateTNFA tnfa s = print (tnfaMatch tnfa s)
 
 compileIR ir output = C.writeFile output . toByteString $
     programHeader output <> genC ir <> programFooter
@@ -70,8 +73,6 @@ reportTime :: String -> UTCTime -> UTCTime -> IO ()
 reportTime label start end = do
     hPutStrLn stderr (printf "%32s %.3fs" label (realToFrac (diffUTCTime end start) :: Double))
 
--- TODO And option to run a match with TNFA instead of TDFA
--- (running without -c currently enables TDFA)
 -- TODO Add option to "validate": run TNFA, TDFA *and* C compiled output,
 -- verify that they all give the same results on the set of input strings.
 data Options = Options
@@ -86,6 +87,7 @@ data Options = Options
   , timeIt :: Bool
   , runIt :: Bool
   , compileIt :: Bool
+  , runTNFA :: Bool
   , defines :: [String]
   , strings :: [String]
   , fuel :: Int
@@ -102,6 +104,7 @@ defaultOptions = Options
     , timeIt = False
     , runIt = True
     , compileIt = False
+    , runTNFA = False
     , fuel = 100000
     , defines = []
     , strings = [] }
@@ -115,6 +118,7 @@ tdfa2cOptions =
   [ Option ['r', 'E'] ["regexp-extended"] (NoArg $ \o -> o { extendedRegexps = True }) "Use extended regexps"
   , Option ['t'] ["time"] (NoArg $ \o -> o { timeIt = True }) "Time optimization and execution of the program"
   , Option ['c'] ["compile"] (NoArg $ \o -> o { compileIt = True }) "Compile the regex to C code, compile and run it to match strings (if given)"
+  , Option ['n'] ["run-tnfa"] (NoArg $ \o -> o { runTNFA = True }) "match using TNFA"
   , Option [] ["dump-parse"] (NoArg $ \o -> o { dumpParse = True }) "parse and print the parsed regex"
   , Option [] ["dump-tnfa"] (NoArg $ \o -> o { dumpTNFA = True }) "show the TNFA state machine"
   , Option [] ["dump-tdfa"] (NoArg $ \o -> o { dumpTDFA = True }) "show the TDFA state machine"
@@ -151,6 +155,10 @@ do_main args = do
   when dumpTNFA $ do
       hPutStrLn stderr (TNFA.prettyStates tnfa)
       when (not dumpTDFA) exitSuccess
+
+  when runTNFA $ do
+    mapM_ (doSimulateTNFA tnfa) strings
+    exitSuccess
 
   tStartTDFA <- timestamp
   let tdfa = genTDFA tnfa
