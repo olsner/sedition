@@ -49,7 +49,7 @@ tagValue (EndOfMatch 0) = "YYPOS"
 tagValue (EndOfMatch d) = "YYPOS - " <> intDec d
 
 declareReg :: R -> Builder
-declareReg r = stmt ("const char* " <> showB r <> " = NULL")
+declareReg r = stmt ("const uint8_t* " <> showB r <> " = NULL")
 
 emitCase :: (Char,Char) -> Builder
 emitCase (lb,ub)
@@ -75,21 +75,23 @@ emitCases (cs, label) = foldMap emitCase cs <> gotoL label
 --
 -- The variable 'bool result' should be set to the success (true = match) of
 -- the regexp search.
+--
+-- Note use of uint8_t for pointers, this is necessary to get the correct
+-- behavior for characters above 128 (and e.g. ranges like 0..255).
 genC :: Program -> Builder
 genC program@Program{..} =
     stmt ("YYDEBUG(\"Starting match at %zu (of %zu)\\n\", orig_offset, s->len)") <>
-    stmt ("const char *const YYBEGIN = s->buf") <>
-    stmt ("const char *const YYLIMIT = s->buf + s->len") <>
+    stmt ("const uint8_t *const YYBEGIN = s->buf") <>
+    stmt ("const uint8_t *const YYLIMIT = s->buf + s->len") <>
     sfun "YYSTATS" ["matched_chars", "s->len - orig_offset"] <>
     "#define YYPOS (YYCURSOR - YYBEGIN)\n" <>
     "#define YYEOF (YYCURSOR >= YYLIMIT)\n" <>
     "#define YYREMAINING (YYLIMIT - YYCURSOR)\n" <>
-    "#define YYGET() (*YYCURSOR)\n" <>
+    "#define YYGET(offs) (YYCURSOR[offs])\n" <>
     "#define YYNEXT() (YYCURSOR++)\n" <>
-    stmt ("const char *YYCURSOR = s->buf + orig_offset") <>
-    stmt ("unsigned char YYCHAR = 0") <>
+    stmt ("const uint8_t *YYCURSOR = s->buf + orig_offset") <>
     stmt ("void *fallback_label = NULL") <>
-    stmt ("const char *fallback_cursor = NULL") <>
+    stmt ("const uint8_t *fallback_cursor = NULL") <>
     foldMap declareReg allRegs <>
     blockComment "Jump to entry point" <>
     gotoL entryPoint <>
@@ -134,14 +136,11 @@ emitInsn (Label l) = label (show l)
 -- O C control flow
 emitInsn (IfBOL tl fl) = cIf "YYCURSOR == YYBEGIN" (gotoL tl) (gotoL fl)
 emitInsn (Switch cm def) =
-    -- TODO Ensure this doesn't to duplicate reads from memory. I think we
-    -- generally only match once per YYNEXT though. Passing through YYCHAR
-    -- gives us a cast to unsigned char along the way.
-    "switch (YYCHAR = YYGET()) {\n" <>
+    "switch (YYGET(0)) {\n" <>
     foldMap emitCases (CM.toRanges cm) <>
     " default: " <> gotoL def <> "}\n"
 emitInsn (TotalSwitch cm) =
-    "switch (YYCHAR = YYGET()) {\n" <>
+    "switch (YYGET(0)) {\n" <>
     foldMap emitCases (CM.toRanges cm) <>
     "}\n"
 emitInsn Fail = goto "end"
