@@ -159,9 +159,9 @@ nfa finalState re =
       return (q1 <> q2)
     (Or x y) -> orNFA finalState x y
     (Repeat 0 m x) -> mdo
+        q0 <- newState
         m1@(NFA q1 _ _) <- nfa finalState (Repeat 1 m x)
         m1'@(NFA q1' _ _) <- ntags finalState m1
-        q0 <- newState
         return (eps q0 q1 (P 1) <> eps q0 q1' (P 2) <> m1' <> m1)
     (Repeat 1 Nothing x) -> mdo
         m1@(NFA q0 _ _) <- nfa q1 x
