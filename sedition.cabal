@@ -23,7 +23,7 @@ source-repository head
 common lang
     default-language: Haskell2010
     build-depends:    base ^>=4.15.0.0
-    ghc-options:      -O2
+    ghc-options:      -O2 -rtsopts
 
 common deps
     build-depends:    bytestring, utf8-string,
