@@ -88,6 +88,7 @@ data Options = Options
   , runIt :: Bool
   , compileIt :: Bool
   , runTNFA :: Bool
+  , noTags :: Bool
   , defines :: [String]
   , strings :: [String]
   , fuel :: Int
@@ -105,6 +106,7 @@ defaultOptions = Options
     , runIt = True
     , compileIt = False
     , runTNFA = False
+    , noTags = False
     , fuel = 100000
     , defines = []
     , strings = [] }
@@ -128,6 +130,7 @@ tdfa2cOptions =
   , Option ['x'] ["exe"] (ReqArg setExeOutputFile "EXEC_FILE") "Path to compiled executable."
   , Option ['D'] [] (ReqArg addDefine "MACRO") "Add macro to C compilation"
   , Option ['O'] ["opt-fuel"] (ReqArg (setFuel . read) "FUEL") "override amount of optimization fuel for optimizations. -O0 to disable optimizations."
+  , Option ['T'] ["no-tags"] (NoArg $ \o -> o { noTags = True }) "Don't emit tags"
   ]
 
 do_main args = do
@@ -141,7 +144,8 @@ do_main args = do
   let regex:strings = nonOpts
 
   tStartParse <- timestamp
-  let re = fixTags . tagRegex . parseString extendedRegexps . C.pack $ regex
+  let filterTags = selectTags (const (not noTags))
+  let re = fixTags . filterTags . tagRegex . parseString extendedRegexps . C.pack $ regex
   tEndParse <- length (show re) `seq` timestamp
 
   when dumpParse $ do
