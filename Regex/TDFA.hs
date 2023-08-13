@@ -97,11 +97,8 @@ data DetState = DetState {
   stateMap :: Map StateId TDFAState,
   revStateMap :: Map TDFAState StateId,
   mappableStateMap :: Map MapStateKey (Set StateId),
-  -- Use Map for these three... And defaultTransitions can be added directly
-  -- in transitions, I think.
-  transitions :: [(StateId, (Char, TDFATrans))],
-  eolTransitions :: [(StateId, RegOps)],
-  defaultTransitions :: [(StateId, TDFATrans)],
+  transitions :: Map StateId TDFATransTable,
+  eolTransitions :: Map StateId RegOps,
   tagRHSMap :: Map (TagId,RegRHS) RegId,
   nextState :: Int,
   nextReg :: Int
@@ -115,9 +112,8 @@ initState tnfa = DetState {
     stateMap = M.empty,
     revStateMap = M.empty,
     mappableStateMap = M.empty,
-    transitions = [],
-    eolTransitions = [],
-    defaultTransitions = [],
+    transitions = M.empty,
+    eolTransitions = M.empty,
     tagRHSMap = M.empty,
     nextState = 0,
     nextReg = succ (S.size tags) }
@@ -160,15 +156,17 @@ clearTagRHSMap = modify (\s -> s { tagRHSMap = M.empty })
 
 emitTransition :: StateId -> Char -> StateId -> RegOps -> GenTDFA ()
 emitTransition q c p o = do
-    modify (\state@DetState{..} -> state{ transitions = (q, (c, (p,o))) : transitions })
+    modify (\state@DetState{..} -> state{ transitions =
+      M.insertWith CM.union q (CM.singleton c (p,o)) transitions })
 
 emitEOLTransition :: StateId -> RegOps -> GenTDFA ()
 emitEOLTransition q o = do
-    modify (\state@DetState{..} -> state{ eolTransitions = (q, o) : eolTransitions })
+    modify (\state@DetState{..} -> state { eolTransitions = M.insert q o eolTransitions })
 
 emitDefaultTransition :: StateId -> StateId -> RegOps -> GenTDFA ()
 emitDefaultTransition q p o = do
-    modify (\state@DetState{..} -> state{ defaultTransitions = (q, (p, o)) : defaultTransitions })
+    modify (\state@DetState{..} -> state{ transitions =
+      M.insertWith (flip CM.union) q (CM.const (p, o)) transitions })
 
 type History = Map TagId RegVal
 
@@ -577,7 +575,7 @@ finalRegOps' r l = do
 fallbackStates :: Set StateId -> DetState -> Map StateId (Set RegId)
 fallbackStates finalStates s = defaultable
   where
-    ts = M.map CM.fromList . multiMapFromList . transitions $ s
+    ts = transitions s
     defaultable :: Map StateId (Set RegId)
     defaultable = go M.empty (zip statesWithDefaultTransitions (repeat S.empty))
     go :: Map StateId (Set RegId) -> [(StateId, Set RegId)] -> Map StateId (Set RegId)
@@ -612,8 +610,8 @@ fallbackStates finalStates s = defaultable
 -- redundant register operations on outgoing edges from final states. Which
 -- can be significant if there are many possibly-final states to pass through
 -- before reaching the last one.
-fallbackRegOps :: Map StateId RegOps -> Map StateId (Set RegId) -> Map StateId TDFATransTable -> StateId -> ((StateId, RegOps), Map (StateId, StateId) RegOps)
-fallbackRegOps finRegOpsMap clobbered ts s = ((s, fallback), M.fromList additionalOps)
+fallbackRegOps :: Map StateId RegOps -> Map StateId (Set RegId) -> Map StateId TDFATransTable -> StateId -> ((StateId, RegOps), (StateId, TDFATransTable))
+fallbackRegOps finRegOpsMap clobbered ts s = ((s, fallback), (s, additionalOps))
   where
     clobberedRegs = M.findWithDefault S.empty s clobbered
     finRegOps = M.findWithDefault [] s finRegOpsMap
@@ -623,15 +621,16 @@ fallbackRegOps finRegOpsMap clobbered ts s = ((s, fallback), M.fromList addition
         _ -> (Left (i, o))
     (fallback, backup) = partitionEithers fallBackups
     additionalOps
-       | null backup = []
-       | otherwise = [((s, s'), backup)
-                      | (s',_) <- CM.elems $ M.findWithDefault CM.empty s ts,
-                        M.member s' clobbered]
+       | null backup = CM.empty
+       | otherwise = CM.fromRanges [(ks, (s', backup ++ ops))
+                                  | (ks, (s', ops)) <- CM.toRanges $
+                                    M.findWithDefault CM.empty s ts,
+                                  M.member s' clobbered]
 
-insertRegOps :: Map (StateId, StateId) RegOps -> [(StateId, (Char, (StateId, RegOps)))] -> [(StateId, (Char, (StateId, RegOps)))]
-insertRegOps m = map $ \(s, (c, (s', o))) -> (s, (c, (s', added s s' ++ o)))
-  where
-   added s s' = M.findWithDefault [] (s,s') m
+-- Insert updated transitions. Unions are left-biased so the updates are the
+-- first argument to this function.
+insertRegOps :: Map StateId TDFATransTable -> Map StateId TDFATransTable -> Map StateId TDFATransTable
+insertRegOps = M.unionWith CM.union
 
 determinize :: TNFA -> GenTDFA TDFA
 determinize tnfa@TNFA{..} = do
@@ -642,9 +641,8 @@ determinize tnfa@TNFA{..} = do
   (s1, _) <- addState state1 []
   visitStates tnfa (S.fromList [s0, s1])
 
-  ts <- gets transitions
+  trans <- gets transitions
   ets <- gets eolTransitions
-  dts <- gets (M.map CM.const . M.fromList . defaultTransitions)
   tagRegMap <- gets (M.map stateRegMap . stateMap)
   stateIdMap <- gets (M.map stateStateIds . stateMap)
   statePrecMap <- gets (M.map tdfaStatePrec . stateMap)
@@ -654,24 +652,18 @@ determinize tnfa@TNFA{..} = do
       finalStateSet = S.fromList finalStates
   finRegOps <- M.fromList <$> forM finalStates (finalRegOps tnfa)
   finRegs <- gets finalRegisters
-  defaultableStates <- gets (fallbackStates finalStateSet)
+  !defaultableStates <- gets (fallbackStates finalStateSet)
   let !fallbackStates = M.restrictKeys defaultableStates finalStateSet
-  let !trans = M.unionWith CM.union (M.map CM.fromList (multiMapFromList ts)) dts
-  let (fb, backups) = unzip $ map (fallbackRegOps finRegOps defaultableStates trans) (M.keys fallbackStates)
-  let !mergedBackups = M.unionsWith (<>) backups
-  -- TODO let this produce trans' from trans instead. default transitions
-  -- should be included.
-  let !ts' = insertRegOps mergedBackups ts
-  let !trans' = M.map CM.fromList (multiMapFromList ts')
-  let !trans'' = M.unionWith CM.union trans' dts
+  let (!fb, !backups) = unzip $ map (fallbackRegOps finRegOps defaultableStates trans) (M.keys fallbackStates)
+  let !trans' = insertRegOps (M.fromList backups) trans
   let tdfa = TDFA {
     tdfaStartState = s0,
     tdfaStartStateNotBOL = s1,
     tdfaFinalRegisters = finRegs,
     tdfaFinalFunction = finRegOps,
     tdfaFallbackFunction = M.fromList fb,
-    tdfaTrans = trans'',
-    tdfaEOL = M.fromList ets,
+    tdfaTrans = trans',
+    tdfaEOL = ets,
     tdfaFixedTags = tnfaTagMap,
     -- Debugging stuff:
     tdfaTagRegMap = tagRegMap,
