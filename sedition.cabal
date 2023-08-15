@@ -59,6 +59,7 @@ executable sedition
                       Regex.TaggedRegex
                       Regex.TNFA
                       Regex.TDFA
+                      Regex.Minimize
                       Regex.TDFA2IR
                       Regex.SimulateTNFA
                       Regex.SimulateTDFA
@@ -100,6 +101,7 @@ executable tdfa2c
                       Regex.TaggedRegex
                       Regex.TNFA
                       Regex.TDFA
+                      Regex.Minimize
                       Regex.SimulateTNFA
                       Regex.SimulateTDFA
                       Regex.IR

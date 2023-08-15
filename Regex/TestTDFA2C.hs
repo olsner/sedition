@@ -24,6 +24,7 @@ import Regex.SimulateTNFA
 import Regex.TaggedRegex
 import Regex.TNFA as TNFA
 import Regex.TDFA as TDFA
+import Regex.Minimize (minimize)
 import Regex.TDFA2IR (genIR)
 import Regex.CompileIR (genC)
 import Regex.OptimizeIR (optimize)
@@ -165,8 +166,17 @@ do_main args = do
     exitSuccess
 
   tStartTDFA <- timestamp
-  let tdfa = genTDFA tnfa
-  tEndTDFA <- length (show tdfa) `seq` timestamp
+  let tdfa1 = genTDFA tnfa
+  tEndTDFA <- length (show tdfa1) `seq` timestamp
+
+  -- TODO Add flag for dumping pre-minimization TDFA.
+  -- when dumpTDFA $ do
+  --     hPutStr stderr (TDFA.prettyStates tdfa)
+
+  tStartMin <- timestamp
+  let tdfa = minimize tdfa1
+  tEndMin <- length (show tdfa) `seq` timestamp
+  hPutStrLn stderr (printf "Minimized from %d to %d states" (length (tdfaStates tdfa1)) (length (tdfaStates tdfa)))
 
   when dumpTDFA $ do
       hPutStr stderr (TDFA.prettyStates tdfa)
@@ -175,6 +185,7 @@ do_main args = do
     reportTime "Parsing" tStartParse tEndParse
     reportTime "TNFA" tStartTNFA tEndTNFA
     reportTime "TDFA" tStartTDFA tEndTDFA
+    reportTime "Minimize" tStartMin tEndMin
 
   when (dumpTDFA || dumpTNFA) exitSuccess
 

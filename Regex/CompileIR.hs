@@ -27,6 +27,7 @@ import Regex.IR as IR
 import Regex.TaggedRegex hiding (EndOfMatch)
 import Regex.TNFA (genTNFA)
 import Regex.TDFA (genTDFA)
+import Regex.Minimize (minimize)
 import Regex.TDFA2IR (genIR)
 import Regex.OptimizeIR (optimize)
 import GenC
@@ -112,6 +113,7 @@ tdfa2c used = toByteString .
     -- a way that lets you bisect both regex and Sed IR optimizations.
     fst . optimize 1000000 .
     genIR .
+    minimize .
     genTDFA .
     genTNFA .
     fixTags .
