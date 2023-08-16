@@ -107,10 +107,17 @@ earlyOut l = sfun "YYSTATS" ["early_out", "1"] <> goto l
 
 tdfa2c :: Maybe IntSet -> Regex -> C.ByteString
 tdfa2c used = toByteString .
+    genC .
     -- TODO Allow controlling optimization fuel here, preferrably integrated in
     -- a way that lets you bisect both regex and Sed IR optimizations.
-    genC . fst . optimize 100000 .
-    genIR . genTDFA . genTNFA . fixTags . makeSearchRegex . unusedTags . tagRegex
+    fst . optimize 1000000 .
+    genIR .
+    genTDFA .
+    genTNFA .
+    fixTags .
+    makeSearchRegex .
+    unusedTags .
+    tagRegex
   where unusedTags | Just s <- used = selectTags (\(T t) -> t `IS.member` s)
                    | otherwise = id
 

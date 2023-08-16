@@ -186,6 +186,8 @@ do_main args = do
 
   tStartOpt <- timestamp
   let (optimized, fuelRemaining) = optimize fuel ir
+  when (fuelRemaining == 0) $
+    hPutStrLn stderr "Warning: Optimization fuel exhausted"
   when dumpIR $ do
     hPrint stderr optimized
     hPutStrLn stderr (show fuelRemaining ++ " fuel remaining")
