@@ -682,8 +682,10 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
     isFinalState s = s `M.member` tdfaFinalFunction
     finalRegOps ops =
         concat ["\n    " ++ show r ++ " <- " ++ show val | (r,val) <- ops] ++
-        concat ["\n    " ++ show t ++ " <- " ++ show r  |
-                 (t,r) <- M.toList tdfaFinalRegisters ] ++ "\n"
+        finalTagRegs
+
+    finalTagRegs = concat ["\n    " ++ show t ++ " <- " ++ show r  |
+                           (t,r) <- M.toList tdfaFinalRegisters ] ++ "\n"
 
     showFinalRegOps s | isFinalState s = "  Final reg ops:" ++ finalRegOps ops
                       | otherwise = ""
@@ -697,7 +699,8 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
       where ops = fromJust $ M.lookup s tdfaFallbackFunction
 
     eolRegOps ops = "  EOL reg ops:" ++
-        concat ["\n    " ++ show r ++ " <- " ++ show val | (r,val) <- ops] ++ "\n"
+        concat ["\n    " ++ show r ++ " <- " ++ show val | (r,val) <- ops] ++
+        finalTagRegs
 
     showEOLRegOps s | Just o <- M.lookup s tdfaEOL = eolRegOps o
                     | otherwise = ""
