@@ -300,5 +300,5 @@ compileRE r@IR.RE{..} = wrapper body
                | otherwise = "Regex2C"
 
 tdfa2c re used =
-    (if testCompare then sfun "clear_tags" ["m"] else mempty) <>
+    (if testCompare then sfun "clear_match" ["m"] else mempty) <>
     byteString (Regex2C.tdfa2c used re)

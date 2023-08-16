@@ -317,7 +317,8 @@ static void compare_regexp_matches(
                 ref_match ? "match" : "not match",
                 match ? "match" : "not");
         diff = true;
-    } else if (ref_match) {  // Only compare groups on match
+    }
+    if (ref_match) {  // Only compare groups on match
         for (int i = 0; i < MAXTAGS; i += 2) {
             if (ref->tags[i] != m->tags[i] || ref->tags[i + 1] != m->tags[i + 1]) {
                 fprintf(stderr, "%s: group %d should be %td..%td, not %td..%td\n",
@@ -333,8 +334,8 @@ static void compare_regexp_matches(
         fprintf(stderr, "%s: on input \"%.*s\"\n",
                 function,
                 (int)(s->len - offset), s->buf + offset);
+        abort();
     }
-    assert(!diff);
 }
 
 static void tdfa2c_statistics() {
