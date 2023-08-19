@@ -55,7 +55,7 @@ runTDFA search TDFA{..} xs =
     go s [] = applyFinalState True s
     go s (x:xs)
       | Just (s',o) <- next s x = applyRegOps o >> incPos >> maybeSetFallback s' >> go' s' xs
-      | otherwise               = trace ("default-transition from " ++ show s) $ applyFinalState False s
+      | otherwise               = trace ("default-transition from " ++ show s ++" on " ++ show x) $ applyFinalState False s
 
     debug = True
 
