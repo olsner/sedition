@@ -44,7 +44,7 @@ uncons (ConfigMap (x:xs)) = Just (x, ConfigMap xs)
 singleton x = ConfigMap [x]
 filterCM f (ConfigMap xs) = ConfigMap (filter f xs)
 elemCM s (ConfigMap xs) = s `elem` map configState xs
-maxGeneration (ConfigMap []) = 0
+maxGeneration (ConfigMap []) = -1
 maxGeneration (ConfigMap xs) = maximum (map configGeneration xs)
 
 instance Semigroup ConfigMap where
@@ -99,19 +99,26 @@ initSimulation tnfa c f k xs = trace simTrace $ simulation tnfa c' f' k xs
 
 simulation :: TNFA -> ConfigMap -> FinalState -> Int -> String -> Maybe TagMap
 simulation tnfa c f k [] = trace simTrace $ finalSimulatedState tnfa f'
-  where cI = reinit tnfa f c
+  where -- TODO Should we really be doing "epsilon closure" here? May be doing
+        -- something around matching EOL since that isn't a "symbol" though.
+        cI = reinit tnfa f c
         c' = epsilonClosure tnfa cI k True
         f' = finalState tnfa k c' <> f
         simTrace = "Ending at " ++ show k ++ ": " ++ showF f ++ " | " ++ showC cI ++ " -> " ++ showC c' ++ " | " ++ showF f'
 simulation tnfa c f k (x:xs)
-  | nullCM cI = trace simTrace $ finalSimulatedState tnfa f
-  | otherwise = trace simTrace $ simulation tnfa c'' f'' (k + 1) xs
-  where cI = reinit tnfa f c
-        c' = epsilonClosure tnfa cI k False
-        f' = finalState tnfa k c' <> f
-        c'' = stepOnSymbol tnfa c' x
-        f'' = finalState tnfa (k + 1) c'' <> f'
-        simTrace = "Continuing at " ++ show k ++ " (" ++ show x ++ "): " ++ showF f ++ " | " ++ showC cI ++ " -> " ++ showC c' ++ " -> " ++ showC c'' ++ " | " ++ showF f''
+  | nullCM c = trace simTrace $ finalSimulatedState tnfa f
+  | otherwise = trace simTrace $ simulation tnfa c3 f3 (k + 1) xs
+  where
+    c1 = stepOnSymbol tnfa c x
+    f1 = finalState tnfa (k + 1) c1 <> f
+
+    c2 = reinit tnfa f c1
+    f2 = finalState tnfa (k + 1) c2 <> f1
+
+    c3 = epsilonClosure tnfa c2 (k + 1) False
+    f3 = finalState tnfa (k + 1) c3 <> f2
+
+    simTrace = "Continuing at " ++ show k ++ " (" ++ show x ++ "): " ++ showF f ++ " | " ++ showC c1 ++ " -> " ++ showC c2 ++ " -> " ++ showC c3 ++ " | " ++ showF f3
 
 matchTerm :: TNFATrans -> Char -> Bool
 matchTerm Any _ = True
