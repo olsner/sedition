@@ -74,6 +74,7 @@ executable sedition
                       Regex.Optimize.RedundantCheckBounds
                       Regex.Optimize.RedundantRestoreCursor
                       Regex.Optimize.SameResult
+                      Regex.Optimize.IdenticalBlocks
                       CharMap RangeMap GenC
 
     build-depends:    hoopl,
@@ -114,6 +115,7 @@ executable tdfa2c
                       Regex.Optimize.RedundantCheckBounds
                       Regex.Optimize.RedundantRestoreCursor
                       Regex.Optimize.SameResult
+                      Regex.Optimize.IdenticalBlocks
                       Collections CharMap RangeMap GenC
                       -- TODO Split out Regex.Collections to avoid AST/IR
                       -- dependency in regex parts.

@@ -8,13 +8,14 @@ import Debug.Trace
 
 import Regex.IR
 
+import Regex.Optimize.IdenticalBlocks (mergeIdenticalBlocks)
+import Regex.Optimize.LiveRegister (liveRegisterPass)
+import Regex.Optimize.LiveSaveCursor (liveSaveCursorPass)
+import Regex.Optimize.LiveSetFallback (liveSetFallbackPass)
+import Regex.Optimize.PossibleFallback (possibleFallbackPass)
 import Regex.Optimize.RedundantBranches (redundantBranchesPass)
 import Regex.Optimize.RedundantCheckBounds (redundantCheckBoundsPass)
-import Regex.Optimize.PossibleFallback (possibleFallbackPass)
-import Regex.Optimize.LiveSetFallback (liveSetFallbackPass)
-import Regex.Optimize.LiveSaveCursor (liveSaveCursorPass)
 import Regex.Optimize.RedundantRestoreCursor (redundantRestoreCursorPass)
-import Regex.Optimize.LiveRegister (liveRegisterPass)
 import Regex.Optimize.SameResult (sameResultPass)
 
 --debugBwd = debugBwdJoins trace (const True)
@@ -40,8 +41,9 @@ tracePass name pass | doTrace = do
   (program,_,_) <- pass
   return program
 
-optimizeOnce :: (CheckpointMonad m, FuelMonad m) => Label -> Graph Insn C C -> m (Graph Insn C C)
+optimizeOnce :: (CheckpointMonad m, FuelMonad m) => Label -> Graph Insn C C -> m (Label, Graph Insn C C)
 optimizeOnce entry program = do
+  (entry,program) <- return (mergeIdenticalBlocks entry program)
   let entries = JustC [entry]
   program <- tracePass "redundantBranches" $
     analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
@@ -59,13 +61,13 @@ optimizeOnce entry program = do
     analyzeAndRewriteFwd redundantCheckBoundsPass entries program mapEmpty
   program <- tracePass "sameResult" $
     analyzeAndRewriteBwd sameResultPass entries program mapEmpty
-  return program
+  return (entry, program)
 
 optToFix f entry original = do
   oldFuel <- fuelRemaining
   -- If we've already ran out of fuel, the optimizations will run but do
   -- nothing, which we'll consider a fixpoint since oldFuel == newFuel == 0.
-  optimized <- f entry original
+  (entry, optimized) <- f entry original
   newFuel <- fuelRemaining
   -- Ugly workaround, but compare the optimized text program to see if
   -- optimization changed something.

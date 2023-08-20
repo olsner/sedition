@@ -72,6 +72,7 @@ data Insn e x where
 
 deriving instance Show (Insn e x)
 deriving instance Eq (Insn e x)
+deriving instance Ord (Insn e x)
 
 showInsn (Label l) = show l ++ ":"
 showInsn i = "  " ++ show i
