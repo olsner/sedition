@@ -14,6 +14,7 @@ import qualified Data.ByteString.Char8 as C
 import Data.Time
 
 import System.Console.GetOpt
+import System.Directory (removeFile)
 import System.Environment
 import System.Exit
 import System.IO
@@ -26,6 +27,7 @@ import Text.Printf (printf)
 
 import AST
 import Compile
+import qualified EmitAsm
 import Interpret (runProgram, inputListFile)
 import Parser
 import IR (toIR, Program)
@@ -37,6 +39,7 @@ data Options = Options
   , enableIPC :: Bool
   , scripts :: [Either S FilePath]
   , cOutputFile :: FilePath
+  , sOutputFile :: FilePath
   , exeOutputFile :: FilePath
   , dumpParse :: Bool
   , dumpOptimizedIR :: Bool
@@ -44,6 +47,8 @@ data Options = Options
   , timeIt :: Bool
   , runIt :: Bool
   , compileIt :: Bool
+  , assembleIt :: Bool
+  , linkIt :: Bool
   , fuel :: Int
   , defines :: [String]
   } deriving (Show, Eq)
@@ -53,6 +58,7 @@ defaultOptions = Options
     , enableIPC = True
     , scripts = []
     , cOutputFile = "out.c"
+    , sOutputFile = "out.asm"
     , exeOutputFile = "a.out"
     , dumpParse = False
     , dumpOptimizedIR = False
@@ -60,12 +66,14 @@ defaultOptions = Options
     , timeIt = False
     , runIt = True
     , compileIt = False
+    , assembleIt = False
+    , linkIt = False
     , fuel = 1000000
     , defines = [] }
 addScript s o = o { scripts = Left (C.pack s) : scripts o }
 addScriptFile f o = o { scripts = Right f : scripts o }
-setCOutputFile f o = o { cOutputFile = f }
-setExeOutputFile f o = o { exeOutputFile = f }
+setCOutputFile f o = o { cOutputFile = f, sOutputFile = f }
+setExeOutputFile f o = o { exeOutputFile = f, linkIt = True }
 setFuel f o = o { fuel = f }
 addDefine f o = o { defines = f : defines o }
 
@@ -84,6 +92,7 @@ sedOptions =
   -- , Option [] ["sandbox"] (NoArg Sandbox) "operate in sandbox mode (unimplemented GNU sed feature)"
   , Option ['t'] ["time"] (NoArg $ \o -> o { timeIt = True }) "Time optimization and execution of the program"
   , Option ['c'] ["compile"] (NoArg $ \o -> o { runIt = False, compileIt = True }) "Don't run the program, compile it to C code instead."
+  , Option ['S'] ["assemble"] (NoArg $ \o -> o { runIt = False, assembleIt = True }) "Don't run the program, compile it to assembly instead."
   , Option [] ["run"] (NoArg $ \o -> o { runIt = True }) "Compile and run."
   , Option ['o'] ["c-output"] (ReqArg setCOutputFile "C_FILE") "Path to compiled C output file."
   , Option [] ["exe"] (ReqArg setExeOutputFile "EXEC_FILE") "Path to compiled executable."
@@ -109,9 +118,37 @@ compileProgram ipc (label, program) ofile = do
     let compiled = compileIR ofile ipc label program
     C.writeFile ofile compiled
 
+system :: String -> [String] -> IO ()
+system cmd args = do
+  res <- rawSystem cmd args
+  case res of
+    ExitSuccess -> return ()
+    _ -> throw res
+
 -- TODO Add flags to control gcc optimization/debug settings.
 compileC cFile exeFile defines =
     rawSystem "cc" (["-O2", cFile, "-o", exeFile] ++ map ("-D"++) defines)
+
+compileToAsm :: Bool -> (H.Label, Program) -> FilePath -> IO ()
+compileToAsm ipc (label, program) sfile =
+    C.writeFile sfile (EmitAsm.compileIR ipc label program)
+
+withTempFile ext work = do
+  (path,h) <- openTempFile "/tmp" ("sedition" ++ ext)
+  hClose h
+  finally (work path) (removeFile path)
+
+assemble sFile exeFile defines =
+    withTempFile ".s" $ \stdSFile ->
+    withTempFile ".o" $ \oFile ->
+    withTempFile ".o" $ \stdOFile -> do
+      -- TODO Could do the mangling/compilation of sedition.h here instead of
+      -- compiling to assembly in the Makefile.
+      C.writeFile stdSFile EmitAsm.seditionRuntime
+      system "cc" ["-c", stdSFile, "-o", stdOFile]
+      let yasmFlags = ["-gdwarf2", "-felf64"] ++ map ("-D"++) defines
+      system "yasm" (yasmFlags ++ ["-o", oFile, sFile])
+      system "cc" [oFile, stdOFile, "-o", exeFile]
 
 -- TODO Use some realPath function instead of ./, in case a full path is used.
 runExecutable exe inputs = rawSystem ("./" ++ exe) (map C.unpack inputs)
@@ -123,6 +160,12 @@ reportTime :: String -> UTCTime -> UTCTime -> IO ()
 reportTime label start end = do
     hPutStrLn stderr (printf "%32s %.3fs" label (realToFrac (diffUTCTime end start) :: Double))
 
+timedOperation name work = do
+  tStart <- timestamp
+  finally work $ do
+    tEnd <- timestamp
+    reportTime name tStart tEnd
+
 do_main args = do
   let (optFuns,nonOpts,errors) = getOpt Permute sedOptions args
   let usage = usageInfo "Usage: sed [OPTION]... [SCRIPT] [INPUT]..." sedOptions
@@ -130,6 +173,8 @@ do_main args = do
     mapM_ putStrLn (errors ++ [usage])
     exitFailure
   let opts@Options {..} = foldl (.) id optFuns defaultOptions
+
+  let timed name work = if timeIt then timedOperation name work else work
 
   (scriptLines,inputs) <- getScript opts (map C.pack nonOpts)
 
@@ -167,19 +212,30 @@ do_main args = do
     reportTime "Optimize" tStartOpt tEndOpt
 
   flip catch exitWith $ do
+    when assembleIt $ do
+      tCompileStart <- timestamp
+      compileToAsm enableIPC (entryLabel, program') sOutputFile
+      tCompileEnd <- timestamp
+
+      when timeIt $ do
+        reportTime "Compile (IR -> Asm)" tCompileStart tCompileEnd
+
+    when (assembleIt && linkIt) $ do
+      timed "Assemble" $ assemble sOutputFile exeOutputFile defines
+
     when compileIt $ do
       tCompileStart <- timestamp
       compileProgram enableIPC (entryLabel, program') cOutputFile
       tCompileEnd <- timestamp
 
       when timeIt $ do
-        reportTime "Compile (Sed)" tCompileStart tCompileEnd
+        reportTime "Compile (IR -> C)" tCompileStart tCompileEnd
 
     -- Dabburu kanpairu!
     -- (https://www.youtube.com/watch?v=FHkFzRZdlV4)
     -- TODO or pipe the compiled C code directly into gcc so we can do it in
     -- one pass without an extra file inbetween.
-    when (compileIt && runIt) $ do
+    when (compileIt && linkIt) $ do
       tCompileStart <- timestamp
       status <- compileC cOutputFile exeOutputFile defines
       tCompileEnd <- timestamp
@@ -191,7 +247,7 @@ do_main args = do
 
     when runIt $ do
       tProgStart <- timestamp
-      status <- if compileIt
+      status <- if compileIt || assembleIt
         then runExecutable exeOutputFile inputs
         else do
           file0 <- inputListFile (map C.unpack inputs)

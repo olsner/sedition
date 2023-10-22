@@ -14,7 +14,7 @@ maintainer:         olsner@gmail.com
 bug-reports:        https://github.com/olsner/sedition
 
 extra-source-files:
-    README.md sedition.h
+    README.md sedition.h sedition.s
 
 source-repository head
   type:     git
@@ -26,11 +26,14 @@ common lang
     ghc-options:      -O2 -rtsopts
 
 common deps
-    build-depends:    bytestring, utf8-string,
+    build-depends:    bytestring,
                       containers,
+                      directory,
+                      regex-base,
+                      regex-posix,
                       transformers,
                       trifecta,
-                      regex-base, regex-posix,
+                      utf8-string,
 
 common warn
     ghc-options: -Widentities -Wcompat -Wall -Wno-name-shadowing -Wno-missing-signatures
@@ -54,6 +57,7 @@ executable sedition
                       Optimize.LiveMatch
                       Optimize.LiveLastRegex
                       Compile Interpret
+                      EmitAsm GenAsm
                       -- TODO Extract a library for the regex parts
                       Regex.Regex
                       Regex.TaggedRegex
@@ -67,6 +71,7 @@ executable sedition
                       Regex.OptimizeIR
                       Regex.RunIR
                       Regex.CompileIR
+                      Regex.CompileAsm
                       Regex.Optimize.LiveRegister
                       Regex.Optimize.LiveSaveCursor
                       Regex.Optimize.LiveSetFallback
@@ -109,6 +114,7 @@ executable tdfa2c
                       Regex.OptimizeIR
                       Regex.RunIR
                       Regex.CompileIR
+                      Regex.CompileAsm
                       Regex.Optimize.LiveRegister
                       Regex.Optimize.LiveSaveCursor
                       Regex.Optimize.LiveSetFallback
@@ -122,6 +128,7 @@ executable tdfa2c
                       -- TODO Split out Regex.Collections to avoid AST/IR
                       -- dependency in regex parts.
                       AST IR
+                      EmitAsm GenAsm
 
     build-depends:    time, process, file-embed, hoopl
     hs-source-dirs:   .

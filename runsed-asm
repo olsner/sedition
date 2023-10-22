@@ -1,0 +1,5 @@
+#!/bin/sh
+
+# IPC is broken with compiled output so far (also missing e.g. threading and
+# networking), so disable it for now.
+$(dirname "$0")/sed "$@" -I --run --assemble --c-output temp.asm --exe a.out +RTS -M10G

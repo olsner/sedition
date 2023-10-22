@@ -11,6 +11,7 @@ import Data.String
 import Data.Time
 
 import System.Console.GetOpt
+import System.Directory (removeFile)
 import System.Environment
 import System.Exit
 import System.IO
@@ -27,7 +28,10 @@ import Regex.TDFA as TDFA
 import Regex.Minimize (minimize)
 import Regex.TDFA2IR (genIR)
 import Regex.CompileIR (genC)
+import Regex.CompileAsm (genAsm)
 import Regex.OptimizeIR (optimize)
+import qualified EmitAsm
+import qualified GenAsm
 import GenC
 
 doSimulateTDFA tdfa s = print (runTDFA True tdfa s)
@@ -37,9 +41,36 @@ doSimulateTNFA tnfa s = print (tnfaMatch tnfa s)
 compileIR ir output = C.writeFile output . toByteString $
     programHeader output <> genC ir <> programFooter
 
+compileToAsm ir sfile = C.writeFile sfile . GenAsm.toByteString $
+    GenAsm.matcherAssemblyHeader <> genAsm ir <> GenAsm.matcherAssemblyFooter
+
 -- TODO Add flags to control gcc optimization/debug settings.
 compileC cFile exeFile defines =
     rawSystem "cc" (["-O2", cFile, "-o", exeFile] ++ map ("-D"++) defines)
+
+withTempFile ext work = do
+  (path,h) <- openTempFile "/tmp" ("sedition" ++ ext)
+  hClose h
+  finally (work path) (removeFile path)
+
+system :: String -> [String] -> IO ()
+system cmd args = do
+  res <- rawSystem cmd args
+  case res of
+    ExitSuccess -> return ()
+    _ -> throw res
+
+assemble sFile exeFile defines =
+    withTempFile ".s" $ \stdSFile ->
+    withTempFile ".o" $ \oFile ->
+    withTempFile ".o" $ \stdOFile -> do
+      -- TODO Could do the mangling/compilation of sedition.h here instead of
+      -- compiling to assembly in the Makefile.
+      C.writeFile stdSFile EmitAsm.seditionRuntime
+      system "cc" ["-c", stdSFile, "-o", stdOFile]
+      let yasmFlags = ["-gdwarf2", "-felf64"] ++ map ("-D"++) defines
+      system "yasm" (yasmFlags ++ ["-o", oFile, sFile])
+      system "cc" [oFile, stdOFile, "-o", exeFile]
 
 -- TODO Use some realPath function instead of ./, in case a full path is used.
 runExecutable exe inputs = rawSystem ("./" ++ exe) inputs
@@ -79,6 +110,7 @@ reportTime label start end = do
 data Options = Options
   { extendedRegexps :: Bool
   , cOutputFile :: FilePath
+  , sOutputFile :: FilePath
   , exeOutputFile :: FilePath
   , dumpParse :: Bool
   , dumpTNFA :: Bool
@@ -86,8 +118,10 @@ data Options = Options
   , dumpIRPre :: Bool
   , dumpIR :: Bool
   , timeIt :: Bool
-  , runIt :: Bool
   , compileIt :: Bool
+  , assembleIt :: Bool
+  , linkIt :: Bool
+  , runIt :: Bool
   , runTNFA :: Bool
   , noTags :: Bool
   , defines :: [String]
@@ -97,6 +131,7 @@ data Options = Options
 defaultOptions = Options
     { extendedRegexps = False
     , cOutputFile = "out.c"
+    , sOutputFile = "out.asm"
     , exeOutputFile = "a.out"
     , dumpParse = False
     , dumpTNFA = False
@@ -104,16 +139,18 @@ defaultOptions = Options
     , dumpIRPre = False
     , dumpIR = False
     , timeIt = False
-    , runIt = True
     , compileIt = False
+    , assembleIt = False
+    , linkIt = True
+    , runIt = True
     , runTNFA = False
     , noTags = False
     , fuel = 100000
     , defines = []
     , strings = [] }
 addString s o = o { strings = s : strings o }
-setCOutputFile f o = o { cOutputFile = f }
-setExeOutputFile f o = o { exeOutputFile = f }
+setCOutputFile f o = o { cOutputFile = f, sOutputFile = f }
+setExeOutputFile f o = o { exeOutputFile = f, linkIt = True }
 addDefine f o = o { defines = f : defines o }
 setFuel f o = o { fuel = f }
 
@@ -121,6 +158,7 @@ tdfa2cOptions =
   [ Option ['r', 'E'] ["regexp-extended"] (NoArg $ \o -> o { extendedRegexps = True }) "Use extended regexps"
   , Option ['t'] ["time"] (NoArg $ \o -> o { timeIt = True }) "Time optimization and execution of the program"
   , Option ['c'] ["compile"] (NoArg $ \o -> o { compileIt = True }) "Compile the regex to C code, compile and run it to match strings (if given)"
+  , Option ['S'] ["assemble"] (NoArg $ \o -> o { assembleIt = True }) "Compile the regex to assembly, assemble and run it to match strings (if given)"
   , Option ['n'] ["run-tnfa"] (NoArg $ \o -> o { runTNFA = True }) "match using TNFA"
   , Option [] ["dump-parse"] (NoArg $ \o -> o { dumpParse = True }) "parse and print the parsed regex"
   , Option [] ["dump-tnfa"] (NoArg $ \o -> o { dumpTNFA = True }) "show the TNFA state machine"
@@ -217,9 +255,17 @@ do_main args = do
       tCompileEnd <- timestamp
 
       when timeIt $ do
-        reportTime "Compile (TDFA)" tCompileStart tCompileEnd
+        reportTime "Compile (TDFA -> C)" tCompileStart tCompileEnd
 
-    when (compileIt && runIt) $ do
+    when assembleIt $ do
+      tAssembleStart <- timestamp
+      compileToAsm optimized sOutputFile
+      tAssembleEnd <- timestamp
+
+      when timeIt $ do
+        reportTime "Compile (TDFA -> Asm)" tAssembleStart tAssembleEnd
+
+    when (compileIt && linkIt) $ do
       tCompileStart <- timestamp
       status <- compileC cOutputFile exeOutputFile defines
       tCompileEnd <- timestamp
@@ -229,9 +275,17 @@ do_main args = do
 
       when (status /= ExitSuccess) $ exitWith status
 
+    when (assembleIt && linkIt) $ do
+      tAssembleStart <- timestamp
+      assemble sOutputFile exeOutputFile defines
+      tAssembleEnd <- timestamp
+
+      when timeIt $ do
+        reportTime "Assemble" tAssembleStart tAssembleEnd
+
     when (not (null strings)) $ do
       tProgStart <- timestamp
-      status <- if compileIt
+      status <- if compileIt || assembleIt
         then runExecutable exeOutputFile strings
         else mapM_ (doSimulateTDFA tdfa) strings >> return ExitSuccess
       tProgEnd <- timestamp

@@ -10,10 +10,15 @@ all: build cabal-test README.html
 %.html: %.md
 	markdown $< >$@
 
+sedition.s: sedition.h
+	sed 's/^static //' $< | gcc -g -O3 -S -x c - -o $@
+
+generated: sedition.s
+
 browse-readme: README.html
 	xdg-open $<
 
-cabal-build: force
+cabal-build: force generated
 	$(CABAL) build
 
 cabal-test: cabal-build
@@ -29,7 +34,10 @@ tdfa2c: cabal-build
 
 check: run-bsdtests run-gnused-tests compiler-tests
 test: check
-compiler-tests: run-bsdtests-compiled run-gnused-tests-compiled
+compiler-tests: c-tests asm-tests
+
+c-tests: run-bsdtests-c run-gnused-tests-c
+asm-tests: run-bsdtests-asm run-gnused-tests-asm
 
 test: cabal-test
 build: cabal-build sed tdfa2c
@@ -40,9 +48,13 @@ run-bsdtests: sed
 	@echo "Running BSD tests on interpreter..."
 	cd tests && ./bsd.sh
 
-run-bsdtests-compiled: sed
-	@echo "Running BSD tests on compiler..."
+run-bsdtests-c: sed
+	@echo "Running BSD tests on C backend..."
 	cd tests && ./bsd.sh ../runsed
+
+run-bsdtests-asm: sed
+	@echo "Running BSD tests on assembly backend..."
+	cd tests && ./bsd.sh ../runsed-asm
 
 gnused:
 	@test -d gnused || echo "Check out GNU sed into a directory called gnused"
@@ -52,9 +64,13 @@ run-gnused-tests: sed gnused
 	@echo "Running GNU tests on interpreter..."
 	./run-gnused-tests.sh gnused
 
-run-gnused-tests-compiled: sed gnused
-	@echo "Running GNU tests on compiler..."
+run-gnused-tests-c: sed gnused
+	@echo "Running GNU tests on C backend..."
 	SED=`pwd`/runsed ./run-gnused-tests.sh gnused
+
+run-gnused-tests-asm: sed gnused
+	@echo "Running GNU tests on assembly backend..."
+	SED=`pwd`/runsed-asm ./run-gnused-tests.sh gnused
 
 clean:
 	$(CABAL) clean --save-config

@@ -139,6 +139,14 @@ static void set_cstr(string* dst, const char* src, size_t n)
     dst->len = n;
 }
 
+static void set_cstrz(string* dst, const char* src)
+{
+    size_t n = strlen(src);
+    ensure_len_discard(dst, n);
+    memcpy(dst->buf, src, n);
+    dst->len = n;
+}
+
 static void append_cstr(string* dst, const char *str, size_t n)
 {
     assert(dst->buf + dst->len < str || dst->buf > str + n);
