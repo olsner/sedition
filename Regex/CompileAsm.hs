@@ -81,12 +81,15 @@ declareReg r = label ("." <> showB r) <> op1 "resq" "1"
 --    (And make decisions on jump tables/number of tests after this
 --    transformation/optimizations.)
 
-emitCase :: Builder () -> (Char,Char) -> Builder ()
-emitCase target (lb,ub)
+emitCase :: Bool -> Builder () -> (Char,Char) -> Builder ()
+emitCase pos target (lb,ub)
     | lb == ub = do
         comment ("case " <> showB lb <> " => " <> target)
-        op "cmp" [yychar, cchar lb] <> je target
+        op "cmp" [yychar, cchar lb] <> je_ne target
     | otherwise  = do
+        -- TODO take nomatch as an argument to possibly avoid jump-to-jump etc
+        -- ... and select based on which label can be inlined and which would
+        -- need a jump anyway?
         nomatch <- newLabel
         comment ("case " <> showB lb <> ".." <> showB ub <> " => " <> target)
         -- If the switch has a default (== holes in the ranges), we may need to
@@ -96,17 +99,24 @@ emitCase target (lb,ub)
         -- optimization to it.
         when (lb > minBound) $ do
           op "cmp" [yychar, cchar lb]
-          jb nomatch
+          jb (if pos then nomatch else target)
         -- Should be done on a new IR so that the jump can be optimized later.
-        when (fromEnum ub == 255) $ do
+        -- If the upper bound is 255 we always match (if positive - in the
+        -- negative case this is a match so we should *not* jump).
+        when (fromEnum ub == 255 && pos) $ do
           goto target
         when (fromEnum ub < 255) $ do
           op "cmp" [yychar, cchar ub]
-          jbe target
+          jbe_a target
         label nomatch
+    where
+      je_ne | pos = je | otherwise = jne
+      jbe_a | pos = jbe | otherwise = ja
 
-emitCases :: ([(Char,Char)], Label) -> Builder ()
-emitCases (cs, label) = foldMap (emitCase (lblname label)) cs
+-- pos = True: positive case, jump to label if true, otherwise jump to label if
+-- outside of range.
+emitCases :: Bool -> ([(Char,Char)], Label) -> Builder ()
+emitCases pos (cs, label) = foldMap (emitCase pos (lblname label)) cs
 
 yychar = reg8 res0
 yybegin = reg64 arg0 -- rdi
@@ -217,13 +227,23 @@ emitInsn (IfBOL tl fl) = do
 emitInsn (Switch cm def) = do
   comment "Switch {"
   loadUInt8 yycursor res0
-  foldMap emitCases (CM.toRanges cm)
-  comment ("} End of switch, default = " <> lblname def)
-  gotoL def
+  case CM.toRanges cm of
+    -- A bit of a subtle point - the list of character ranges is "or:ed"
+    -- together so negating an entry with multiple ranges is a bit different.
+    [([c],label)] -> do
+      comment ("Single case, default = " <> lblname def <> " target = " <> lblname label)
+      foldMap (emitCases False) [([c],def)]
+      gotoL label
+    xs -> do
+      foldMap (emitCases True) xs
+      comment ("} End of switch, default = " <> lblname def)
+      gotoL def
+-- TODO Do I transform total switches to partial switches? Makes sense if most
+-- cases are the same.
 emitInsn (TotalSwitch cm) = do
   comment "Total switch {"
   loadUInt8 yycursor res0
-  foldMap emitCases (CM.toRanges cm)
+  foldMap (emitCases True) (CM.toRanges cm)
   comment "} End of total switch"
 emitInsn Fail = comment "fail" <> setInt 0 res0 <> goto ".end"
 emitInsn (Match tagMap) =

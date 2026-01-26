@@ -55,6 +55,13 @@
 - Optimize out concatenation of empty strings
 - Precalculate length of append lists to avoid repeated reallocs
 
+## Micro optimizations
+
+- Skip prologue/epilogue in asm output if no C functions are called
+- Delay/batch pointer increments so that adjacent comparisons can be merged
+  (Is this best done as optimization or with TNFA/TDFA extensions?)
+- On a single case, don't load to al first? (probably doesn't matter?)
+
 ## Regex
 
 * Strip out failed states
