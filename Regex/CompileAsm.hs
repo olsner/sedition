@@ -164,11 +164,14 @@ genAsm program@Program{..} = do
     op "mov" [yylimit, yybegin]
     op "add" [yylimit, mem (yystring <> " + " <> intDec stringLenOffset)]
     op "lea" [yycursor, mem (yybegin <> " + " <> yyorigOffset)]
+    postOrderRegisterBlocks program
     comment "Jump to entry point"
     gotoL entryPoint
     comment "Basic blocks"
-    postOrderFoldGraphNodes foldEmitInsn program mempty
+    writeAllBlocks
     comment "Exit point"
+    -- TODO Slight optimization: emit the epilogue where we'd put the first jmp
+    -- to .end, if that's the only path we get rid of a redundant jump.
     label ".end"
   where allRegs = setElems (IR.allRegs program)
 
@@ -197,6 +200,15 @@ postOrderFoldGraphNodes f Program{..} e = foldMap f' (postorder_dfs g) e
   where g = mkLast (Branch entryPoint) H.|*><*| programGraph
         f' :: Block Insn e x -> IndexedCO e a a -> IndexedCO x a a
         f' = foldBlockNodesF f
+
+postOrderRegisterBlocks Program{..} = mapM_ regBlock (postorder_dfs g)
+  where g = mkLast (Branch entryPoint) H.|*><*| programGraph
+
+emitBlock :: Block Insn C C -> Builder ()
+emitBlock b = foldBlockNodesF foldEmitInsn b mempty
+
+regBlock :: Block Insn C C -> Builder ()
+regBlock b = GenAsm.addBlock (entryLabel b) (emitBlock b)
 
 foldEmitInsn :: Insn e x -> Builder () -> Builder ()
 foldEmitInsn insn = (<> emitInsn insn)
@@ -239,10 +251,11 @@ emitInsn (Switch cm def) = do
       comment ("} End of switch, default = " <> lblname def)
       gotoL def
 -- TODO Do I transform total switches to partial switches? Makes sense if most
--- cases are the same.
+-- cases are the same to flip the sense of the switch.
 emitInsn (TotalSwitch cm) = do
   comment "Total switch {"
   loadUInt8 yycursor res0
+  -- Could skip the last comparison for a total switch.
   foldMap (emitCases True) (CM.toRanges cm)
   comment "} End of total switch"
 emitInsn Fail = comment "fail" <> setInt 0 res0 <> goto ".end"

@@ -6,6 +6,7 @@
 module GenAsm where
 
 import qualified Compiler.Hoopl as H
+import Compiler.Hoopl (LabelMap, mapEmpty, mapLookup, mapInsert, mapDelete, mapKeys)
 
 import Control.Monad
 import Control.Monad.Trans.Class
@@ -16,6 +17,7 @@ import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy.Char8 as L
 import qualified Data.ByteString.Builder as B
 import Data.ByteString.Builder as B hiding (Builder, string8, intDec, byteString)
+import Data.Maybe
 import Data.String
 
 -- TODO Connect to an ABI or something
@@ -64,7 +66,10 @@ tmp2 = r12
 prologue = op1 "push" "rbp"
 epilogue = op1 "pop" "rbp" <> op0 "ret"
 
-type Builder a = WriterT B.Builder (State Int) a
+data BState = BState Int (LabelMap (Builder ()))
+initBState = BState 1 mapEmpty
+
+type Builder a = WriterT B.Builder (State BState) a
 
 instance Semigroup (Builder ()) where
   x <> y = x >> y
@@ -149,19 +154,45 @@ emitCString s = do
   return l
 
 toByteString :: Builder () -> C.ByteString
-toByteString = L.toStrict . B.toLazyByteString . flip evalState 1 . execWriterT
+toByteString = L.toStrict . B.toLazyByteString . flip evalState initBState . execWriterT
 
 newLabel :: Builder (Builder ())
-newLabel = lift (get >>= \l -> put (succ l) >> return (".T" <> showB l))
+newLabel = lift (get >>= \(BState l s) -> put (BState (succ l) s) >> return (".T" <> showB l))
 
 emitNewLabel :: Builder (Builder ())
 emitNewLabel = newLabel >>= (\l -> label l >> return l)
+
+addBlock :: H.Label -> Builder () -> Builder ()
+addBlock l body = lift (modify (\(BState al m) -> BState al (mapInsert l body m)))
+
+removeBlock :: H.Label -> Builder ()
+removeBlock l = lift (modify (\(BState al m) -> BState al (mapDelete l m)))
+
+getBlock :: H.Label -> Builder (Maybe (Builder ()))
+getBlock l = lift (gets (\(BState _ m) -> mapLookup l m))
+
+popBlock :: H.Label -> Builder (Maybe (Builder ()))
+popBlock l = do
+  body <- getBlock l
+  if isJust body then removeBlock l >> return body else return Nothing
+
+writeAllBlocks :: Builder ()
+writeAllBlocks = do
+  keys <- lift (gets (\(BState _ m) -> mapKeys m))
+  mapM_ f keys
+  where f l = do
+          res <- popBlock l
+          case res of
+            Just body -> body
+            Nothing -> return ()
 
 label :: Builder () -> Builder ()
 label name = name <> ":\n"
 goto name = op "jmp" [name]
 gotoL :: H.Label -> Builder ()
-gotoL l = goto (lblname l)
+gotoL l = do
+  body <- popBlock l
+  if isJust body then fromJust body else goto (lblname l)
 lblname l = "." <> showB l
 
 cmp x y = op "cmp" [x, y]
