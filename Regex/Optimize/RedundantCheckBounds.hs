@@ -25,9 +25,9 @@ redundantCheckBoundsTransfer = mkFTransfer3 first middle last
     first :: Insn C O -> RedundantBoundsFact -> RedundantBoundsFact
     first _ f = f
     middle :: Insn O O -> RedundantBoundsFact -> RedundantBoundsFact
-    middle Next Bot       = Bot
-    middle Next (PElem 0) = PElem 0
-    middle Next (PElem n) = PElem (n - 1)
+    -- TODO Supposedly it's illegal to move the cursor beyond what has been
+    -- bounds checked.
+    middle (MoveCursor m) (PElem n) = PElem (max 0 (n - m))
     middle _    f         = f
     last :: Insn O C -> RedundantBoundsFact -> FactBase RedundantBoundsFact
     last (CheckBounds n eof cont) f =

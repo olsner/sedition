@@ -38,20 +38,22 @@ rewrite = deepBwdRw rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x RBFact -> m (Maybe (Graph Insn e x))
     -- Do just one change at a time so that optimization fuel applies.
-    rw i@(IfBOL tl fl) f | Just tl' <- label tl f = rwLast i (IfBOL tl' fl)
-                         | Just fl' <- label fl f = rwLast i (IfBOL tl fl')
+    rw i@(IfBOL tl fl) f
+        | Just tl' <- label tl f     = rwLast i (IfBOL tl' fl)
+        | Just fl' <- label fl f     = rwLast i (IfBOL tl fl')
     rw i@(CheckBounds n l1 l2) f
-                         | Just l1' <- label l1 f = rwLast i (CheckBounds n l1' l2)
-                         | Just l2' <- label l2 f = rwLast i (CheckBounds n l1 l2')
-    rw i@(Switch cm l) f | CM.null cm             = rwLast i (Branch l)
-                         | Just l'  <- label l f  = rwLast i (Switch cm l')
-                         -- Single target label matches the default-branch
-                         | Just l == oneLabel cm  = rwLast i (Branch l)
-                         | Just cm' <- mapLabels cm f = rwLast i (Switch cm' l)
-    rw i@(TotalSwitch m) f
-                         | Just l' <- oneLabel m  = rwLast i (Branch l')
-                         | Just m' <- mapLabels m f = rwLast i (TotalSwitch m')
-    rw i@(Branch t)    f                          = rwInsn i t f
+        | Just l1' <- label l1 f     = rwLast i (CheckBounds n l1' l2)
+        | Just l2' <- label l2 f     = rwLast i (CheckBounds n l1 l2')
+    rw i@(Switch offset cm l) f
+        | CM.null cm                 = rwLast i (Branch l)
+        | Just l'  <- label l f      = rwLast i (Switch offset cm l')
+        -- Single target label matches the default-branch
+        | Just l == oneLabel cm      = rwLast i (Branch l)
+        | Just cm' <- mapLabels cm f = rwLast i (Switch offset cm' l)
+    rw i@(TotalSwitch offset m) f
+        | Just l' <- oneLabel m      = rwLast i (Branch l')
+        | Just m' <- mapLabels m f   = rwLast i (TotalSwitch offset m')
+    rw i@(Branch t) f                = rwInsn i t f
     rw _ _ = return Nothing
 
     rwLast :: FuelMonad m => Insn O C -> Insn O C -> m (Maybe (Graph Insn O C))

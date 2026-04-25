@@ -47,8 +47,8 @@ tInsn :: forall e x . Insn e x -> Map Label Label -> Insn e x
 tInsn (Label l) = pure (Label l)
 tInsn (Branch l) = Branch <$> tLabel l
 tInsn (IfBOL l1 l2) = IfBOL <$> tLabel l1 <*> tLabel l2
-tInsn (Switch cm l) = Switch <$> tLabelMap cm <*> tLabel l
-tInsn (TotalSwitch cm) = TotalSwitch <$> tLabelMap cm
+tInsn (Switch offset cm l) = Switch offset <$> tLabelMap cm <*> tLabel l
+tInsn (TotalSwitch offset cm) = TotalSwitch offset <$> tLabelMap cm
 tInsn (CheckBounds b eof cont) = CheckBounds b <$> tLabel eof <*> tLabel cont
 tInsn (Fallback ls) = Fallback <$> tLabelSet ls
 tInsn (SetFallback l) = SetFallback <$> tLabel l

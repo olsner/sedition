@@ -93,6 +93,17 @@
     for non-greedy .* and returning shortest instead of longest match.
 * Do more with memmem - e.g. precalculate tables and constants, check for
   string search algorithms with more expensive precalculation.
+* Cursor optimizations
+  - Where do we actually want the cursor movements to happen, how can they be
+    more efficiently carried through e.g. switches?
+    The low-level efficiency we're kind of looking for is the dependency chain
+    between increments and following uses.
+    (Modern CPUs can also track offsets during register renaming...)
+  - Introduce more/arbitrary cursor registers? That seems to require actual
+    register allocation though...
+* Bounds check should not lead to retry if that's just an impossible match
+  (e.g. madding.sed should not iterate through to the end before giving up since
+  a shorter input can never match)
 
 ### Done
 

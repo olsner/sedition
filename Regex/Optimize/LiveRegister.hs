@@ -23,7 +23,7 @@ liveLattice = DataflowLattice
               ch = changeIf (setSize j > setSize old)
 
 kill :: Insn e x -> LiveRegFact -> LiveRegFact
-kill (Set r)    = setDelete r
+kill (Set r _)  = setDelete r
 kill (Clear r)  = setDelete r
 kill (Copy r _) = setDelete r
 kill _          = id
@@ -52,7 +52,7 @@ liveRegister :: FuelMonad m => BwdRewrite m Insn LiveRegFact
 liveRegister = mkBRewrite rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x LiveRegFact -> m (Maybe (Graph Insn e x))
-    rw (Set r)    f | not (setMember r f) = return (Just emptyGraph)
+    rw (Set r _)  f | not (setMember r f) = return (Just emptyGraph)
     rw (Clear r)  f | not (setMember r f) = return (Just emptyGraph)
     rw (Copy r _) f | not (setMember r f) = return (Just emptyGraph)
     rw _ _ = return Nothing

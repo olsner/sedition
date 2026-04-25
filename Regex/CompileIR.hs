@@ -89,7 +89,7 @@ genC program@Program{..} =
     "#define YYEOF (YYCURSOR >= YYLIMIT)\n" <>
     "#define YYREMAINING (YYLIMIT - YYCURSOR)\n" <>
     "#define YYGET(offs) (YYCURSOR[offs])\n" <>
-    "#define YYNEXT() (YYCURSOR++)\n" <>
+    "#define YYNEXT(offs) (YYCURSOR += offs)\n" <>
     stmt ("const uint8_t *YYCURSOR = s->buf + orig_offset") <>
     stmt ("void *fallback_label = NULL") <>
     stmt ("const uint8_t *fallback_cursor = NULL") <>
@@ -144,12 +144,12 @@ emitInsn (Label l) = label (show l)
 
 -- O C control flow
 emitInsn (IfBOL tl fl) = cIf "YYCURSOR == YYBEGIN" (gotoL tl) (gotoL fl)
-emitInsn (Switch cm def) =
-    "switch (YYGET(0)) {\n" <>
+emitInsn (Switch offset cm def) =
+    fun "switch" [fun "YYGET" [intDec offset]] <> " {\n" <>
     foldMap emitCases (CM.toRanges cm) <>
     " default: " <> gotoL def <> "}\n"
-emitInsn (TotalSwitch cm) =
-    "switch (YYGET(0)) {\n" <>
+emitInsn (TotalSwitch offset cm) =
+    fun "switch" [fun "YYGET" [intDec offset]] <> " {\n" <>
     foldMap emitCases (CM.toRanges cm) <>
     "}\n"
 emitInsn Fail = goto "end"
@@ -168,13 +168,13 @@ emitInsn (Branch l) = gotoL l
 -- O O debugging
 emitInsn (Trace msg) = yydebug "\"%s\\n\"" [cstring (C.pack msg)]
 -- O O primitives
-emitInsn Next = sfun "YYNEXT" []
-emitInsn (Set r) = stmt (showB r <> " = YYCURSOR")
+emitInsn (Set r i) = stmt (showB r <> " = YYCURSOR + " <> intDec i)
 emitInsn (Clear r) = stmt (showB r <> " = NULL")
 emitInsn (Copy r r2) = stmt (showB r <> " = " <> showB r2)
-
+-- O O cursor movement
+emitInsn (MoveCursor i) = sfun "YYNEXT" [intDec i]
+emitInsn (SaveCursor i) = stmt ("fallback_cursor = YYCURSOR + " <> intDec i)
+emitInsn RestoreCursor = stmt "YYCURSOR = fallback_cursor"
 -- O O fallback operations
 emitInsn (Fallback _) = goto "*fallback_label"
 emitInsn (SetFallback l) = stmt ("fallback_label = &&" <> showB l)
-emitInsn SaveCursor = stmt "fallback_cursor = YYCURSOR"
-emitInsn RestoreCursor = stmt "YYCURSOR = fallback_cursor"

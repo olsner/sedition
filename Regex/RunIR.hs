@@ -26,11 +26,11 @@ data S = S { buffer :: String, bufferLength :: Int,
              debugEnabled :: Bool }
          deriving (Show)
 
-initState s p = gonext $ S {
+initState s p = S {
   buffer = s,
   bufferLength = length s,
   registers = M.empty,
-  position = (-1),
+  position = 0,
   program = p,
   fallbackCursor = error "Fallback cursor used before init",
   fallbackLabel = error "Fallback label used before init",
@@ -44,11 +44,8 @@ type Result = Maybe (Map TagId Int)
 
 type M a = StateT S (Either Result) a
 
-next :: M ()
-next = modify gonext
-
-gonext s@S{..} = s { position = succ position }
-char S{..} = buffer !! position
+move i s@S{..} = s { position = position + i }
+char i = gets (\S{..} -> buffer !! (position + i))
 
 getReg r = gets (M.lookup r . registers)
 setReg r val = modify $ \s@S{..} -> s { registers = M.insert r val registers }
@@ -78,11 +75,11 @@ run (Label _) = return ()
 run (IfBOL tl fl) = do
   bol <- gets ((<= 0) . position)
   runLabel (if bol then tl else fl)
-run (Switch cm def) = do
-  c <- gets char
+run (Switch offset cm def) = do
+  c <- char offset
   runLabel (CM.findWithDefault def c cm)
-run (TotalSwitch cm) = do
-  c <- gets char
+run (TotalSwitch offset cm) = do
+  c <- char offset
   runLabel (fromJust $ CM.lookup c cm)
 run Fail = lift (Left Nothing)
 run (Match tagMap) = do
@@ -98,14 +95,14 @@ run (Branch l) = runLabel l
 run (Trace msg) = do
     s <- get
     when (debugEnabled s) $ traceM (msg ++ ": " ++ showState s)
-run Next = next
-run (Set r) = setReg r =<< gets position
+run (MoveCursor i) = modify (move i)
+run (Set r i) = setReg r =<< gets ((+ i) . position)
 run (Clear r) = clearReg r
 run (Copy r r2) = setReg' r =<< getReg r2
 
 run (Fallback _) = runLabel =<< gets fallbackLabel
 run (SetFallback l) = modify $ \s -> s { fallbackLabel = l }
-run SaveCursor = modify $ \s@S{..} -> s { fallbackCursor = position }
+run (SaveCursor i) = modify $ \s@S{..} -> s { fallbackCursor = position + i }
 run RestoreCursor = modify $ \s@S{..} -> s { position = fallbackCursor }
 
 resolveTagMap pos regs = M.map f

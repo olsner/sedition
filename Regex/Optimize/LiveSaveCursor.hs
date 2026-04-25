@@ -20,8 +20,8 @@ liveLattice = DataflowLattice
               ch = changeIf (new /= old)
 
 kill :: Insn e x -> LiveSaveCursorFact -> LiveSaveCursorFact
-kill SaveCursor _ = False
-kill _          f = f
+kill (SaveCursor _) _ = False
+kill _              f = f
 
 gen :: Insn e x -> LiveSaveCursorFact -> LiveSaveCursorFact
 gen RestoreCursor _ = True
@@ -44,7 +44,7 @@ liveSaveCursor :: FuelMonad m => BwdRewrite m Insn LiveSaveCursorFact
 liveSaveCursor = mkBRewrite rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x LiveSaveCursorFact -> m (Maybe (Graph Insn e x))
-    rw SaveCursor False = return (Just emptyGraph)
+    rw (SaveCursor _) False = return (Just emptyGraph)
     rw _ _ = return Nothing
 
 liveSaveCursorPass :: FuelMonad m => BwdPass m Insn LiveSaveCursorFact

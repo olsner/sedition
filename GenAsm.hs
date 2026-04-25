@@ -118,6 +118,8 @@ loadInt32 var reg = op "mov" [reg32 reg, mem var]
 loadInt64 var reg = op "mov" [reg64 reg, mem var]
 loadAddr var reg = op "mov" [regA reg, mem var]
 
+loadUInt8At var offset reg = op "movzx" [reg32 reg, byte_ptr (var <> " + " <> intDec offset)]
+
 already src dst | dst == src = mempty
                 | otherwise  = error ("Expected no movement required but " ++
                                       show src ++ " is not " ++ show dst)

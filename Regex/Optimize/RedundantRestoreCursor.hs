@@ -24,15 +24,15 @@ redundantRestoreLattice = DataflowLattice
 
 -- Moving the cursor means a restore may be necessary from now on.
 kill :: Insn e O -> RedundantRestoreFact -> RedundantRestoreFact
-kill Next _ = True
+kill (MoveCursor _) _ = True
 kill _    f = f
 
 -- Restoring or saving cursor makes current cursor definitely exactly the same
 -- as the saved cursor.
 gen :: Insn e O -> RedundantRestoreFact -> RedundantRestoreFact
-gen RestoreCursor _ = False
-gen SaveCursor    _ = False
-gen _             f = f
+gen RestoreCursor  _ = False
+gen (SaveCursor _) _ = False
+gen _              f = f
 
 redundantRestoreCursorTransfer :: FwdTransfer Insn RedundantRestoreFact
 redundantRestoreCursorTransfer = mkFTransfer3 first middle last

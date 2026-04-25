@@ -27,14 +27,14 @@ data Insn e x where
   -- If we're on the first character of the line, go to the first label
   -- otherwise go to the second.
   IfBOL         :: Label -> Label           -> Insn O C
-  -- Match current character against label map, jump to matching label.
-  -- For characters not in the label map, go to default-label instead.
-  Switch        :: CharMap Label -> Label   -> Insn O C
+  -- Match character at offset against label map, jump to matching label. For
+  -- characters not in the label map, go to default-label instead.
+  Switch        :: Int -> CharMap Label -> Label -> Insn O C
   -- Switch that does not need a default case.
   -- All switches could use this by augmenting them with missing entries, but
   -- then we'd want a corresponding transformation on the output side to e.g.
   -- use default for the most common target label.
-  TotalSwitch   :: CharMap Label            -> Insn O C
+  TotalSwitch   :: Int -> CharMap Label     -> Insn O C
   -- Definitely did not match.
   Fail          ::                             Insn O C
   -- Definitely did match. Argument maps tags to final registers, including the
@@ -48,12 +48,8 @@ data Insn e x where
   Trace         :: String                   -> Insn O O
   -- TODO Add stats counters
 
-  -- Read next character from string into current-character register. Must not
-  -- be called without bounds check somewhere before it.
-  Next          ::                             Insn O O
-  -- R := current position (TODO specify better - positions have been off by
-  -- one in every direction twice)
-  Set           :: R                        -> Insn O O
+  -- R := current position plus offset
+  Set           :: R -> Int                 -> Insn O O
   -- R := nil
   Clear         :: R                        -> Insn O O
   -- R1 := R2
@@ -65,9 +61,14 @@ data Insn e x where
   Fallback      :: LabelSet                 -> Insn O C
   -- Set fallback to given label.
   SetFallback   :: Label                    -> Insn O O
+
+  -- Move cursor by offset. May not move cursor beyond end of string so bounds
+  -- check is required somewhere before it.
+  MoveCursor    :: Int                      -> Insn O O
   -- This is done separately to allow fallback to at least sometimes be
   -- optimized out to a direct branch.
-  SaveCursor    ::                             Insn O O
+  SaveCursor    :: Int                      -> Insn O O
+  -- TODO Should the restore also have an offset?
   RestoreCursor ::                             Insn O O
 
 deriving instance Show (Insn e x)
@@ -84,8 +85,8 @@ instance NonLocal Insn where
   entryLabel (Label l) = l
   successors (IfBOL l1 l2) = [l1, l2]
   successors (Branch l) = [l]
-  successors (Switch cm l) = S.toList (S.insert l (CM.elemSet cm))
-  successors (TotalSwitch cm) = S.toList (CM.elemSet cm)
+  successors (Switch _ cm l) = S.toList (S.insert l (CM.elemSet cm))
+  successors (TotalSwitch _ cm) = S.toList (CM.elemSet cm)
   successors Fail = []
   successors (Match _) = []
   successors (CheckBounds _ eof cont) = [eof, cont]
@@ -120,7 +121,7 @@ allRegs :: Program -> RegSet
 allRegs Program{..} = foldGraphNodes f programGraph setEmpty
   where
     f :: Insn e x -> RegSet -> RegSet
-    f (Set r) = setInsert r
+    f (Set r _) = setInsert r
     f (Clear r) = setInsert r
     f (Copy r1 r2) = setInsert r1 . setInsert r2
     f _ = id
