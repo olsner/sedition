@@ -143,7 +143,7 @@ emitState TDFA{..} s = mdo
   fc <- gets fallbackReg
 
   matchL <- gets matchLabel
-  fallbackLabel <- labelBlock (fallbackRegOps fc matchL)
+  fallbackLabel <- labelBlock (fallbackRegOps c fc matchL)
   eolLabel <- labelBlock (eolRegOps c matchL)
   entryLabel <- getLabel (s, Checked)
   nocheckLabel <- getLabel (s, Unchecked)
@@ -175,10 +175,11 @@ emitState TDFA{..} s = mdo
       | isFinalState = emitEndRegOps c tdfaFinalFunction H.<*> goto matchLabel
       | otherwise = gofail
 
-    fallbackRegOps :: RegId -> Label -> Graph Insn O C
-    fallbackRegOps fc matchLabel | isFallbackState || isFinalState =
+    fallbackRegOps :: RegId -> RegId -> Label -> Graph Insn O C
+    fallbackRegOps c fc matchLabel | isFallbackState || isFinalState =
+        mkMiddle (Copy c fc) H.<*>
         -- debug ("Fell back to " <> show s <> " at {{YYPOS}}") <>
-        emitEndRegOps fc (tdfaFallbackFunction `M.union` tdfaFinalFunction) H.<*>
+        emitEndRegOps c (tdfaFallbackFunction `M.union` tdfaFinalFunction) H.<*>
         goto matchLabel
                               | otherwise = gofail
 
