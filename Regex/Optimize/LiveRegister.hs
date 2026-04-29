@@ -26,13 +26,17 @@ kill :: Insn e x -> LiveRegFact -> LiveRegFact
 kill (Set r _)  = setDelete r
 kill (Clear r)  = setDelete r
 kill (Copy r _) = setDelete r
+kill (InitCursor r) = setDelete r
 kill _          = id
 
 gen :: Insn e x -> LiveRegFact -> LiveRegFact
 gen (Copy _ r)     f = setInsert r f
-gen (Match tagMap) f = setUnion f (setFromList (mapMaybe reg (M.elems tagMap)))
-  where reg (Reg r _)      = Just r
-        reg (EndOfMatch _) = Nothing
+gen (Set _ (r,_))  f = setInsert r f
+gen (Match tagMap) f = setUnion f (setFromList (map reg (M.elems tagMap)))
+  where reg (Reg r _) = r
+gen (IfBOL r _ _)  f = setInsert r f
+gen (Switch (r,_) _ _) f = setInsert r f
+gen (TotalSwitch (r,_) _) f = setInsert r f
 gen _              f = f
 
 liveRegisterTransfer :: BwdTransfer Insn LiveRegFact
@@ -55,6 +59,7 @@ liveRegister = mkBRewrite rw
     rw (Set r _)  f | not (setMember r f) = return (Just emptyGraph)
     rw (Clear r)  f | not (setMember r f) = return (Just emptyGraph)
     rw (Copy r _) f | not (setMember r f) = return (Just emptyGraph)
+    rw (InitCursor r) f | not (setMember r f) = return (Just emptyGraph)
     rw _ _ = return Nothing
 
 liveRegisterPass :: FuelMonad m => BwdPass m Insn LiveRegFact

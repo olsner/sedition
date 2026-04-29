@@ -145,7 +145,7 @@ defaultOptions = Options
     , runIt = True
     , runTNFA = False
     , noTags = False
-    , fuel = 100000
+    , fuel = 1000000
     , defines = []
     , strings = [] }
 addString s o = o { strings = s : strings o }

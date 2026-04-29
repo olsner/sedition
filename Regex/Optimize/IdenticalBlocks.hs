@@ -46,7 +46,7 @@ tLabelMap cm m = CM.map (flip tLabel m) cm
 tInsn :: forall e x . Insn e x -> Map Label Label -> Insn e x
 tInsn (Label l) = pure (Label l)
 tInsn (Branch l) = Branch <$> tLabel l
-tInsn (IfBOL l1 l2) = IfBOL <$> tLabel l1 <*> tLabel l2
+tInsn (IfBOL r l1 l2) = IfBOL r <$> tLabel l1 <*> tLabel l2
 tInsn (Switch offset cm l) = Switch offset <$> tLabelMap cm <*> tLabel l
 tInsn (TotalSwitch offset cm) = TotalSwitch offset <$> tLabelMap cm
 tInsn (CheckBounds b eof cont) = CheckBounds b <$> tLabel eof <*> tLabel cont

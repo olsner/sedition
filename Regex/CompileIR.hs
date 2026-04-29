@@ -11,6 +11,7 @@ import qualified Data.ByteString.Char8 as C
 
 --import Data.Map (Map)
 import qualified Data.Map as M
+import qualified Data.Set as S
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IS
 -- import Data.List
@@ -43,11 +44,12 @@ matchFromTag (t,val) | possibleTag t = stmt ("m->tags[" <> tagix t <> "] = " <> 
 
 debugTag t = yydebug ("\"match[" <> tagix t <> "] = %td\\n\"") ["m[" <> tagix t <> "]"]
 
+-- TODO YYPOS is just a macro, inline it?
+yypos p = fun "YYPOS" [showB p]
+
 tagValue :: IR.TagValue -> Builder
 tagValue (Reg r 0) = showB r <> " ? " <> showB r <> " - YYBEGIN : -1"
 tagValue (Reg r d) = showB r <> " ? " <> showB r <> " - YYBEGIN - " <> intDec d <> " : -1"
-tagValue (EndOfMatch 0) = "YYPOS"
-tagValue (EndOfMatch d) = "YYPOS - " <> intDec d
 
 declareReg :: R -> Builder
 declareReg r = stmt ("const uint8_t* " <> showB r <> " = NULL")
@@ -85,14 +87,8 @@ genC program@Program{..} =
     stmt ("const uint8_t *const YYBEGIN = s->buf") <>
     stmt ("const uint8_t *const YYLIMIT = s->buf + s->len") <>
     sfun "YYSTATS" ["matched_chars", "s->len - orig_offset"] <>
-    "#define YYPOS (YYCURSOR - YYBEGIN)\n" <>
-    "#define YYEOF (YYCURSOR >= YYLIMIT)\n" <>
-    "#define YYREMAINING (YYLIMIT - YYCURSOR)\n" <>
-    "#define YYGET(offs) (YYCURSOR[offs])\n" <>
-    "#define YYNEXT(offs) (YYCURSOR += offs)\n" <>
-    stmt ("const uint8_t *YYCURSOR = s->buf + orig_offset") <>
+    "#define YYPOS(cur) (cur - YYBEGIN)\n" <>
     stmt ("void *fallback_label = NULL") <>
-    stmt ("const uint8_t *fallback_cursor = NULL") <>
     foldMap declareReg allRegs <>
     blockComment "Jump to entry point" <>
     gotoL entryPoint <>
@@ -139,17 +135,20 @@ postOrderFoldGraphNodes f Program{..} e = foldMap f' (postorder_dfs g) e
 foldEmitInsn :: Insn e x -> Builder -> Builder
 foldEmitInsn insn = (<> emitInsn insn)
 
+showPos (p, off) = showB p <> " + " <> off
+yyget (p, off) = showB p <> "[" <> intDec off <> "]"
+
 emitInsn :: Insn e x -> Builder
 emitInsn (Label l) = label (show l)
 
 -- O C control flow
-emitInsn (IfBOL tl fl) = cIf "YYCURSOR == YYBEGIN" (gotoL tl) (gotoL fl)
-emitInsn (Switch offset cm def) =
-    fun "switch" [fun "YYGET" [intDec offset]] <> " {\n" <>
+emitInsn (IfBOL r tl fl) = cIf (showB r <> " == YYBEGIN") (gotoL tl) (gotoL fl)
+emitInsn (Switch pos cm def) =
+    fun "switch" [yyget pos] <> " {\n" <>
     foldMap emitCases (CM.toRanges cm) <>
     " default: " <> gotoL def <> "}\n"
-emitInsn (TotalSwitch offset cm) =
-    fun "switch" [fun "YYGET" [intDec offset]] <> " {\n" <>
+emitInsn (TotalSwitch pos cm) =
+    fun "switch" [yyget pos] <> " {\n" <>
     foldMap emitCases (CM.toRanges cm) <>
     "}\n"
 emitInsn Fail = goto "end"
@@ -159,22 +158,24 @@ emitInsn (Match tagMap) =
     foldMap matchFromTag (M.toList tagMap) <>
     foldMap debugTag (M.keys tagMap) <>
     goto "end"
-emitInsn (CheckBounds 1 eof cont) =
-  cIf ("YYLIMIT <= YYCURSOR") (gotoL eof) (gotoL cont)
-emitInsn (CheckBounds n eof cont) =
-  cIf ("YYLIMIT < YYCURSOR + " <> intDec n) (gotoL eof) (gotoL cont)
+emitInsn (CheckBounds (r, 1) eof cont) =
+  cIf ("YYLIMIT <= " <> showB r) (gotoL eof) (gotoL cont)
+emitInsn (CheckBounds (r, n) eof cont) =
+  cIf ("YYLIMIT < " <> showB r <> " + " <> intDec n) (gotoL eof) (gotoL cont)
 emitInsn (Branch l) = gotoL l
 
 -- O O debugging
 emitInsn (Trace msg) = yydebug "\"%s\\n\"" [cstring (C.pack msg)]
 -- O O primitives
-emitInsn (Set r i) = stmt (showB r <> " = YYCURSOR + " <> intDec i)
+emitInsn (Set r (r2, i)) = stmt (showB r <> " = " <> showB r2 <> " + " <> intDec i)
 emitInsn (Clear r) = stmt (showB r <> " = NULL")
 emitInsn (Copy r r2) = stmt (showB r <> " = " <> showB r2)
+emitInsn (InitCursor r) = stmt (showB r <> " = s->buf + orig_offset")
 -- O O cursor movement
-emitInsn (MoveCursor i) = sfun "YYNEXT" [intDec i]
-emitInsn (SaveCursor i) = stmt ("fallback_cursor = YYCURSOR + " <> intDec i)
-emitInsn RestoreCursor = stmt "YYCURSOR = fallback_cursor"
+-- emitInsn (MovePointer p i) = stmt (showB p <> " += " <> intDec i)
+-- emitInsn (CopyPointer p p2) = stmt (showB p <> " = " <> showB p2)
+-- emitInsn (SaveCursor p) = stmt ("fallback_cursor = " <> showB p)
+-- emitInsn RestoreCursor = stmt (yycursor <> " = fallback_cursor")
 -- O O fallback operations
 emitInsn (Fallback _) = goto "*fallback_label"
 emitInsn (SetFallback l) = stmt ("fallback_label = &&" <> showB l)

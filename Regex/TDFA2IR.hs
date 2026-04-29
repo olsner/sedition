@@ -23,7 +23,7 @@ import CharMap (CharMap)
 import Regex.Regex (Regex)
 import Regex.TaggedRegex as TR
 import Regex.TNFA (genTNFA)
-import Regex.TDFA as TDFA hiding (initState)
+import Regex.TDFA as TDFA hiding (initState, nextReg, newReg)
 import Regex.IR as IR
 
 data LabelType = Checked | Unchecked deriving (Show, Ord, Eq)
@@ -33,10 +33,17 @@ data IRState = IRState {
     firstFreeUnique :: Int,
     graph :: Graph Insn C C,
     labelMap :: Map StateLabel Label,
-    matchLabel :: Label
+    matchLabel :: Label,
+    cursorReg :: R,
+    fallbackReg :: R,
+    freeRegister :: R
   } deriving (Show)
 
-initState = IRState 0 emptyClosedGraph M.empty undefined
+nextReg (R r) = R (succ r)
+initState r1 = IRState 0 emptyClosedGraph M.empty undefined r1 r2 r3
+  where
+    r2 = nextReg r1
+    r3 = nextReg r2
 
 type IRM = State IRState
 
@@ -63,6 +70,12 @@ getLabel s = do
       return l
 setMatchLabel l = modify $ \s -> s { matchLabel = l }
 
+newReg :: IRM R
+newReg = do
+ r <- gets freeRegister 
+ modify $ \s -> s { freeRegister = nextReg r }
+ return r
+
 addBlock :: Graph Insn C C -> IRM ()
 addBlock block = modify $ \s@IRState{..} -> s { graph = graph |*><*| block }
 
@@ -71,8 +84,8 @@ goto l = mkLast (Branch l)
 gofail :: Graph Insn O C
 gofail = mkLast (Fallback setEmpty)
 
-checkBounds d eof cont = mkLast (CheckBounds d eof cont)
-checkEOF = checkBounds 1
+checkBounds pos eof cont = mkLast (CheckBounds pos eof cont)
+checkEOF c = checkBounds (c, 0)
 
 gostate :: StateLabel -> IRM (Graph Insn O C)
 gostate s = getLabel s >>= return . goto
@@ -86,18 +99,22 @@ yystats _ _ = emptyGraph
 debug _ = emptyGraph
 --debug msg = mkMiddle (Trace msg)
 
-emitRegOp :: RegOp -> Graph Insn O O
-emitRegOp (r,val) = mkMiddle (g val) H.<*> yystats "regops" 1
+emitRegOp :: R -> RegOp -> Graph Insn O O
+emitRegOp c (r,val) = mkMiddle (g val) H.<*> yystats "regops" 1
   where
-    g (SetReg Pos) = Set r 0
+    g (SetReg Pos) = Set r (c, 0)
     g (SetReg Nil) = Clear r
     g (CopyReg r2) = Copy r r2
 
 emitCase :: Set StateId -> TDFATrans -> IRM Label
-emitCase nocheckStates (s', regops) = labelBlock =<<
-    (foldMap emitRegOp regops H.<*> mkMiddle (MoveCursor 1) H.<*>) <$>
-    (if skipCheck then gostate_nocheck s' else gostate_check s')
-    where skipCheck = S.member s' nocheckStates
+emitCase nocheckStates (s', regops) = do
+  go <- if skipCheck then gostate_nocheck s' else gostate_check s'
+  c <- gets cursorReg
+  c' <- newReg
+  let updateCursor = mkMiddles [Set c' (c, 1), Copy c c']
+  let block = foldMap (emitRegOp c) regops H.<*> updateCursor H.<*> go
+  labelBlock block
+  where skipCheck = S.member s' nocheckStates
 
 emitCases :: Set StateId -> CharMap TDFATrans -> IRM (CharMap Label)
 emitCases nocheckStates trans = CM.traverse (emitCase nocheckStates) trans
@@ -111,33 +128,37 @@ labelBlock b = do
 emitTrans :: Set StateId -> CharMap TDFATrans -> Label -> IRM (Graph Insn O C)
 emitTrans nocheckStates trans fail = do
     table <- emitCases nocheckStates trans
-    return (mkLast (mkSwitch table fail))
+    c <- gets cursorReg
+    return (mkLast (mkSwitch (c, 0) table fail))
 
-mkSwitch table def | CM.isComplete table = TotalSwitch 0 table
-                   | otherwise           = Switch 0 table def
+mkSwitch pos table def | CM.isComplete table = TotalSwitch pos table
+                       | otherwise           = Switch pos table def
 
 emitState :: TDFA -> StateId -> IRM ()
 emitState TDFA{..} s = mdo
   body <- labelBlock (debug ("state " ++ show s) H.<*> yystats "visited_chars" 1 H.<*> switch)
   switch <- emitTrans nocheckStates trans defaultLabel
 
+  c <- gets cursorReg
+  fc <- gets fallbackReg
+
   matchL <- gets matchLabel
-  fallbackLabel <- labelBlock (fallbackRegOps matchL)
-  eolLabel <- labelBlock (eolRegOps matchL)
+  fallbackLabel <- labelBlock (fallbackRegOps fc matchL)
+  eolLabel <- labelBlock (eolRegOps c matchL)
   entryLabel <- getLabel (s, Checked)
   nocheckLabel <- getLabel (s, Unchecked)
-  addBlock (mkLabel nocheckLabel H.<*> maybeSetFallback fallbackLabel H.<*>
+  addBlock (mkLabel nocheckLabel H.<*> maybeSetFallback c fc fallbackLabel H.<*>
             mkBranch body)
   addBlock (mkLabel entryLabel H.<*>
     -- SimulateTDFA does this after incPos for the state we're going to, so
     -- do it first thing in the state block. Should be the same, I hope :)
-    maybeSetFallback fallbackLabel H.<*>
+    maybeSetFallback c fc fallbackLabel H.<*>
     mkBranch (if minLength > 1 then checkMinLength else checkEOFLabel))
-  checkMinLength <- labelBlock (checkBounds minLength failLabel body)
-  checkEOFLabel <- labelBlock (checkEOF eolLabel body)
+  checkMinLength <- labelBlock (checkBounds (c, minLength) failLabel body)
+  checkEOFLabel <- labelBlock (checkEOF c eolLabel body)
   defaultLabel <- if isFinalState
                     then labelBlock (debug ("default-transition from final " ++ show s) H.<*>
-                                     emitEndRegOps tdfaFinalFunction H.<*>
+                                     emitEndRegOps c tdfaFinalFunction H.<*>
                                      goto matchL)
                     else return failLabel
   failLabel <- labelBlock (debug ("default-transition from non-final " ++ show s) H.<*> gofail)
@@ -148,23 +169,22 @@ emitState TDFA{..} s = mdo
     isFinalState = M.member s tdfaFinalFunction
     isEOLState = M.member s tdfaEOL
 
-    eolRegOps :: Label -> Graph Insn O C
-    eolRegOps matchLabel
-      | isEOLState = emitEndRegOps tdfaEOL H.<*> goto matchLabel
-      | isFinalState = emitEndRegOps tdfaFinalFunction H.<*> goto matchLabel
+    eolRegOps :: RegId -> Label -> Graph Insn O C
+    eolRegOps c matchLabel
+      | isEOLState = emitEndRegOps c tdfaEOL H.<*> goto matchLabel
+      | isFinalState = emitEndRegOps c tdfaFinalFunction H.<*> goto matchLabel
       | otherwise = gofail
 
-    fallbackRegOps :: Label -> Graph Insn O C
-    fallbackRegOps matchLabel | isFallbackState || isFinalState =
-        mkMiddle RestoreCursor H.<*>
+    fallbackRegOps :: RegId -> Label -> Graph Insn O C
+    fallbackRegOps fc matchLabel | isFallbackState || isFinalState =
         -- debug ("Fell back to " <> show s <> " at {{YYPOS}}") <>
-        emitEndRegOps (tdfaFallbackFunction `M.union` tdfaFinalFunction) H.<*>
+        emitEndRegOps fc (tdfaFallbackFunction `M.union` tdfaFinalFunction) H.<*>
         goto matchLabel
                               | otherwise = gofail
 
-    emitEndRegOps opfun = foldMap emitRegOp (M.findWithDefault [] s opfun)
+    emitEndRegOps c opfun = foldMap (emitRegOp c) (M.findWithDefault [] s opfun)
 
-    maybeSetFallback l | isFinalState = mkMiddles [Trace ("setting fallback in " ++ show s), SaveCursor 0, SetFallback l]
+    maybeSetFallback c fc l | isFinalState = mkMiddles [Trace ("setting fallback in " ++ show s), Copy fc c, SetFallback l]
                        | otherwise    = debug ("no fallback from " ++ show s)
 
     minLength | Just min <- M.lookup s tdfaMinLengths, min > 1 = min
@@ -176,8 +196,11 @@ emitState TDFA{..} s = mdo
 
 emitIR :: TDFA -> IRM Program
 emitIR tdfa@TDFA{..} = mdo
-  entry <- labelBlock (mkMiddles [SaveCursor 0, SetFallback failLabel] H.<*>
-    mkLast (IfBOL startLabelBOL startNotBOL))
+  c <- gets cursorReg
+  fc <- gets fallbackReg
+
+  entry <- labelBlock (mkMiddles [InitCursor c, InitCursor fc, SetFallback failLabel] H.<*>
+    mkLast (IfBOL c startLabelBOL startNotBOL))
 
   setMatchLabel matchLabel
 
@@ -185,19 +208,20 @@ emitIR tdfa@TDFA{..} = mdo
   startLabelBOL <- getLabel (tdfaStartState, Checked)
 
   mapM_ (emitState tdfa) (tdfaStates tdfa)
-  matchLabel <- labelBlock (mkLast (Match finalTagRegMap))
+  matchLabel <- labelBlock (mkLast (Match (finalTagRegMap c)))
 
   let startNotBOL | onlyMatchAtBOL = justFail
                   | otherwise      = startLabelNotBOL
 
   -- We get here if we reach the original fallback, i.e. we reach a state where
   -- it's impossible to match the rest of the string.
-  failLabel <- labelBlock (mkMiddle RestoreCursor H.<*> checkEOF justFail retry)
+  failLabel <- labelBlock (mkMiddle (Copy c fc) H.<*> checkEOF c justFail retry)
   justFail <- labelBlock (mkLast Fail)
   -- We have a check bounds and restore cursor before this so we know we're not
   -- at the end of the string and can safely move the cursor by one at least.
   -- Then repeat matching from the starting not-BOL state.
-  retry <- labelBlock (mkMiddles [MoveCursor 1, Trace "retrying", SaveCursor 0, SetFallback failLabel]
+  c' <- newReg
+  retry <- labelBlock (mkMiddles [Set c' (c, 1), Copy c c', Trace "retrying", Copy fc c', SetFallback failLabel]
                        H.<*> goto startNotBOL)
   g <- gets graph
   return (finishProgram entry g)
@@ -205,15 +229,17 @@ emitIR tdfa@TDFA{..} = mdo
   where
     onlyMatchAtBOL = not (M.member tdfaStartStateNotBOL tdfaMinLengths)
 
-    finalTagRegMap = M.union finalTagRegs fixedTags
+    finalTagRegMap c = M.union finalTagRegs (fixedTags c)
     finalTagRegs = M.map (\r -> Reg r 0) tdfaFinalRegisters
-    fixedTags = M.map f tdfaFixedTags
-      where f (TR.EndOfMatch d) = IR.EndOfMatch d
+    fixedTags c = M.map f tdfaFixedTags
+      where f (TR.EndOfMatch d) = Reg c d
             f (TR.FixedTag t d) = add d (M.lookup t finalTagRegs)
             add d2 ~(Just (Reg r d1)) = Reg r (d1 + d2)
 
 genIR :: TDFA -> Program
-genIR tdfa = evalState (emitIR tdfa) initState
+genIR tdfa = evalState (emitIR tdfa) (initState freeReg)
+ where freeReg | regs <- tdfaRegisters tdfa, not (null regs) = nextReg (maximum regs)
+               | otherwise = R 0
 
 tdfa2ir :: Maybe IntSet -> Regex -> Program
 tdfa2ir used = genIR . genTDFA . genTNFA . fixTags . makeSearchRegex . unusedTags . tagRegex

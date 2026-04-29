@@ -5,6 +5,7 @@ module Regex.IR where
 import Compiler.Hoopl as H
 
 import Data.Map (Map)
+import Data.Set (Set)
 import qualified Data.Set as S
 
 import Collections
@@ -16,43 +17,46 @@ import Regex.TaggedRegex (TagId)
 
 type R = RegId
 
-data TagValue
-    = EndOfMatch Int  -- ^ Current position / end of match, minus offset
-    | Reg R Int       -- ^ Register value minus offset
+data TagValue = Reg R Int       -- ^ Register value minus offset
     deriving (Show,Ord,Eq)
+
+type Pos = (R, Int)
 
 data Insn e x where
   Label         :: Label                    -> Insn C O
 
-  -- If we're on the first character of the line, go to the first label
-  -- otherwise go to the second.
-  IfBOL         :: Label -> Label           -> Insn O C
+  -- If register points to the first character of the line, go to the first
+  -- label otherwise go to the second. (TODO beginning of string?)
+  IfBOL         :: R -> Label -> Label      -> Insn O C
   -- Match character at offset against label map, jump to matching label. For
   -- characters not in the label map, go to default-label instead.
-  Switch        :: Int -> CharMap Label -> Label -> Insn O C
+  Switch        :: Pos -> CharMap Label -> Label -> Insn O C
   -- Switch that does not need a default case.
   -- All switches could use this by augmenting them with missing entries, but
   -- then we'd want a corresponding transformation on the output side to e.g.
   -- use default for the most common target label.
-  TotalSwitch   :: Int -> CharMap Label     -> Insn O C
+  TotalSwitch   :: Pos -> CharMap Label     -> Insn O C
   -- Definitely did not match.
   Fail          ::                             Insn O C
   -- Definitely did match. Argument maps tags to final registers, including the
   -- evaluation of fixed tags.
   Match         :: Map TagId TagValue       -> Insn O C
-  -- If EOF is closer than n characters (0 => at eof), go to first label.
+  -- If EOF is at or before Pos, i.e. if EOF is closer than n characters (0 =>
+  -- at eof) from the given register, go to first label.
   -- Otherwise go to second label.
-  CheckBounds   :: Int -> Label -> Label    -> Insn O C
+  CheckBounds   :: Pos -> Label -> Label    -> Insn O C
   Branch        :: Label                    -> Insn O C
 
   Trace         :: String                   -> Insn O O
   -- TODO Add stats counters
 
-  -- R := current position plus offset
-  Set           :: R -> Int                 -> Insn O O
   -- R := nil
   Clear         :: R                        -> Insn O O
-  -- R1 := R2
+  -- R := beginning of string
+  InitCursor    :: R                        -> Insn O O
+  -- R1 := R2 + Offset (not valid for nil source registers)
+  Set           :: R -> Pos                 -> Insn O O
+  -- R1 := R2 (preserving nil)
   Copy          :: R -> R                   -> Insn O O
 
   -- Fallback and restore mechanism.
@@ -61,15 +65,6 @@ data Insn e x where
   Fallback      :: LabelSet                 -> Insn O C
   -- Set fallback to given label.
   SetFallback   :: Label                    -> Insn O O
-
-  -- Move cursor by offset. May not move cursor beyond end of string so bounds
-  -- check is required somewhere before it.
-  MoveCursor    :: Int                      -> Insn O O
-  -- This is done separately to allow fallback to at least sometimes be
-  -- optimized out to a direct branch.
-  SaveCursor    :: Int                      -> Insn O O
-  -- TODO Should the restore also have an offset?
-  RestoreCursor ::                             Insn O O
 
 deriving instance Show (Insn e x)
 deriving instance Eq (Insn e x)
@@ -83,7 +78,7 @@ instance Show (Graph Insn e x) where
 
 instance NonLocal Insn where
   entryLabel (Label l) = l
-  successors (IfBOL l1 l2) = [l1, l2]
+  successors (IfBOL _ l1 l2) = [l1, l2]
   successors (Branch l) = [l]
   successors (Switch _ cm l) = S.toList (S.insert l (CM.elemSet cm))
   successors (TotalSwitch _ cm) = S.toList (CM.elemSet cm)
@@ -121,7 +116,8 @@ allRegs :: Program -> RegSet
 allRegs Program{..} = foldGraphNodes f programGraph setEmpty
   where
     f :: Insn e x -> RegSet -> RegSet
-    f (Set r _) = setInsert r
+    f (Set r (r2, _)) = setInsert r . setInsert r2
+    f (Copy r r2) = setInsert r . setInsert r2
     f (Clear r) = setInsert r
-    f (Copy r1 r2) = setInsert r1 . setInsert r2
+    f (InitCursor r) = setInsert r
     f _ = id

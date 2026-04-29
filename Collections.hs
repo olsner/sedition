@@ -190,3 +190,39 @@ instance IsSet RegSet where
   setElems (RS s) = map R (S.elems s)
   setFromList ks = RS (S.fromList [k | R k <- ks])
 
+
+newtype RegMap a = RM (M.IntMap a)
+  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+
+instance IsMap RegMap where
+  type KeyOf RegMap = RegId
+
+  mapNull (RM m) = M.null m
+  mapSize (RM m) = M.size m
+  mapMember (R k) (RM m) = M.member k m
+  mapLookup (R k) (RM m) = M.lookup k m
+  mapFindWithDefault def (R k) (RM m) = M.findWithDefault def k m
+
+  mapEmpty = RM M.empty
+  mapSingleton (R k) v = RM (M.singleton k v)
+  mapInsert (R k) v (RM m) = RM (M.insert k v m)
+  mapInsertWith f (R k) v (RM m) = RM (M.insertWith f k v m)
+  mapDelete (R k) (RM m) = RM (M.delete k m)
+
+  mapUnion (RM x) (RM y) = RM (M.union x y)
+  mapUnionWithKey f (RM x) (RM y) = RM (M.unionWithKey (f . R) x y)
+  mapDifference (RM x) (RM y) = RM (M.difference x y)
+  mapIntersection (RM x) (RM y) = RM (M.intersection x y)
+  mapIsSubmapOf (RM x) (RM y) = M.isSubmapOf x y
+
+  mapMap f (RM m) = RM (M.map f m)
+  mapMapWithKey f (RM m) = RM (M.mapWithKey (f . R) m)
+  mapFold k z (RM m) = M.foldr k z m
+  mapFoldWithKey k z (RM m) = M.foldrWithKey (k . R) z m
+  mapFilter f (RM m) = RM (M.filter f m)
+
+  mapElems (RM m) = M.elems m
+  mapKeys (RM m) = map R (M.keys m)
+  mapToList (RM m) = [(R k, v) | (k,v) <- M.toList m]
+  mapFromList assocs = RM (M.fromList [(k, v) | (R k, v) <- assocs])
+  mapFromListWith f assocs = RM (M.fromListWith f [(k, v) | (R k, v) <- assocs])

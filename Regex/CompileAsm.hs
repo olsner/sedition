@@ -63,11 +63,6 @@ tagValue (IR.Reg r d) res = do
   setInt (-1) res
   label isSet
 
-tagValue (EndOfMatch d) res = do
-  copy yycursor (regA res)
-  sub (regA res) yybegin
-  when (d > 0) $ sub (regA res) (intDec d)
-
 declareReg :: R -> Builder ()
 declareReg r = label ("." <> showB r) <> op1 "resq" "1"
 
@@ -164,7 +159,6 @@ genAsm program@Program{..} = do
     op "mov" [yybegin, mem (yystring <> " + " <> intDec stringBufOffset)]
     op "mov" [yylimit, yybegin]
     op "add" [yylimit, mem (yystring <> " + " <> intDec stringLenOffset)]
-    op "lea" [yycursor, mem (yybegin <> " + " <> yyorigOffset)]
     postOrderRegisterBlocks program
     comment "Jump to entry point"
     gotoL entryPoint
@@ -232,13 +226,14 @@ emitInsn :: Insn e x -> Builder ()
 emitInsn (Label l) = label (lblname l)
 
 -- O C control flow
-emitInsn (IfBOL tl fl) = do
+emitInsn (IfBOL r tl fl) = do
   comment ("if BOL: " <> lblname tl <> " else: " <> lblname fl)
-  cmp yycursor yybegin
+  cmp (yyreg r) yybegin
   je (lblname tl)
   gotoL fl
-emitInsn (Switch offset cm def) = do
+emitInsn (Switch (r, offset) cm def) = do
   comment "Switch {"
+  op "mov" [yycursor, qword_ptr (yyreg r)]
   loadUInt8At yycursor offset res0
   case CM.toRanges cm of
     -- A bit of a subtle point - the list of character ranges is "or:ed"
@@ -253,8 +248,9 @@ emitInsn (Switch offset cm def) = do
       gotoL def
 -- TODO Do I transform total switches to partial switches? Makes sense if most
 -- cases are the same to flip the sense of the switch.
-emitInsn (TotalSwitch offset cm) = do
+emitInsn (TotalSwitch (r, offset) cm) = do
   comment "Total switch {"
+  op "mov" [yycursor, qword_ptr (yyreg r)]
   loadUInt8At yycursor offset res0
   -- Could skip the last comparison for a total switch.
   foldMap (emitCases True) (CM.toRanges cm)
@@ -265,17 +261,18 @@ emitInsn (Match tagMap) =
     foldMap matchFromTag (M.toList tagMap) <>
     setInt 1 res0 <>
     goto ".end"
-emitInsn (CheckBounds 1 eof cont) = do
+emitInsn (CheckBounds (r,1) eof cont) = do
   comment ("Need >= 1 char")
-  cmp yylimit yycursor
+  cmp yylimit (yyreg r)
   jbe (lblname eof)
   gotoL cont
-emitInsn (CheckBounds n eof cont) = do
+emitInsn (CheckBounds (r,n) eof cont) = do
   comment ("Need >= " <> intDec n <> " chars")
   -- instead of yylimit < pos+n, test yylimit <= pos+(n-1) to allow one more
   -- case to fit in a byte-size offset. n > 1 (so n-1 > 0), since we already
   -- checked the 0 case above.
-  setAddr (yycursor <> " + " <> intDec (n - 1)) res0
+  loadAddr (yyreg r) res0
+  setAddr (regA res0 <> " + " <> intDec (n - 1)) res0
   cmp yylimit (regA res0)
   jbe (lblname eof)
   gotoL cont
@@ -283,30 +280,30 @@ emitInsn (Branch l) = gotoL l
 
 -- O O debugging
 emitInsn (Trace msg) = comment (string8 msg)
--- O O primitives
-emitInsn (Set r 0) = do
-  comment (showB r <> " := YYCURSOR")
-  op "mov" [mem (yyreg r), yycursor]
-emitInsn (Set r offset) = do
-  comment (showB r <> " := YYCURSOR + " <> intDec offset)
-  op "lea" [yytmp, mem (yycursor <> " + " <> intDec offset)]
-  op "mov" [mem (yyreg r), yytmp]
+-- O O register primitives
+-- TODO Make sure these support assigning registers to registers, in particular
+-- for the cursor register.
+emitInsn (Set r (r2, 0)) = do
+  comment (showB r <> " := " <> showB r2)
+  loadAddr (yyreg r2) res0
+  storeAddr (yyreg r) res0
+emitInsn (Set r (r2, offset)) = do
+  comment (showB r <> " := " <> showB r2 <> " + " <> intDec offset)
+  loadAddr (yyreg r2) res0
+  op "add" [regA res0, intDec offset]
+  storeAddr (yyreg r) res0
 emitInsn (Clear r) = do
   comment (showB r <> " := nullptr")
   op "mov" [qword_ptr (yyreg r), "0"]
 emitInsn (Copy r r2) = do
   comment (showB r <> " := " <> showB r2)
-  -- r := r2
   loadAddr (yyreg r2) res0
   storeAddr (yyreg r) res0
+emitInsn (InitCursor r) = do
+  comment (showB r <> " := YYBEGIN")
+  op "lea" [yycursor, mem (yybegin <> " + " <> yyorigOffset)]
+  op "mov" [qword_ptr (yyreg r), yycursor]
 
--- O O cursor operations
-emitInsn (MoveCursor 0) = mempty
-emitInsn (MoveCursor 1) = inc yycursor
-emitInsn (MoveCursor i) = error ("Unhandled movement value " ++ show i)
-emitInsn (SaveCursor 0) = copy yycursor fallbackCursor
-emitInsn (SaveCursor i) = op "lea" [fallbackCursor, mem (yycursor <> " + " <> intDec i)]
-emitInsn RestoreCursor = copy fallbackCursor yycursor
 -- O O fallback operations
 emitInsn (Fallback _) = goto (regA fallbackLabel)
 emitInsn (SetFallback l) = setAddr (lblname l) fallbackLabel

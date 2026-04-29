@@ -21,8 +21,9 @@ import Regex.TDFA2IR (testTDFA2IR)
 import Regex.OptimizeIR (optimize)
 
 data S = S { buffer :: String, bufferLength :: Int,
-             registers :: Map R Int, position :: Int, program :: Program,
-             fallbackCursor :: Int, fallbackLabel :: Label,
+             registers :: Map R Int, program :: Program,
+             fallbackLabel :: Label,
+             cursorReg :: Maybe R,
              debugEnabled :: Bool }
          deriving (Show)
 
@@ -30,13 +31,13 @@ initState s p = S {
   buffer = s,
   bufferLength = length s,
   registers = M.empty,
-  position = 0,
   program = p,
-  fallbackCursor = error "Fallback cursor used before init",
   fallbackLabel = error "Fallback label used before init",
+  cursorReg = Nothing,
   debugEnabled = False }
 
-showState S{..} = "@" ++ show position ++ " " ++ show (drop position buffer) ++ " fallback @" ++ show fallbackCursor
+showState S{..} = "@" ++ show position ++ " " ++ show (drop position buffer)
+  where position | Just c <- cursorReg = registers M.! c | otherwise = 0
 
 blocks S{ program = Program { programGraph = GMany _ blocks _ } } = blocks
 
@@ -44,10 +45,11 @@ type Result = Maybe (Map TagId Int)
 
 type M a = StateT S (Either Result) a
 
-move i s@S{..} = s { position = position + i }
-char i = gets (\S{..} -> buffer !! (position + i))
+char (r, i) = gets (\S{..} -> buffer !! (registers M.! r + i))
+setCursorReg r = modify $ \s -> s { cursorReg = Just r }
 
 getReg r = gets (M.lookup r . registers)
+getReg' r = fromJust <$> getReg r
 setReg r val = modify $ \s@S{..} -> s { registers = M.insert r val registers }
 clearReg r = modify $ \s@S{..} -> s { registers = M.delete r registers }
 
@@ -72,8 +74,8 @@ run :: Insn e x -> M ()
 run (Label _) = return ()
 
 -- O C control flow
-run (IfBOL tl fl) = do
-  bol <- gets ((<= 0) . position)
+run (IfBOL r tl fl) = do
+  bol <- (<= 0) <$> getReg' r
   runLabel (if bol then tl else fl)
 run (Switch offset cm def) = do
   c <- char offset
@@ -84,30 +86,26 @@ run (TotalSwitch offset cm) = do
 run Fail = lift (Left Nothing)
 run (Match tagMap) = do
   regs <- gets registers
-  pos <- gets position
-  lift (Left (Just (resolveTagMap pos regs tagMap)))
-run (CheckBounds n eof cont) = do
+  lift (Left (Just (resolveTagMap regs tagMap)))
+run (CheckBounds (r, n) eof cont) = do
   len <- gets bufferLength
-  pos <- gets position
+  pos <- getReg' r
   runLabel (if pos + n > len then eof else cont)
 run (Branch l) = runLabel l
 
 run (Trace msg) = do
     s <- get
     when (debugEnabled s) $ traceM (msg ++ ": " ++ showState s)
-run (MoveCursor i) = modify (move i)
-run (Set r i) = setReg r =<< gets ((+ i) . position)
+run (Set r (r2, i)) = setReg r =<< (+ i) <$> getReg' r2
 run (Clear r) = clearReg r
 run (Copy r r2) = setReg' r =<< getReg r2
+run (InitCursor r) = setReg r 0 >> setCursorReg r
 
 run (Fallback _) = runLabel =<< gets fallbackLabel
 run (SetFallback l) = modify $ \s -> s { fallbackLabel = l }
-run (SaveCursor i) = modify $ \s@S{..} -> s { fallbackCursor = position + i }
-run RestoreCursor = modify $ \s@S{..} -> s { position = fallbackCursor }
 
-resolveTagMap pos regs = M.map f
+resolveTagMap regs = M.map f
   where
-    f (IR.EndOfMatch d) = pos - d
     f (IR.Reg r d) | Just val <- M.lookup r regs = val - d
                    | otherwise = (-1)
 

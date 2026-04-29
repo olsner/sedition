@@ -10,12 +10,11 @@ import Regex.IR
 
 import Regex.Optimize.IdenticalBlocks (mergeIdenticalBlocks)
 import Regex.Optimize.LiveRegister (liveRegisterPass)
-import Regex.Optimize.LiveSaveCursor (liveSaveCursorPass)
 import Regex.Optimize.LiveSetFallback (liveSetFallbackPass)
 import Regex.Optimize.PossibleFallback (possibleFallbackPass)
+import Regex.Optimize.PropagateRegister (propagateRegisterPass)
 import Regex.Optimize.RedundantBranches (redundantBranchesPass)
 import Regex.Optimize.RedundantCheckBounds (redundantCheckBoundsPass)
-import Regex.Optimize.RedundantRestoreCursor (redundantRestoreCursorPass)
 import Regex.Optimize.SameResult (sameResultPass)
 
 --debugBwd = debugBwdJoins trace (const True)
@@ -49,10 +48,8 @@ optimizeOnce entry program = do
     analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
   program <- tracePass "liveSetFallback" $
     analyzeAndRewriteBwd liveSetFallbackPass entries program mapEmpty
-  program <- tracePass "redundantRestoreCursor" $
-    analyzeAndRewriteFwd redundantRestoreCursorPass entries program mapEmpty
-  program <- tracePass "liveSaveCursor" $
-    analyzeAndRewriteBwd liveSaveCursorPass entries program mapEmpty
+  program <- tracePass "propagateRegister" $
+    analyzeAndRewriteFwd propagateRegisterPass entries program mapEmpty
   program <- tracePass "possibleFallback" $
     analyzeAndRewriteFwd possibleFallbackPass entries program mapEmpty
   program <- tracePass "liveRegister" $

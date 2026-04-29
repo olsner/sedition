@@ -73,12 +73,11 @@ executable sedition
                       Regex.CompileIR
                       Regex.CompileAsm
                       Regex.Optimize.LiveRegister
-                      Regex.Optimize.LiveSaveCursor
                       Regex.Optimize.LiveSetFallback
                       Regex.Optimize.PossibleFallback
+                      Regex.Optimize.PropagateRegister
                       Regex.Optimize.RedundantBranches
                       Regex.Optimize.RedundantCheckBounds
-                      Regex.Optimize.RedundantRestoreCursor
                       Regex.Optimize.SameResult
                       Regex.Optimize.IdenticalBlocks
                       CharMap RangeMap GenC
@@ -116,12 +115,11 @@ executable tdfa2c
                       Regex.CompileIR
                       Regex.CompileAsm
                       Regex.Optimize.LiveRegister
-                      Regex.Optimize.LiveSaveCursor
                       Regex.Optimize.LiveSetFallback
                       Regex.Optimize.PossibleFallback
+                      Regex.Optimize.PropagateRegister
                       Regex.Optimize.RedundantBranches
                       Regex.Optimize.RedundantCheckBounds
-                      Regex.Optimize.RedundantRestoreCursor
                       Regex.Optimize.SameResult
                       Regex.Optimize.IdenticalBlocks
                       Collections CharMap RangeMap GenC

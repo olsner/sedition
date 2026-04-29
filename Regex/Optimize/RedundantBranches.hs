@@ -38,9 +38,9 @@ rewrite = deepBwdRw rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x RBFact -> m (Maybe (Graph Insn e x))
     -- Do just one change at a time so that optimization fuel applies.
-    rw i@(IfBOL tl fl) f
-        | Just tl' <- label tl f     = rwLast i (IfBOL tl' fl)
-        | Just fl' <- label fl f     = rwLast i (IfBOL tl fl')
+    rw i@(IfBOL r tl fl) f
+        | Just tl' <- label tl f     = rwLast i (IfBOL r tl' fl)
+        | Just fl' <- label fl f     = rwLast i (IfBOL r tl fl')
     rw i@(CheckBounds n l1 l2) f
         | Just l1' <- label l1 f     = rwLast i (CheckBounds n l1' l2)
         | Just l2' <- label l2 f     = rwLast i (CheckBounds n l1 l2')
@@ -88,7 +88,7 @@ simplifySameIfs :: FuelMonad m => BwdRewrite m Insn RBFact
 simplifySameIfs = deepBwdRw rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x RBFact -> m (Maybe (Graph Insn e x))
-    rw (IfBOL tl fl)         f | tl == fl = rwLast (Branch tl)
+    rw (IfBOL _ tl fl)       f | tl == fl = rwLast (Branch tl)
                                | Just i' <- same tl fl f = rwLast i'
     rw (CheckBounds _ tl fl) f | tl == fl = rwLast (Branch tl)
                                | Just i' <- same tl fl f = rwLast i'
