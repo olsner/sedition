@@ -22,8 +22,7 @@ import Regex.OptimizeIR (optimize)
 
 data S = S { buffer :: String, bufferLength :: Int,
              registers :: Map R Int, program :: Program,
-             fallbackLabel :: Label,
-             cursorReg :: Maybe R,
+             fallbackLabel :: Maybe Label,
              debugEnabled :: Bool }
          deriving (Show)
 
@@ -32,12 +31,10 @@ initState s p = S {
   bufferLength = length s,
   registers = M.empty,
   program = p,
-  fallbackLabel = error "Fallback label used before init",
-  cursorReg = Nothing,
-  debugEnabled = False }
+  fallbackLabel = Nothing,
+  debugEnabled = True }
 
-showState S{..} = "@" ++ show position ++ " " ++ show (drop position buffer)
-  where position | Just c <- cursorReg = registers M.! c | otherwise = 0
+showState S{..} = "@" ++ show registers
 
 blocks S{ program = Program { programGraph = GMany _ blocks _ } } = blocks
 
@@ -46,7 +43,6 @@ type Result = Maybe (Map TagId Int)
 type M a = StateT S (Either Result) a
 
 char (r, i) = gets (\S{..} -> buffer !! (registers M.! r + i))
-setCursorReg r = modify $ \s -> s { cursorReg = Just r }
 
 getReg r = gets (M.lookup r . registers)
 getReg' r = fromJust <$> getReg r
@@ -68,7 +64,12 @@ runLabel entry = do
       Just block -> runBlock block
       Nothing    -> error ("Entry " ++ show entry ++ " not found in graph?")
 
-runBlock block = foldBlockNodesF (\n z -> z >> run n) block (return ())
+traceInsn n = do
+  s <- get
+  trace (showState s) (return ())
+  trace (show n) (return ())
+
+runBlock block = foldBlockNodesF (\n z -> z >> traceInsn n >> run n) block (return ())
 
 run :: Insn e x -> M ()
 run (Label _) = return ()
@@ -90,6 +91,7 @@ run (Match tagMap) = do
 run (CheckBounds (r, n) eof cont) = do
   len <- gets bufferLength
   pos <- getReg' r
+  trace (show (pos,n,len)) (return ())
   runLabel (if pos + n > len then eof else cont)
 run (Branch l) = runLabel l
 
@@ -99,10 +101,10 @@ run (Trace msg) = do
 run (Set r (r2, i)) = setReg r =<< (+ i) <$> getReg' r2
 run (Clear r) = clearReg r
 run (Copy r r2) = setReg' r =<< getReg r2
-run (InitCursor r) = setReg r 0 >> setCursorReg r
+run (InitCursor r) = setReg r 0
 
-run (Fallback _) = runLabel =<< gets fallbackLabel
-run (SetFallback l) = modify $ \s -> s { fallbackLabel = l }
+run (Fallback _) = runLabel =<< gets (fromJust . fallbackLabel)
+run (SetFallback l) = modify $ \s -> s { fallbackLabel = Just l }
 
 resolveTagMap regs = M.map f
   where

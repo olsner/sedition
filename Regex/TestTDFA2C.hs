@@ -30,6 +30,7 @@ import Regex.TDFA2IR (genIR)
 import Regex.CompileIR (genC)
 import Regex.CompileAsm (genAsm)
 import Regex.OptimizeIR (optimize)
+import qualified Regex.RunIR as RunIR (runIR)
 import qualified EmitAsm
 import qualified GenAsm
 import GenC
@@ -37,6 +38,8 @@ import GenC
 doSimulateTDFA tdfa s = print (runTDFA True tdfa s)
 
 doSimulateTNFA tnfa s = print (tnfaMatch tnfa s)
+
+doRunIR ir s = print (RunIR.runIR s ir)
 
 compileIR ir output = C.writeFile output . toByteString $
     programHeader output <> genC ir <> programFooter
@@ -123,6 +126,7 @@ data Options = Options
   , linkIt :: Bool
   , runIt :: Bool
   , runTNFA :: Bool
+  , runIR :: Bool
   , noTags :: Bool
   , defines :: [String]
   , strings :: [String]
@@ -144,6 +148,7 @@ defaultOptions = Options
     , linkIt = True
     , runIt = True
     , runTNFA = False
+    , runIR = False
     , noTags = False
     , fuel = 1000000
     , defines = []
@@ -160,6 +165,7 @@ tdfa2cOptions =
   , Option ['c'] ["compile"] (NoArg $ \o -> o { compileIt = True }) "Compile the regex to C code, compile and run it to match strings (if given)"
   , Option ['S'] ["assemble"] (NoArg $ \o -> o { assembleIt = True }) "Compile the regex to assembly, assemble and run it to match strings (if given)"
   , Option ['n'] ["run-tnfa"] (NoArg $ \o -> o { runTNFA = True }) "match using TNFA"
+  , Option ['i'] ["run-ir"] (NoArg $ \o -> o { runIR = True }) "match by simulating intermediate representation"
   , Option [] ["dump-parse"] (NoArg $ \o -> o { dumpParse = True }) "parse and print the parsed regex"
   , Option [] ["dump-tnfa"] (NoArg $ \o -> o { dumpTNFA = True }) "show the TNFA state machine"
   , Option [] ["dump-tdfa"] (NoArg $ \o -> o { dumpTDFA = True }) "show the TDFA state machine"
@@ -285,9 +291,10 @@ do_main args = do
 
     when (not (null strings)) $ do
       tProgStart <- timestamp
-      status <- if compileIt || assembleIt
-        then runExecutable exeOutputFile strings
-        else mapM_ (doSimulateTDFA tdfa) strings >> return ExitSuccess
+      status <- case () of
+        () | compileIt || assembleIt -> runExecutable exeOutputFile strings
+           | runIR -> mapM_ (doRunIR optimized) strings >> return ExitSuccess
+           | otherwise -> mapM_ (doSimulateTDFA tdfa) strings >> return ExitSuccess
       tProgEnd <- timestamp
 
       when timeIt $ do
