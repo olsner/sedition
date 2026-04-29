@@ -228,7 +228,7 @@ emitInsn (Label l) = label (lblname l)
 -- O C control flow
 emitInsn (IfBOL r tl fl) = do
   comment ("if BOL: " <> lblname tl <> " else: " <> lblname fl)
-  cmp (yyreg r) yybegin
+  cmp (mem (yyreg r)) yybegin
   je (lblname tl)
   gotoL fl
 emitInsn (Switch (r, offset) cm def) = do
