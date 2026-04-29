@@ -85,7 +85,7 @@ gofail :: Graph Insn O C
 gofail = mkLast (Fallback setEmpty)
 
 checkBounds pos eof cont = mkLast (CheckBounds pos eof cont)
-checkEOF c = checkBounds (c, 0)
+checkEOF c = checkBounds (c, 1)
 
 gostate :: StateLabel -> IRM (Graph Insn O C)
 gostate s = getLabel s >>= return . goto
