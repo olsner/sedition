@@ -37,6 +37,7 @@ gen (Match tagMap) f = setUnion f (setFromList (map reg (M.elems tagMap)))
 gen (IfBOL r _ _)  f = setInsert r f
 gen (Switch (r,_) _ _) f = setInsert r f
 gen (TotalSwitch (r,_) _) f = setInsert r f
+gen (CheckBounds (r,_) _ _) f = setInsert r f
 gen _              f = f
 
 liveRegisterTransfer :: BwdTransfer Insn LiveRegFact
