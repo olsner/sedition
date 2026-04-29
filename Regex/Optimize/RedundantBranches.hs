@@ -69,16 +69,12 @@ rewrite = deepBwdRw rw
     label l f | Just (PElem (Branch l')) <- mapLookup l f = Just l'
               | otherwise                                 = Nothing
 
-    -- Doesn't seem to ever actually do anything?
     mapLabels :: CharMap Label -> FactBase RBFact -> Maybe (CharMap Label)
     mapLabels cm f | cm' == cm = Nothing
-                   | otherwise = trace ("Found switch label rewrite! " ++ show cm ++ " -> " ++ show cm') $ Just cm'
+                   | otherwise = Just cm'
       -- TODO Add map function instead of using traverse
       where Just cm' = CM.traverse fun cm
-            fun l | Just l' <- label l f = trace ("Found switch label rewrite! " ++ show l ++ " -> " ++ show l') $ Just l'
-                  -- The SameResult optimization produces this case now, so
-                  -- skip tracing.
-                  -- | Just _  <- insn l f  = trace ("can't have instruction in switch, but: " ++ show l ++ " -> " ++ show i) $ Just l
+            fun l | Just l' <- label l f = Just l'
                   | otherwise            = Just l
 
     oneLabel cm | [(_,label)] <- CM.toRanges cm = Just label
