@@ -57,7 +57,7 @@ tagValue (IR.Reg r d) res = do
   loadAddr (yyreg r) res
   jz res notSet
   sub (regA res) yybegin
-  when (d > 0) $ sub (regA res) (intDec d)
+  when (d /= 0) $ sub (regA res) (intDec d)
   goto isSet
   label notSet
   setInt (-1) res
@@ -263,7 +263,7 @@ emitInsn (Match tagMap) =
     goto ".end"
 emitInsn (CheckBounds (r,1) eof cont) = do
   comment ("Need >= 1 char")
-  cmp yylimit (yyreg r)
+  cmp yylimit (mem (yyreg r))
   jbe (lblname eof)
   gotoL cont
 emitInsn (CheckBounds (r,n) eof cont) = do
