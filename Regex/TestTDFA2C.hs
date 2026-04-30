@@ -7,6 +7,7 @@ import Control.Monad
 
 import qualified Data.ByteString.Char8 as C
 import Data.FileEmbed (embedStringFile)
+import Data.Maybe (isJust)
 import Data.String
 import Data.Time
 
@@ -131,6 +132,8 @@ data Options = Options
   , defines :: [String]
   , strings :: [String]
   , fuel :: Int
+  , goodFuel :: Maybe Int
+  , badFuel :: Maybe Int
   } deriving (Show, Eq)
 defaultOptions = Options
     { extendedRegexps = False
@@ -151,6 +154,8 @@ defaultOptions = Options
     , runIR = False
     , noTags = False
     , fuel = 1000000
+    , goodFuel = Nothing
+    , badFuel = Nothing
     , defines = []
     , strings = [] }
 addString s o = o { strings = s : strings o }
@@ -158,6 +163,11 @@ setCOutputFile f o = o { cOutputFile = f, sOutputFile = f }
 setExeOutputFile f o = o { exeOutputFile = f, linkIt = True }
 addDefine f o = o { defines = f : defines o }
 setFuel f o = o { fuel = f }
+setGoodFuel f o = binarySearchFuel $ o { goodFuel = Just f }
+setBadFuel f o = binarySearchFuel $ o { badFuel = Just f }
+binarySearchFuel o@Options{..}
+  | Just g <- goodFuel, Just b <- badFuel, f <- div (g + b + 1) 2 = o { fuel = f }
+  | otherwise = o
 
 tdfa2cOptions =
   [ Option ['r', 'E'] ["regexp-extended"] (NoArg $ \o -> o { extendedRegexps = True }) "Use extended regexps"
@@ -176,6 +186,8 @@ tdfa2cOptions =
   , Option ['D'] [] (ReqArg addDefine "MACRO") "Add macro to C compilation"
   , Option ['O'] ["opt-fuel"] (ReqArg (setFuel . read) "FUEL") "override amount of optimization fuel for optimizations. -O0 to disable optimizations."
   , Option ['T'] ["no-tags"] (NoArg $ \o -> o { noTags = True }) "Don't emit tags"
+  , Option ['G'] ["good-fuel"] (ReqArg (setGoodFuel . read) "FUEL") "known-good optimization fuel setting for binary search"
+  , Option ['B'] ["bad-fuel"] (ReqArg (setBadFuel . read) "FUEL") "known-bad optimization fuel setting for binary search"
   ]
 
 do_main args = do
@@ -185,6 +197,8 @@ do_main args = do
     mapM_ putStrLn (errors ++ [usage])
     exitFailure
   let Options{..} = foldl (.) id optFuns defaultOptions
+  when (isJust goodFuel && isJust badFuel) $ do
+    hPutStrLn stderr ("Binary search: using " ++ show fuel ++ " optimization fuel")
 
   let regex:strings = nonOpts
 
