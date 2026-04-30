@@ -26,7 +26,9 @@ propRegLattice = DataflowLattice
           | r1 /= r2, d2 > d1 = (SomeChange, PElem new)
           | otherwise  = (SomeChange, Top)
 
-update r new = cleanup . mapInsert r new
+-- TODO Needs a more efficient data structure!
+-- e.g. track (reverse) dependencies in a RegMap RegSet as well?
+update r new = mapInsert r new . const mapEmpty -- cleanup
   where
     cleanup :: PropRegFact -> PropRegFact
     cleanup  = mapFilter (\t -> case t of PElem (r2,_) -> r2 /= r; Top -> True)
@@ -60,7 +62,7 @@ propagateRegister = mkFRewrite rw
       | Just (PElem (r3,d)) <- mapLookup r2 f, r3 < r1 = rwMid (Set r1 (r3, d + n))
     rw (Copy r1 r2) f
       | Just (PElem (r3,d)) <- mapLookup r2 f, r3 < r1 = rwMid (Set r1 (r3, d))
-    rw (Set r1 (r2,0)) f = rwMid (Copy r1 r2)
+    rw (Set r1 (r2,0)) _ = rwMid (Copy r1 r2)
     rw (Switch (r1,n) table def) f
       | Just (PElem (r2,d)) <- mapLookup r1 f = rwLast (Switch (r2,d+n) table def)
     rw (TotalSwitch (r1,n) table) f

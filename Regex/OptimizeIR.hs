@@ -21,7 +21,7 @@ import Regex.Optimize.SameResult (sameResultPass)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
 --debugBwd = id
 
-doTrace = False
+doTrace = True
 
 traceFuel :: FuelMonad m => Int -> m ()
 traceFuel oldFuel = do
@@ -48,10 +48,17 @@ optimizeOnce entry program = do
     analyzeAndRewriteBwd redundantBranchesPass entries program mapEmpty
   program <- tracePass "liveSetFallback" $
     analyzeAndRewriteBwd liveSetFallbackPass entries program mapEmpty
-  program <- tracePass "propagateRegister" $
-    analyzeAndRewriteFwd propagateRegisterPass entries program mapEmpty
   program <- tracePass "possibleFallback" $
     analyzeAndRewriteFwd possibleFallbackPass entries program mapEmpty
+  -- Since propagate register is what (generally) kills most registers, run it
+  -- before live register to hopefully reduce the amount of work for
+  -- redundantCheckBounds...
+  program <- tracePass "propagateRegister" $
+    analyzeAndRewriteFwd propagateRegisterPass entries program mapEmpty
+  program <- tracePass "liveRegister" $
+    analyzeAndRewriteBwd liveRegisterPass entries program mapEmpty
+  program <- tracePass "propagateRegister" $
+    analyzeAndRewriteFwd propagateRegisterPass entries program mapEmpty
   program <- tracePass "liveRegister" $
     analyzeAndRewriteBwd liveRegisterPass entries program mapEmpty
   program <- tracePass "redundantCheckBounds" $
