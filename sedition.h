@@ -451,15 +451,15 @@ static void print_match(bool res, match_t* m, string* s)
     }
     printf("\"%.*s\" MATCHED:\n", (int)s->len, s->buf);
     for (int i = 0; i < MAXTAGS; i += 2) {
-        if (i == 0 || (m->tags[i] >= 0 && m->tags[i + 1] >= 0)) {
+        if (i == 0 || m->tags[i] >= 0 || m->tags[i + 1] >= 0) {
             printf("\t%d: %td..%td\n", i / 2, m->tags[i], m->tags[i + 1]);
             if (m->tags[i] > m->tags[i + 1]) {
                 printf("ERROR! starts after end?\n");
             }
-            if (m->tags[i] > s->len) {
+            if (m->tags[i] >= 0 && m->tags[i] > s->len) {
                 printf("ERROR! match starts outside string?\n");
             }
-            if (m->tags[i + 1] > s->len) {
+            if (m->tags[i] >= 0 && m->tags[i + 1] > s->len) {
                 printf("ERROR! match ends outside string?\n");
             }
         }
