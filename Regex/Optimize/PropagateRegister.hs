@@ -58,6 +58,9 @@ propagateRegister :: FuelMonad m => FwdRewrite m Insn PropRegFact
 propagateRegister = mkFRewrite rw
   where
     rw :: FuelMonad m => Insn e x -> PropRegFact -> m (Maybe (Graph Insn e x))
+    -- TODO Not very principled with just checking the index... The goal should
+    -- be to maximize the offset to try to do as much as possible from the
+    -- furthest-back register?
     rw (Set r1 (r2,n)) f
       | Just (PElem (r3,d)) <- mapLookup r2 f, r3 < r1 = rwMid (Set r1 (r3, d + n))
     rw (Copy r1 r2) f

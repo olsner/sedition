@@ -22,6 +22,7 @@ import Data.Word (Word8)
 import RangeMap (RangeMap)
 import qualified RangeMap as RM
 
+-- TODO Make into a newtype and make a nicer Show instance
 type CharMap a = RangeMap Word8 a
 
 w8 :: Char -> Word8

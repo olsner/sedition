@@ -21,7 +21,7 @@ import Regex.Optimize.SameResult (sameResultPass)
 --debugBwd = debugBwdTransfers trace showInsn (\n f -> True)
 --debugBwd = id
 
-doTrace = True
+doTrace = False
 
 traceFuel :: FuelMonad m => Int -> m ()
 traceFuel oldFuel = do
