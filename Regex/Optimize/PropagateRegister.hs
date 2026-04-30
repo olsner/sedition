@@ -5,7 +5,7 @@ module Regex.Optimize.PropagateRegister (propagateRegisterPass) where
 import Compiler.Hoopl as H hiding (joinMaps)
 
 import qualified Data.Map as M
---import Debug.Trace
+import Debug.Trace
 
 import Regex.IR
 
@@ -20,18 +20,19 @@ propRegLattice = DataflowLattice
  { fact_name = "Propagate register offsets"
  , fact_bot  = mapEmpty
  , fact_join = joinMaps (extendJoinDomain add) }
- where add _ (OldFact old@(r1,d1)) (NewFact new@(r2,d2))
+ where add _ (OldFact old) (NewFact new)
           | new == old = (NoChange, PElem old)
-          -- Prefer to use common registers with higher offsets
-          | r1 /= r2, d2 > d1 = (SomeChange, PElem new)
           | otherwise  = (SomeChange, Top)
 
 -- TODO Needs a more efficient data structure!
 -- e.g. track (reverse) dependencies in a RegMap RegSet as well?
-update r new = mapInsert r new . const mapEmpty -- cleanup
+update r new = mapInsert r new . cleanup
   where
     cleanup :: PropRegFact -> PropRegFact
-    cleanup  = mapFilter (\t -> case t of PElem (r2,_) -> r2 /= r; Top -> True)
+    cleanup  = mapMap f
+    -- Break dependencies on this variable
+    f (PElem (r2, _)) | r2 == r = Top
+    f x                         = x
 
 propagateRegisterTransfer :: FwdTransfer Insn PropRegFact
 propagateRegisterTransfer = mkFTransfer3 first middle last
@@ -43,7 +44,7 @@ propagateRegisterTransfer = mkFTransfer3 first middle last
       | r == r2             = update r Top f
       | otherwise           = update r (PElem (r2, n)) f
     middle (Copy r r2) f
-      | r == r2             = update r Top f
+      | r == r2             = trace "Copy to same register??" f
       | otherwise           = update r (PElem (r2, 0)) f
     middle (Clear r) f      = update r Top f
     middle (InitCursor r) f = update r Top f
@@ -84,8 +85,26 @@ rewriteTagMap f map | map' == map = Nothing
     t (Reg r d) | Just (PElem (r2,d2)) <- mapLookup r f = Reg r2 (d - d2)
                 | otherwise = Reg r d
 
+enableTrace = False
+
+interesting (Set _ _) = True
+interesting (Copy _ _) = True
+interesting (Clear _) = True
+interesting (InitCursor _) = True
+interesting _ = False
+
+ifChanged SomeChange = True
+ifChanged NoChange = False
+
+limitedShow :: Show a => a -> String
+limitedShow = take 100 . show
+
+addTracing
+  | enableTrace = debugFwdJoins trace ifChanged . debugFwdTransfers trace limitedShow (\insn _ -> interesting insn)
+  | otherwise = id
+
 propagateRegisterPass :: FuelMonad m => FwdPass m Insn PropRegFact
-propagateRegisterPass = FwdPass
+propagateRegisterPass = addTracing $ FwdPass
   { fp_lattice = propRegLattice
   , fp_transfer = propagateRegisterTransfer
   , fp_rewrite = propagateRegister }
