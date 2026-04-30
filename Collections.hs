@@ -167,6 +167,7 @@ instance IsMap MVarMap where
   mapFromListWith f assocs = MVM (M.fromListWith f [(k, v) | (MVar k, v) <- assocs])
 
 newtype RegSet = RS S.IntSet
+  deriving (Eq, Ord)
 
 instance IsSet RegSet where
   type ElemOf RegSet = RegId
@@ -190,6 +191,8 @@ instance IsSet RegSet where
   setElems (RS s) = map R (S.elems s)
   setFromList ks = RS (S.fromList [k | R k <- ks])
 
+instance Show RegSet where
+  show (RS s) = show (map R (S.elems s))
 
 newtype RegMap a = RM (M.IntMap a)
   deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
