@@ -48,8 +48,8 @@ liveCursor :: FuelMonad m => BwdRewrite m Insn LiveCursorFact
 liveCursor = mkBRewrite rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x LiveCursorFact -> m (Maybe (Graph Insn e x))
-    rw (LoadCursor _) False = trace ("Removed unused LoadCursor") $ return (Just emptyGraph)
-    rw (MoveCursor _) False = trace ("Removed unused MoveCursor") $ return (Just emptyGraph)
+    rw (LoadCursor _) False = return (Just emptyGraph)
+    rw (MoveCursor _) False = return (Just emptyGraph)
     rw _ _ = return Nothing
 
 liveCursorPass :: FuelMonad m => BwdPass m Insn LiveCursorFact
