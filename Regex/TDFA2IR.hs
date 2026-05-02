@@ -33,7 +33,7 @@ data IRState = IRState {
     firstFreeUnique :: Int,
     graph :: Graph Insn C C,
     labelMap :: Map StateLabel Label,
-    matchLabel :: Label,
+    matchCode :: Graph Insn O C,
     fallbackReg :: R,
     freeRegister :: R
   } deriving (Show)
@@ -66,7 +66,7 @@ getLabel s = do
       l <- freshLabel
       modify (addLabel s l)
       return l
-setMatchLabel l = modify $ \s -> s { matchLabel = l }
+setMatchCode c = modify $ \s -> s { matchCode = c }
 
 newReg :: IRM R
 newReg = do
@@ -135,7 +135,7 @@ emitState TDFA{..} s = mdo
 
   fc <- gets fallbackReg
 
-  matchL <- gets matchLabel
+  matchL <- gets matchCode
   fallbackLabel <- labelBlock (fallbackRegOps fc matchL)
   eolLabel <- labelBlock (eolRegOps matchL)
   entryLabel <- getLabel (s, Checked)
@@ -152,7 +152,7 @@ emitState TDFA{..} s = mdo
   defaultLabel <- if isFinalState
                     then labelBlock (debug ("default-transition from final " ++ show s) H.<*>
                                      emitEndRegOps tdfaFinalFunction H.<*>
-                                     goto matchL)
+                                     matchL)
                     else return failLabel
   failLabel <- labelBlock (debug ("default-transition from non-final " ++ show s) H.<*> gofail)
   return ()
@@ -162,18 +162,18 @@ emitState TDFA{..} s = mdo
     isFinalState = M.member s tdfaFinalFunction
     isEOLState = M.member s tdfaEOL
 
-    eolRegOps :: Label -> Graph Insn O C
-    eolRegOps matchLabel
-      | isEOLState = emitEndRegOps tdfaEOL H.<*> goto matchLabel
-      | isFinalState = emitEndRegOps tdfaFinalFunction H.<*> goto matchLabel
+    eolRegOps :: Graph Insn O C -> Graph Insn O C
+    eolRegOps matchCode
+      | isEOLState = emitEndRegOps tdfaEOL H.<*> matchCode
+      | isFinalState = emitEndRegOps tdfaFinalFunction H.<*> matchCode
       | otherwise = gofail
 
-    fallbackRegOps :: RegId -> Label -> Graph Insn O C
-    fallbackRegOps fc matchLabel | isFallbackState || isFinalState =
+    fallbackRegOps :: RegId -> Graph Insn O C -> Graph Insn O C
+    fallbackRegOps fc matchCode | isFallbackState || isFinalState =
         mkMiddle (LoadCursor fc) H.<*>
         -- debug ("Fell back to " <> show s <> " at {{YYPOS}}") <>
         emitEndRegOps (tdfaFallbackFunction `M.union` tdfaFinalFunction) H.<*>
-        goto matchLabel
+        matchCode
                               | otherwise = gofail
 
     emitEndRegOps opfun = foldMap emitRegOp (M.findWithDefault [] s opfun)
@@ -195,18 +195,13 @@ emitIR tdfa@TDFA{..} = mdo
   entry <- labelBlock (mkMiddles [SaveCursor fc 0, SetFallback failLabel] H.<*>
     mkLast (IfBOL startLabelBOL startNotBOL))
 
-  -- TODO Replace match label with a match block, since that should unlock more
-  -- optimization opportunities.
-  setMatchLabel matchLabel
+  c <- newReg
+  setMatchCode (mkMiddle (SaveCursor c 0) H.<*> mkLast (Match (finalTagRegMap c)))
 
   startLabelNotBOL <- getLabel (tdfaStartStateNotBOL, Checked)
   startLabelBOL <- getLabel (tdfaStartState, Checked)
 
   mapM_ (emitState tdfa) (tdfaStates tdfa)
-
-  matchLabel <- do
-    c <- newReg
-    labelBlock (mkMiddle (SaveCursor c 0) H.<*> mkLast (Match (finalTagRegMap c)))
 
   let startNotBOL | onlyMatchAtBOL = justFail
                   | otherwise      = startLabelNotBOL

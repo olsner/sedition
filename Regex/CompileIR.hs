@@ -50,6 +50,7 @@ yypos p = fun "YYPOS" [showB p]
 tagValue :: IR.TagValue -> Builder
 tagValue (Reg r 0) = showB r <> " ? " <> showB r <> " - YYBEGIN : -1"
 tagValue (Reg r d) = showB r <> " ? " <> showB r <> " - YYBEGIN - " <> intDec d <> " : -1"
+tagValue NoTag = "-1"
 
 declareReg :: R -> Builder
 declareReg r = stmt ("const uint8_t* " <> showB r <> " = NULL")

@@ -62,6 +62,7 @@ tagValue (IR.Reg r d) res = do
   label notSet
   setInt (-1) res
   label isSet
+tagValue (IR.NoTag) res = setInt (-1) res
 
 declareReg :: R -> Builder ()
 declareReg r = label ("." <> showB r) <> op1 "resq" "1"

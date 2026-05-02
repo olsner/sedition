@@ -96,12 +96,18 @@ byteString :: C.ByteString -> Builder ()
 byteString = tell . B.byteString
 
 setInt :: Int -> Reg -> Builder ()
+setInt 0 reg = op "xor" [reg32 reg, reg32 reg] -- 2 bytes
+setInt (-1) reg = setInt 0 reg <> op "dec" [reg64 reg] -- 5 bytes
+setInt 1 reg = setInt 0 reg <> op "inc" [reg32 reg] -- 4 bytes
 setInt val reg
-  | 0 <- val  = op "xor" [reg32 reg, reg32 reg]
-  -- TODO Check the range and switch to movabs if too large.
-  -- TODO Check sign/zero-extension
-  | otherwise = op "mov" [reg32 reg, intDec val]
-  -- | otherwise = error (show val ++ " is out of range")
+  -- mov+sign extend is 6 bytes
+  | val >= -128 && val < 0 = op "mov" [reg8 reg, intDec val] <> op "movsx" [reg64 reg, reg8 reg]
+  -- | val >= 0 && val < 128 = op "mov" [reg8 reg, intDec val] <> op "movsx" [reg32 reg, reg8 reg]
+  -- 6 bytes iirc
+  | val >= 0 && val < 2^(32 :: Int) = op "mov" [reg32 reg, intDec val]
+  -- 32-bit immediate to 64-bit register is 7 bytes
+  | val < 0 && val >= -2^(31 :: Int) = op "mov" [reg64 reg, intDec val]
+  | otherwise = op "movabs" [reg64 reg, intDec val]
 
 setCChar val = setInt (fromEnum val)
 
