@@ -96,8 +96,11 @@
 * Cursor optimizations
   - Register allocation of registers to x86-64 registers
 * Bounds check should not lead to retry if that's just an impossible match
-  (e.g. madding.sed should not iterate through to the end before giving up since
-  a shorter input can never match)
+  The failed bounds check for the starting state seems to be going to the
+  fallback label in cases where that would not be useful. Could special-case
+  bounds checks for the start state? (The amount of wasted work is very small
+  though - it's bounded by the minimum match length of the regex and only
+  happens near the end of the string.)
 
 ### Done
 
