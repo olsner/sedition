@@ -26,16 +26,16 @@ kill :: Insn e x -> LiveRegFact -> LiveRegFact
 kill (Set r _)  = setDelete r
 kill (Clear r)  = setDelete r
 kill (Copy r _) = setDelete r
-kill (LoadCursor r) = setDelete r
+kill (SaveCursor r _) = setDelete r
 kill _          = id
 
 gen :: Insn e x -> LiveRegFact -> LiveRegFact
-gen (Copy _ r)     f = setInsert r f
-gen (Set _ (r,_))  f = setInsert r f
-gen (Match tagMap) f = setUnion f (setFromList (map reg (M.elems tagMap)))
+gen (Copy _ r)     = setInsert r
+gen (Set _ (r,_))  = setInsert r
+gen (Match tagMap) = setUnion (setFromList (map reg (M.elems tagMap)))
   where reg (Reg r _) = r
-gen (SaveCursor r _) f = setInsert r f
-gen _              f = f
+gen (LoadCursor r) = setInsert r
+gen _              = id
 
 liveRegisterTransfer :: BwdTransfer Insn LiveRegFact
 liveRegisterTransfer = mkBTransfer3 first middle last
