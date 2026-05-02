@@ -91,7 +91,7 @@ redundantCheckBounds = mkFRewrite rw
 
     rwLast orig insn = trace ("rewrite: " ++ show orig ++ "  -->  " ++ show insn) $ return (Just (mkLast insn))
 
-enableTrace = True
+enableTrace = False
 
 interesting (CheckBounds _ _ _) = True
 interesting (MoveCursor _) = True
