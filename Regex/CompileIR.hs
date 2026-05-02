@@ -135,14 +135,13 @@ postOrderFoldGraphNodes f Program{..} e = foldMap f' (postorder_dfs g) e
 foldEmitInsn :: Insn e x -> Builder -> Builder
 foldEmitInsn insn = (<> emitInsn insn)
 
-showPos (p, off) = showB p <> " + " <> off
-yyget (p, off) = showB p <> "[" <> intDec off <> "]"
+yyget off = "YYCURSOR[" <> intDec off <> "]"
 
 emitInsn :: Insn e x -> Builder
 emitInsn (Label l) = label (show l)
 
 -- O C control flow
-emitInsn (IfBOL r tl fl) = cIf (showB r <> " == YYBEGIN") (gotoL tl) (gotoL fl)
+emitInsn (IfBOL tl fl) = cIf ("YYCURSOR == YYBEGIN") (gotoL tl) (gotoL fl)
 emitInsn (Switch pos cm def) =
     fun "switch" [yyget pos] <> " {\n" <>
     foldMap emitCases (CM.toRanges cm) <>
@@ -158,10 +157,10 @@ emitInsn (Match tagMap) =
     foldMap matchFromTag (M.toList tagMap) <>
     foldMap debugTag (M.keys tagMap) <>
     goto "end"
-emitInsn (CheckBounds (r, 1) eof cont) =
-  cIf ("YYLIMIT <= " <> showB r) (gotoL eof) (gotoL cont)
-emitInsn (CheckBounds (r, n) eof cont) =
-  cIf ("YYLIMIT < " <> showB r <> " + " <> intDec n) (gotoL eof) (gotoL cont)
+emitInsn (CheckBounds 1 eof cont) =
+  cIf ("YYLIMIT <= YYCURSOR") (gotoL eof) (gotoL cont)
+emitInsn (CheckBounds n eof cont) =
+  cIf ("YYLIMIT < YYCURSOR + " <> intDec n) (gotoL eof) (gotoL cont)
 emitInsn (Branch l) = gotoL l
 
 -- O O debugging
@@ -170,12 +169,10 @@ emitInsn (Trace msg) = yydebug "\"%s\\n\"" [cstring (C.pack msg)]
 emitInsn (Set r (r2, i)) = stmt (showB r <> " = " <> showB r2 <> " + " <> intDec i)
 emitInsn (Clear r) = stmt (showB r <> " = NULL")
 emitInsn (Copy r r2) = stmt (showB r <> " = " <> showB r2)
-emitInsn (InitCursor r) = stmt (showB r <> " = s->buf + orig_offset")
--- O O cursor movement
--- emitInsn (MovePointer p i) = stmt (showB p <> " += " <> intDec i)
--- emitInsn (CopyPointer p p2) = stmt (showB p <> " = " <> showB p2)
--- emitInsn (SaveCursor p) = stmt ("fallback_cursor = " <> showB p)
--- emitInsn RestoreCursor = stmt (yycursor <> " = fallback_cursor")
+-- O O cursor movement and transfer
+emitInsn (MoveCursor i) = stmt ("YYCURSOR += " <> intDec i)
+emitInsn (SaveCursor r i) = stmt (showB r <> " = YYCURSOR + " <> intDec i)
+emitInsn (LoadCursor r) = stmt ("YYCURSOR = " <> showB r)
 -- O O fallback operations
 emitInsn (Fallback _) = goto "*fallback_label"
 emitInsn (SetFallback l) = stmt ("fallback_label = &&" <> showB l)

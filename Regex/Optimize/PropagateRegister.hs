@@ -24,7 +24,7 @@ propRegLattice = DataflowLattice
   join l (OldFact (old, reverse)) (NewFact (new, _)) =
     case joinMaps (extendJoinDomain add) l (OldFact old) (NewFact new) of
       (NoChange, joined) -> (NoChange, (joined, reverse))
-      (SomeChange, joined) -> (SomeChange, (joined, mapEmpty))
+      (SomeChange, joined) -> (SomeChange, (joined, makeReverseMap joined))
   add _ (OldFact old) (NewFact new)
           | new == old = (NoChange, PElem old)
           | otherwise  = (SomeChange, Top)
@@ -56,7 +56,7 @@ propagateRegisterTransfer = mkFTransfer3 first middle last
       | r == r2             = trace "Copy to same register??" f
       | otherwise           = update r (PElem (r2, 0)) f
     middle (Clear r) f      = update r Top f
-    middle (InitCursor r) f = update r Top f
+    middle (LoadCursor r) f = update r Top f
     middle _ f = f
     -- Final instructions never change the cursor.
     last :: Insn O C -> PropRegFact -> FactBase PropRegFact
@@ -76,10 +76,6 @@ propagateRegister = mkFRewrite rw
     rw (Copy r1 r2) f
       | Just (PElem (r3,d)) <- doLookup r2 f, r3 < r1 = rwMid (Set r1 (r3, d))
     rw (Set r1 (r2,0)) _ = rwMid (Copy r1 r2)
-    rw (Switch (r1,n) table def) f
-      | Just (PElem (r2,d)) <- doLookup r1 f = rwLast (Switch (r2,d+n) table def)
-    rw (TotalSwitch (r1,n) table) f
-      | Just (PElem (r2,d)) <- doLookup r1 f = rwLast (TotalSwitch (r2,d+n) table)
     rw (Match map) f
       | Just map' <- rewriteTagMap f map = rwLast (Match map')
     rw _ _ = return Nothing

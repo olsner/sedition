@@ -23,6 +23,7 @@ import Regex.OptimizeIR (optimize)
 data S = S { buffer :: String, bufferLength :: Int,
              registers :: Map R Int, program :: Program,
              fallbackLabel :: Maybe Label,
+             position :: Int,
              debugEnabled :: Bool }
          deriving (Show)
 
@@ -32,9 +33,10 @@ initState s p = S {
   registers = M.empty,
   program = p,
   fallbackLabel = Nothing,
+  position = 0,
   debugEnabled = True }
 
-showState S{..} = "@" ++ show registers
+showState S{..} = "@" ++ show position -- TODO Restore more printing now that we have a position
 
 blocks S{ program = Program { programGraph = GMany _ blocks _ } } = blocks
 
@@ -42,8 +44,9 @@ type Result = Maybe (Map TagId Int)
 
 type M a = StateT S (Either Result) a
 
-char (r, i) = gets (\S{..} -> buffer !! (registers M.! r + i))
+char i = gets (\S{..} -> buffer !! (position + i))
 
+setPos i = modify $ \s -> s { position = i }
 getReg r = gets (M.lookup r . registers)
 getReg' r = fromJust <$> getReg r
 setReg r val = modify $ \s@S{..} -> s { registers = M.insert r val registers }
@@ -75,8 +78,8 @@ run :: Insn e x -> M ()
 run (Label _) = return ()
 
 -- O C control flow
-run (IfBOL r tl fl) = do
-  bol <- (<= 0) <$> getReg' r
+run (IfBOL tl fl) = do
+  bol <- gets (\s -> position s <= 0)
   runLabel (if bol then tl else fl)
 run (Switch offset cm def) = do
   c <- char offset
@@ -88,11 +91,9 @@ run Fail = lift (Left Nothing)
 run (Match tagMap) = do
   regs <- gets registers
   lift (Left (Just (resolveTagMap regs tagMap)))
-run (CheckBounds (r, n) eof cont) = do
-  len <- gets bufferLength
-  pos <- getReg' r
-  trace (show (pos,n,len)) (return ())
-  runLabel (if pos + n > len then eof else cont)
+run (CheckBounds n eof cont) = do
+  S{..} <- get
+  runLabel (if position + n > bufferLength then eof else cont)
 run (Branch l) = runLabel l
 
 run (Trace msg) = do
@@ -101,7 +102,10 @@ run (Trace msg) = do
 run (Set r (r2, i)) = setReg r =<< (+ i) <$> getReg' r2
 run (Clear r) = clearReg r
 run (Copy r r2) = setReg' r =<< getReg r2
-run (InitCursor r) = setReg r 0
+
+run (SaveCursor r i) = setReg r =<< gets (\s -> position s + i)
+run (LoadCursor r) = setPos =<< getReg' r
+run (MoveCursor i) = modify $ \s -> s { position = position s + i }
 
 run (Fallback _) = runLabel =<< gets (fromJust . fallbackLabel)
 run (SetFallback l) = modify $ \s -> s { fallbackLabel = Just l }

@@ -42,9 +42,8 @@ joinBounds (Between lb ub) (Lt n) | lb < n = PElem (Between lb (min ub n))
 joinBounds (Between lb ub) (GE n) | n < ub = PElem (Between (max lb n) ub)
 joinBounds lhs rhs = Top
 
-offsetBound :: WithTop Bounds -> Int -> WithTop Bounds
-offsetBound Top n = Top
-offsetBound (PElem b) n = PElem $ case b of
+offsetBound :: Bounds -> Int -> Bounds
+offsetBound b n = case b of
   Lt m -> Lt (max 0 (m - n))
   GE m -> GE (max 0 (m - n))
   Between lb ub -> Between (max 0 (lb - n)) (max 0 (ub - n))
@@ -52,13 +51,10 @@ offsetBound (PElem b) n = PElem $ case b of
 -- Combination of checked bounds on all incoming paths, not present if no bounds
 -- have been checked yet, Top if the register has changed without getting
 -- checked or on conflicting incoming information.
-type RedundantBoundsFact = RegMap (WithTop Bounds)
+type RedundantBoundsFact = WithTopAndBot Bounds
 
 redundantBoundsLattice :: DataflowLattice RedundantBoundsFact
-redundantBoundsLattice = DataflowLattice
- { fact_name = "Redundant bounds check"
- , fact_bot  = mapEmpty
- , fact_join = joinMaps (extendJoinDomain add) }
+redundantBoundsLattice = addPoints' "Redundant bounds check" add
  where add _ (OldFact old) (NewFact new) = (ch, j)
             where
               j = joinBounds old new
@@ -70,23 +66,14 @@ redundantCheckBoundsTransfer = mkFTransfer3 first middle last
     first :: Insn C O -> RedundantBoundsFact -> RedundantBoundsFact
     first _ f = f
     middle :: Insn O O -> RedundantBoundsFact -> RedundantBoundsFact
-    middle (Set dst (src, n)) f
-      | Just b <- mapLookup src f = mapInsert dst (offsetBound b n) f
-      | otherwise                 = mapInsert dst Top f
-    middle (Copy dst src)     f
-      | Just b <- mapLookup src f = mapInsert dst b f
-      | otherwise                 = mapInsert dst Top f
-    middle (Clear dst)        f   = mapInsert dst Top f
-    middle (InitCursor dst)   f   = mapInsert dst Top f
-    middle _                  f   = f
+    middle (MoveCursor n) (PElem b) = PElem (offsetBound b n)
+    middle (LoadCursor _) f = Top
+    middle _              f = f
     last :: Insn O C -> RedundantBoundsFact -> FactBase RedundantBoundsFact
-    last (CheckBounds (r, n) eof cont) f
-      | Just (PElem b) <- mapLookup r f =
-        factBase [(eof, mapInsert r (joinBounds (Lt n) b) f),
-                  (cont, mapInsert r (joinBounds (GE n) b) f)]
-      | otherwise =
-        factBase [(eof, mapInsert r (PElem (Lt n)) f),
-                  (cont, mapInsert r (PElem (GE n)) f)]
+    last (CheckBounds n eof cont) (PElem b) =
+        factBase [(eof, joinBounds (Lt n) b), (cont, joinBounds (GE n) b)]
+    last (CheckBounds n eof cont) _ =
+        factBase [(eof, PElem (Lt n)), (cont, PElem (GE n))]
     last insn f = boringFactBase f (successors insn)
 
     factBase = mkFactBase redundantBoundsLattice
@@ -96,8 +83,7 @@ redundantCheckBounds :: FuelMonad m => FwdRewrite m Insn RedundantBoundsFact
 redundantCheckBounds = mkFRewrite rw
   where
     rw :: FuelMonad m => Insn e x -> RedundantBoundsFact -> m (Maybe (Graph Insn e x))
-    rw orig@(CheckBounds (r, n) eof cont) f
-      | Just (PElem b) <- mapLookup r f = case checkBound n b of
+    rw orig@(CheckBounds n eof cont) (PElem b) = case checkBound n b of
           EOF ->  rwLast orig (Branch eof)
           Cont -> rwLast orig (Branch cont)
           _ -> return Nothing
@@ -105,13 +91,11 @@ redundantCheckBounds = mkFRewrite rw
 
     rwLast orig insn = trace ("rewrite: " ++ show orig ++ "  -->  " ++ show insn) $ return (Just (mkLast insn))
 
-enableTrace = False
+enableTrace = True
 
 interesting (CheckBounds _ _ _) = True
-interesting (Set _ _) = True
-interesting (Copy _ _) = True
-interesting (Clear _) = True
-interesting (InitCursor _) = True
+interesting (MoveCursor _) = True
+interesting (LoadCursor _) = True
 interesting _ = False
 
 ifChanged SomeChange = True
