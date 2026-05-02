@@ -195,7 +195,15 @@ instance Show RegSet where
   show (RS s) = show (map R (S.elems s))
 
 newtype RegMap a = RM (M.IntMap a)
-  deriving (Eq, Ord, Show, Functor, Foldable, Traversable)
+  deriving (Eq, Ord, Functor, Foldable, Traversable)
+
+instance Show a => Show (RegMap a) where
+  showsPrec _ (RM m) = showString "{" . showCommasWith showAssoc (M.toList m) . showString "}"
+    where
+      showCommasWith f [] = id
+      showCommasWith f [x] = f x
+      showCommasWith f (x:xs) = f x . showString "," . showCommasWith f xs
+      showAssoc (k,v) = shows (R k) . showString ":" . shows v
 
 instance IsMap RegMap where
   type KeyOf RegMap = RegId
