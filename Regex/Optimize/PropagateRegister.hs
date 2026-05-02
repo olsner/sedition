@@ -13,26 +13,35 @@ import Collections
 
 -- Map register to other register plus offset. Invalidation when modifying
 -- registers might be tricky though.
-type PropRegFact = RegMap (WithTop (R, Int))
+type PropRegFact = (RegMap (WithTop (R, Int)), RegMap RegSet)
 
 propRegLattice :: DataflowLattice PropRegFact
 propRegLattice = DataflowLattice
  { fact_name = "Propagate register offsets"
- , fact_bot  = mapEmpty
- , fact_join = joinMaps (extendJoinDomain add) }
- where add _ (OldFact old) (NewFact new)
+ , fact_bot  = (mapEmpty, mapEmpty)
+ , fact_join = join }
+ where
+  join l (OldFact (old, reverse)) (NewFact (new, _)) =
+    case joinMaps (extendJoinDomain add) l (OldFact old) (NewFact new) of
+      (NoChange, joined) -> (NoChange, (joined, reverse))
+      (SomeChange, joined) -> (SomeChange, (joined, mapEmpty))
+  add _ (OldFact old) (NewFact new)
           | new == old = (NoChange, PElem old)
           | otherwise  = (SomeChange, Top)
 
--- TODO Needs a more efficient data structure!
--- e.g. track (reverse) dependencies in a RegMap RegSet as well?
-update r new = mapInsert r new . cleanup
+addReverseMap :: R -> WithTop (R, Int) -> RegMap RegSet -> RegMap RegSet
+addReverseMap _  Top = id
+addReverseMap r1 (PElem (r2,_)) = mapInsertWith setUnion r2 (setSingleton r1)
+
+makeReverseMap :: RegMap (WithTop (R, Int)) -> RegMap RegSet
+makeReverseMap = mapFoldWithKey addReverseMap mapEmpty
+
+update r new (f,rev) = (mapInsert r new (cleanup f), addReverseMap r new (mapDelete r rev))
   where
-    cleanup :: PropRegFact -> PropRegFact
-    cleanup  = mapMap f
-    -- Break dependencies on this variable
-    f (PElem (r2, _)) | r2 == r = Top
-    f x                         = x
+    invalidatedKeys = setElems (mapFindWithDefault setEmpty r rev)
+    cleanup = mapInsertList [(k,Top) | k <- invalidatedKeys]
+
+doLookup r (f,_) = mapLookup r f
 
 propagateRegisterTransfer :: FwdTransfer Insn PropRegFact
 propagateRegisterTransfer = mkFTransfer3 first middle last
@@ -63,14 +72,14 @@ propagateRegister = mkFRewrite rw
     -- be to maximize the offset to try to do as much as possible from the
     -- furthest-back register?
     rw (Set r1 (r2,n)) f
-      | Just (PElem (r3,d)) <- mapLookup r2 f, r3 < r1 = rwMid (Set r1 (r3, d + n))
+      | Just (PElem (r3,d)) <- doLookup r2 f, r3 < r1 = rwMid (Set r1 (r3, d + n))
     rw (Copy r1 r2) f
-      | Just (PElem (r3,d)) <- mapLookup r2 f, r3 < r1 = rwMid (Set r1 (r3, d))
+      | Just (PElem (r3,d)) <- doLookup r2 f, r3 < r1 = rwMid (Set r1 (r3, d))
     rw (Set r1 (r2,0)) _ = rwMid (Copy r1 r2)
     rw (Switch (r1,n) table def) f
-      | Just (PElem (r2,d)) <- mapLookup r1 f = rwLast (Switch (r2,d+n) table def)
+      | Just (PElem (r2,d)) <- doLookup r1 f = rwLast (Switch (r2,d+n) table def)
     rw (TotalSwitch (r1,n) table) f
-      | Just (PElem (r2,d)) <- mapLookup r1 f = rwLast (TotalSwitch (r2,d+n) table)
+      | Just (PElem (r2,d)) <- doLookup r1 f = rwLast (TotalSwitch (r2,d+n) table)
     rw (Match map) f
       | Just map' <- rewriteTagMap f map = rwLast (Match map')
     rw _ _ = return Nothing
@@ -82,15 +91,15 @@ rewriteTagMap f map | map' == map = Nothing
                     | otherwise = Just map'
   where
     map' = M.map t map
-    t (Reg r d) | Just (PElem (r2,d2)) <- mapLookup r f = Reg r2 (d - d2)
+    t (Reg r d) | Just (PElem (r2,d2)) <- doLookup r f = Reg r2 (d - d2)
                 | otherwise = Reg r d
 
 enableTrace = False
 
-interesting (Set _ _) = True
-interesting (Copy _ _) = True
-interesting (Clear _) = True
-interesting (InitCursor _) = True
+interesting (Set _ _) = False
+-- interesting (Copy _ _) = True
+-- interesting (Clear _) = True
+-- interesting (InitCursor _) = True
 interesting _ = False
 
 ifChanged SomeChange = True
