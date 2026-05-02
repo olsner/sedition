@@ -51,17 +51,10 @@ optimizeOnce entry program = do
     analyzeAndRewriteBwd liveSetFallbackPass entries program mapEmpty
   program <- tracePass "possibleFallback" $
     analyzeAndRewriteFwd possibleFallbackPass entries program mapEmpty
-  -- Since propagate register is what (generally) kills most registers, run it
-  -- before live register to hopefully reduce the amount of work for
-  -- redundantCheckBounds...
-  program <- tracePass "propagateRegister" $
-    analyzeAndRewriteFwd propagateRegisterPass entries program mapEmpty
   program <- tracePass "liveRegister" $
     analyzeAndRewriteBwd liveRegisterPass entries program mapEmpty
-  program <- tracePass "propagateRegister" $
-    analyzeAndRewriteFwd propagateRegisterPass entries program mapEmpty
-  program <- tracePass "liveRegister" $
-    analyzeAndRewriteBwd liveRegisterPass entries program mapEmpty
+  program <- tracePass "liveCursor" $
+    analyzeAndRewriteBwd liveCursorPass entries program mapEmpty
   program <- tracePass "redundantCheckBounds" $
     analyzeAndRewriteFwd redundantCheckBoundsPass entries program mapEmpty
   program <- tracePass "sameResult" $

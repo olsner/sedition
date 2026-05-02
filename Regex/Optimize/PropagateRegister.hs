@@ -77,7 +77,7 @@ propagateRegister = mkFRewrite rw
       | Just (PElem (r3,d)) <- doLookup r2 f, r3 < r1 = rwMid (Set r1 (r3, d))
     rw (Set r1 (r2,0)) _ = rwMid (Copy r1 r2)
     rw (Match map) f
-      | Just map' <- rewriteTagMap f map = rwLast (Match map')
+      | Just map' <- rewriteTagMap f map = trace (show f) $ rwLast (Match map')
     rw _ _ = return Nothing
 
     rwMid insn = return (Just (mkMiddle insn))
@@ -90,12 +90,15 @@ rewriteTagMap f map | map' == map = Nothing
     t (Reg r d) | Just (PElem (r2,d2)) <- doLookup r f = Reg r2 (d - d2)
                 | otherwise = Reg r d
 
-enableTrace = False
+enableTrace = True
 
 interesting (Set _ _) = False
--- interesting (Copy _ _) = True
--- interesting (Clear _) = True
--- interesting (InitCursor _) = True
+interesting (Copy _ _) = True
+interesting (Clear _) = True
+interesting (SaveCursor _ _) = True
+interesting (LoadCursor _) = True
+interesting (MoveCursor _) = True
+interesting (Match _) = True
 interesting _ = False
 
 ifChanged SomeChange = True
@@ -105,7 +108,7 @@ limitedShow :: Show a => a -> String
 limitedShow = take 100 . show
 
 addTracing
-  | enableTrace = debugFwdJoins trace ifChanged . debugFwdTransfers trace limitedShow (\insn _ -> interesting insn)
+  | enableTrace = debugFwdJoins trace (const False) . debugFwdTransfers trace limitedShow (\insn _ -> interesting insn)
   | otherwise = id
 
 propagateRegisterPass :: FuelMonad m => FwdPass m Insn PropRegFact

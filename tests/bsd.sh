@@ -590,6 +590,7 @@ u2/g' lines1
     # Test extraction of empty subexpressions in compiled output (substring
     # would not accept -1..-1 as a valid empty offset)
     mark '8.30' ; $SED -r 's/((l)|(_))/;\2;\3;/g' lines1
+                  $SED -r 's/(l)|(_)/;\1;\2;/g' lines1
 
 	mark '8.31' ; echo FOO | $SED -r 's/.*/\\l &\l&/'
 	              echo FOO | $SED -r 's/.*/\\L &\L&/'
