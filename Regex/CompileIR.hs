@@ -87,6 +87,7 @@ genC program@Program{..} =
     stmt ("const uint8_t *const YYBEGIN = s->buf") <>
     stmt ("const uint8_t *const YYLIMIT = s->buf + s->len") <>
     sfun "YYSTATS" ["matched_chars", "s->len - orig_offset"] <>
+    stmt ("const uint8_t *YYCURSOR = s->buf + orig_offset") <>
     "#define YYPOS(cur) (cur - YYBEGIN)\n" <>
     stmt ("void *fallback_label = NULL") <>
     foldMap declareReg allRegs <>
