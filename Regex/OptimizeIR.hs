@@ -10,6 +10,7 @@ import Regex.IR
 
 import Regex.Optimize.IdenticalBlocks (mergeIdenticalBlocks)
 import Regex.Optimize.LiveRegister (liveRegisterPass)
+import Regex.Optimize.LiveCursor (liveCursorPass)
 import Regex.Optimize.LiveSetFallback (liveSetFallbackPass)
 import Regex.Optimize.PossibleFallback (possibleFallbackPass)
 import Regex.Optimize.PropagateRegister (propagateRegisterPass)
