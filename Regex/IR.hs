@@ -17,8 +17,10 @@ import Regex.TaggedRegex (TagId)
 
 type R = RegId
 
-data TagValue = Reg R Int       -- ^ Register value minus offset
-    deriving (Show,Ord,Eq)
+data TagValue
+  = Reg R Int      -- ^ Register value minus offset
+  | NoTag          -- ^ Tag not set in this branch
+  deriving (Show,Ord,Eq)
 
 type Pos = (R, Int)
 

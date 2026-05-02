@@ -195,12 +195,15 @@ emitIR tdfa@TDFA{..} = mdo
   entry <- labelBlock (mkMiddles [SaveCursor fc 0, SetFallback failLabel] H.<*>
     mkLast (IfBOL startLabelBOL startNotBOL))
 
+  -- TODO Replace match label with a match block, since that should unlock more
+  -- optimization opportunities.
   setMatchLabel matchLabel
 
   startLabelNotBOL <- getLabel (tdfaStartStateNotBOL, Checked)
   startLabelBOL <- getLabel (tdfaStartState, Checked)
 
   mapM_ (emitState tdfa) (tdfaStates tdfa)
+
   matchLabel <- do
     c <- newReg
     labelBlock (mkMiddle (SaveCursor c 0) H.<*> mkLast (Match (finalTagRegMap c)))
