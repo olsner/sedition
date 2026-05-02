@@ -123,7 +123,6 @@ fallbackCursor = regA arg4
 yymatch = regA tmp0
 yystring = regA tmp1
 yyorigOffset = reg64 tmp2
-yytmp = regA arg5 -- Since we're using tmp0, tmp1 and tmp2 above apparently we need a different "temp" register here...
 
 yyreg r = ("." <> showB r)
 
@@ -159,6 +158,7 @@ genAsm program@Program{..} = do
     op "mov" [yybegin, mem (yystring <> " + " <> intDec stringBufOffset)]
     op "mov" [yylimit, yybegin]
     op "add" [yylimit, mem (yystring <> " + " <> intDec stringLenOffset)]
+    op "lea" [yycursor, mem (yybegin <> " + " <> yyorigOffset)]
     postOrderRegisterBlocks program
     comment "Jump to entry point"
     gotoL entryPoint
@@ -278,8 +278,6 @@ emitInsn (Branch l) = gotoL l
 -- O O debugging
 emitInsn (Trace msg) = comment (string8 msg)
 -- O O register primitives
--- TODO Make sure these support assigning registers to registers, in particular
--- for the cursor register.
 emitInsn (Set r (r2, 0)) = do
   comment (showB r <> " := " <> showB r2)
   loadAddr (yyreg r2) res0
@@ -298,9 +296,15 @@ emitInsn (Copy r r2) = do
   storeAddr (yyreg r) res0
 
 -- O O cursor operations
-emitInsn (MoveCursor n) = do
-  op "add" [yycursor, intDec n]
--- TODO SaveCursor, LoadCursor
+emitInsn (MoveCursor n) = op "add" [yycursor, intDec n]
+emitInsn (SaveCursor r 0) = do
+  op "mov" [mem (yyreg r), yycursor]
+emitInsn (SaveCursor r i) = do
+  comment (showB r <> " := YYCURSOR + " <> intDec i)
+  setAddr (yycursor <> " + " <> intDec i) res0
+  op "mov" [mem (yyreg r), regA res0]
+emitInsn (LoadCursor r) = do
+  op "mov" [yycursor, mem (yyreg r)]
 
 -- O O fallback operations
 emitInsn (Fallback _) = goto (regA fallbackLabel)
