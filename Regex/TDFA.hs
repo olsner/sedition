@@ -27,6 +27,7 @@ import Regex.TaggedRegex hiding (Term(..))
 import Regex.TNFA (genTNFA, TNFA(..), TNFATrans(..), Tag(..))
 import qualified Regex.TNFA as TNFA
 import Regex.SimulateTNFA (matchTerm)
+import Regex.Cursor (cursorOps)
 
 newtype StateId = S Int deriving (Ord, Eq)
 newtype RegId = R Int deriving (Ord, Eq)
@@ -64,7 +65,8 @@ data TDFA = TDFA {
     tdfaTagRegMap :: Map StateId (Map TNFA.StateId (Map TagId RegId)),
     tdfaStateMap :: Map StateId (Set TNFA.StateId),
     tdfaOriginalFinalState :: TNFA.StateId,
-    tdfaMinLengths :: Map StateId Int
+    tdfaMinLengths :: Map StateId Int,
+    tdfaReadOffsets :: Map StateId Int
   }
   deriving (Show, Ord, Eq)
 
@@ -595,7 +597,8 @@ determinize tnfa@TNFA{..} = do
     tdfaTagRegMap = tagRegMap,
     tdfaStateMap = stateIdMap,
     tdfaOriginalFinalState = tnfaFinalState,
-    tdfaMinLengths = minLengths tdfa
+    tdfaMinLengths = minLengths tdfa,
+    tdfaReadOffsets = cursorOps (successorMap tdfa) [s0, s1]
     } in return tdfa
 
 multiMapFromList :: Ord a => [(a,b)] -> Map a [b]
@@ -635,7 +638,7 @@ prettyStates :: TDFA -> String
 prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
   where
     ss = tdfaStates tdfa
-    showState s = statePrefix s <> showState' s <> showTrans s <> showTagMap s <> showEOLRegOps s <> showFinalRegOps s <> showFallbackRegOps s <> showMinLength s
+    showState s = statePrefix s <> showState' s <> showTrans s <> showTagMap s <> showEOLRegOps s <> showFinalRegOps s <> showFallbackRegOps s <> showMinLength s <> showOffset s
     statePrefix s = concat
         [ if s == tdfaStartState then "START " else ""
         , if s == tdfaStartStateNotBOL then "MID " else ""
@@ -708,6 +711,9 @@ prettyStates tdfa@TDFA{..} = foldMap showState ss <> fixedTags <> "\n"
     showMinLength s | Just dist <- M.lookup s tdfaMinLengths = "  Min length: " ++ show dist ++ "\n"
                     | otherwise = "  [failed state]\n"
 
+    showOffset s | Just off <- M.lookup s tdfaReadOffsets, off > 0 = "  Offset: " ++ show off ++ "\n"
+                 | otherwise = ""
+
 -- Minimum length to an accepting state. If there aren't this many characters
 -- left in the string it cannot match from here.
 minLengths :: TDFA -> Map StateId Int
@@ -726,6 +732,13 @@ minLengths tdfa@TDFA{..} = go' M.empty 0 (M.keysSet (tdfaFinalFunction `M.union`
 
     ss = S.fromList (tdfaStates tdfa)
     allPrevStates = M.map S.fromList $ multiMapFromList [(next, prev) | prev <- S.toList ss, next <- nextStates tdfa prev]
+
+successors :: TDFA -> StateId -> [StateId]
+successors TDFA{..} s = states (M.findWithDefault CM.empty s tdfaTrans)
+  where states = map fst . CM.elems
+
+successorMap :: TDFA -> Map StateId [StateId]
+successorMap tdfa = M.fromList [(s, ss) | s <- tdfaStates tdfa, let ss = successors tdfa s]
 
 testTDFA :: String -> IO ()
 testTDFA = putStr . prettyStates . genTDFA . genTNFA . testTagRegex
