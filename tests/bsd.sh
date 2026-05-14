@@ -603,6 +603,14 @@ u2/g' lines1
 	# following literal (or other substitution component) instead.
 	mark '8.33' ; echo foobar | $SED -r 's/foo(x*)bar/foo\u\1bar/'
 	              echo fooxbar | $SED -r 's/foo(x*)bar/foo\u\1bar/'
+    mark '8.34' ; echo 'dSa2lbla*-*dLa!=a~7~0~20.02~2002~2002~2002~2002~|P|K3|I10|O10|rpddsf[lfp[too early
+]Pq]s@1583>@
+ddd19%1+sg100/1+d3*4/12-sx8*5+25/5-sz5*4/lx-10-sdlg11*20+lz+lx-30%
+d[30+]s@0>@d[[1+]s@lg11<@]s@25=@d[1+]s@24=@se44le-d[30+]s@21>@dld+7%-7+
+[March ]smd[31-[April ]sm]s@31<@psnlmPpsn1z>p~|rf2002~|r@lfp[too early
+]Pq~|radSa2lbla*-*dLa!=a~19~|rb.19~|?xsakLasbLb*tLaKSa[999]k*Lak-1+sg100/1+d3*4/12-sx8*5+25/5-sz5*4/lx-10-sdlg11*20+lz+lx-30%
+d[30+]s@0>@d[[1+]s@lg11<@]s@25=@d[1+]s@24=@se44le-d[30+]s@21>@dld+7%-7+
+[March ]smd[31-[April ]sm]s@31<@psnlmPpsn1z>p~' | $SED 'N;N;N;N;N;N;N;s/\([^~]*~\)\(.*|?x\)~*/\2\1/'
 }
 
 test_sedition()

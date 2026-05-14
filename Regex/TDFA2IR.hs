@@ -83,7 +83,7 @@ gofail :: Graph Insn O C
 gofail = mkLast (Fallback setEmpty)
 
 checkBounds pos eof cont = mkLast (CheckBounds pos eof cont)
-checkEOF = checkBounds 1
+checkEOF offset = checkBounds (offset + 1)
 
 gostate :: StateLabel -> IRM (Graph Insn O C)
 gostate s = getLabel s >>= return . goto
@@ -97,22 +97,29 @@ yystats _ _ = emptyGraph
 debug _ = emptyGraph
 --debug msg = mkMiddle (Trace msg)
 
-emitRegOp :: RegOp -> Graph Insn O O
-emitRegOp (r,val) = mkMiddle (g val) H.<*> yystats "regops" 1
+moveCursor :: Int -> Graph Insn O O
+moveCursor 0 = emptyGraph
+moveCursor i | i > 0 = mkMiddle (MoveCursor i)
+             | i < 0 = error "Negative cursor movement!"
+
+emitRegOp :: Int -> RegOp -> Graph Insn O O
+emitRegOp offset (r,val) = mkMiddle (g val) H.<*> yystats "regops" 1
   where
-    g (SetReg Pos) = SaveCursor r 0
+    g (SetReg Pos) = SaveCursor r offset
     g (SetReg Nil) = Clear r
     g (CopyReg r2) = Copy r r2
 
-emitCase :: Set StateId -> TDFATrans -> IRM Label
-emitCase nocheckStates (s', regops) = do
+emitCase :: Set StateId -> Map StateId Int -> Int -> TDFATrans -> IRM Label
+emitCase nocheckStates readOffsets offset (s', regops) = do
   go <- if skipCheck then gostate_nocheck s' else gostate_check s'
-  let block = foldMap emitRegOp regops H.<*> mkMiddle (MoveCursor 1) H.<*> go
+  let block = foldMap (emitRegOp offset) regops H.<*> moveCursor neededMove H.<*> go
   labelBlock block
   where skipCheck = S.member s' nocheckStates
+        targetOffset = M.findWithDefault 0 s' readOffsets
+        neededMove = offset + 1 - targetOffset
 
-emitCases :: Set StateId -> CharMap TDFATrans -> IRM (CharMap Label)
-emitCases nocheckStates trans = CM.traverse (emitCase nocheckStates) trans
+emitCases :: Set StateId -> Map StateId Int -> Int -> CharMap TDFATrans -> IRM (CharMap Label)
+emitCases nocheckStates readOffsets offset trans = CM.traverse (emitCase nocheckStates readOffsets offset) trans
 
 labelBlock :: Graph Insn O C -> IRM Label
 labelBlock b = do
@@ -120,11 +127,11 @@ labelBlock b = do
   addBlock (mkLabel l H.<*> b)
   return l
 
-emitTrans :: Set StateId -> CharMap TDFATrans -> Label -> IRM (Graph Insn O C)
-emitTrans nocheckStates trans fail | CM.null trans = return (goto fail)
-emitTrans nocheckStates trans fail = do
-    table <- emitCases nocheckStates trans
-    return (mkLast (mkSwitch 0 table fail))
+emitTrans :: Set StateId -> Map StateId Int -> Int -> CharMap TDFATrans -> Label -> IRM (Graph Insn O C)
+emitTrans nocheckStates readOffsets offset trans fail | CM.null trans = return (goto fail)
+emitTrans nocheckStates readOffsets offset trans fail = do
+    table <- emitCases nocheckStates readOffsets offset trans
+    return (mkLast (mkSwitch offset table fail))
 
 mkSwitch pos table def | CM.isComplete table = TotalSwitch pos table
                        | otherwise           = Switch pos table def
@@ -132,13 +139,13 @@ mkSwitch pos table def | CM.isComplete table = TotalSwitch pos table
 emitState :: TDFA -> StateId -> IRM ()
 emitState TDFA{..} s = mdo
   body <- labelBlock (debug ("state " ++ show s) H.<*> yystats "visited_chars" 1 H.<*> switch)
-  switch <- emitTrans nocheckStates trans defaultLabel
+  switch <- emitTrans nocheckStates readOffsets offset trans defaultLabel
 
   fc <- gets fallbackReg
 
   matchL <- gets matchCode
   fallbackLabel <- labelBlock (fallbackRegOps fc matchL)
-  eolLabel <- labelBlock (eolRegOps matchL)
+  eolLabel <- labelBlock (moveCursor offset H.<*> eolRegOps matchL)
   entryLabel <- getLabel (s, Checked)
   nocheckLabel <- getLabel (s, Unchecked)
   addBlock (mkLabel nocheckLabel H.<*> maybeSetFallback fc fallbackLabel H.<*>
@@ -148,11 +155,12 @@ emitState TDFA{..} s = mdo
     -- do it first thing in the state block. Should be the same, I hope :)
     maybeSetFallback fc fallbackLabel H.<*>
     mkBranch (if minLength > 1 then checkMinLength else checkEOFLabel))
-  checkMinLength <- labelBlock (checkBounds minLength failLabel body)
-  checkEOFLabel <- labelBlock (checkEOF eolLabel body)
+  checkMinLength <- labelBlock (checkBounds (offset + minLength) failLabel body)
+  checkEOFLabel <- labelBlock (checkEOF offset eolLabel body)
   defaultLabel <- if isFinalState
                     then labelBlock (debug ("default-transition from final " ++ show s) H.<*>
-                                     emitEndRegOps tdfaFinalFunction H.<*>
+                                     emitEndRegOps offset tdfaFinalFunction H.<*>
+                                     moveCursor offset H.<*>
                                      matchL)
                     else return failLabel
   failLabel <- labelBlock (debug ("default-transition from non-final " ++ show s) H.<*> gofail)
@@ -163,23 +171,26 @@ emitState TDFA{..} s = mdo
     isFinalState = M.member s tdfaFinalFunction
     isEOLState = M.member s tdfaEOL
 
+    readOffsets = tdfaReadOffsets -- M.empty
+    offset = M.findWithDefault 0 s readOffsets
+
     eolRegOps :: Graph Insn O C -> Graph Insn O C
     eolRegOps matchCode
-      | isEOLState = emitEndRegOps tdfaEOL H.<*> matchCode
-      | isFinalState = emitEndRegOps tdfaFinalFunction H.<*> matchCode
+      | isEOLState = emitEndRegOps 0 tdfaEOL H.<*> matchCode
+      | isFinalState = emitEndRegOps 0 tdfaFinalFunction H.<*> matchCode
       | otherwise = gofail
 
     fallbackRegOps :: RegId -> Graph Insn O C -> Graph Insn O C
     fallbackRegOps fc matchCode | isFallbackState || isFinalState =
         mkMiddle (LoadCursor fc) H.<*>
         -- debug ("Fell back to " <> show s <> " at {{YYPOS}}") <>
-        emitEndRegOps (tdfaFallbackFunction `M.union` tdfaFinalFunction) H.<*>
+        emitEndRegOps 0 (tdfaFallbackFunction `M.union` tdfaFinalFunction) H.<*>
         matchCode
                               | otherwise = gofail
 
-    emitEndRegOps opfun = foldMap emitRegOp (M.findWithDefault [] s opfun)
+    emitEndRegOps offset opfun = foldMap (emitRegOp offset) (M.findWithDefault [] s opfun)
 
-    maybeSetFallback fc l | isFinalState = mkMiddles [Trace ("setting fallback in " ++ show s), SaveCursor fc 0, SetFallback l]
+    maybeSetFallback fc l | isFinalState = debug ("setting fallback in " ++ show s) H.<*> mkMiddles [SaveCursor fc offset, SetFallback l]
                        | otherwise    = debug ("no fallback from " ++ show s)
 
     minLength | Just min <- M.lookup s tdfaMinLengths, min > 1 = min
@@ -210,7 +221,7 @@ emitIR tdfa@TDFA{..} = mdo
   -- We get here if we reach the original fallback, i.e. we reach a state where
   -- it's impossible to match the rest of the string.
   -- TODO Instead of just checkEOF, use the min length of startNotBOL (plus one), then use the unchecked label for startNotBOL below.
-  failLabel <- labelBlock (mkMiddle (LoadCursor fc) H.<*> checkEOF justFail retry)
+  failLabel <- labelBlock (mkMiddle (LoadCursor fc) H.<*> checkEOF 0 justFail retry)
   justFail <- labelBlock (mkLast Fail)
   -- We have a check bounds and restore cursor before this so we know we're not
   -- at the end of the string and can safely move the cursor by one at least.
