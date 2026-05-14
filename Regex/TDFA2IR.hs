@@ -121,6 +121,7 @@ labelBlock b = do
   return l
 
 emitTrans :: Set StateId -> CharMap TDFATrans -> Label -> IRM (Graph Insn O C)
+emitTrans nocheckStates trans fail | CM.null trans = return (goto fail)
 emitTrans nocheckStates trans fail = do
     table <- emitCases nocheckStates trans
     return (mkLast (mkSwitch 0 table fail))
