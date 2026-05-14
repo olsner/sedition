@@ -138,6 +138,8 @@ foldEmitInsn :: Insn e x -> Builder -> Builder
 foldEmitInsn insn = (<> emitInsn insn)
 
 yyget off = "YYCURSOR[" <> intDec off <> "]"
+yyget16 off = "*(uint16_t*)(YYCURSOR + " <> intDec off <> ")"
+yyget32 off = "*(uint32_t*)(YYCURSOR + " <> intDec off <> ")"
 
 emitInsn :: Insn e x -> Builder
 emitInsn (Label l) = label (show l)
@@ -152,6 +154,9 @@ emitInsn (TotalSwitch pos cm) =
     fun "switch" [yyget pos] <> " {\n" <>
     foldMap emitCases (CM.toRanges cm) <>
     "}\n"
+emitInsn (CmpByte pos c tl fl) = cIf (yyget pos <> " == " <> word8Dec c) (gotoL tl) (gotoL fl)
+emitInsn (CmpWord pos c tl fl) = cIf (yyget16 pos <> " == " <> word16Dec c) (gotoL tl) (gotoL fl)
+emitInsn (CmpDWord pos c tl fl) = cIf (yyget32 pos <> " == " <> word32Dec c) (gotoL tl) (gotoL fl)
 emitInsn Fail = goto "end"
 emitInsn (Match tagMap) =
     stmt "YYDEBUG(\"match found\\n\")" <>

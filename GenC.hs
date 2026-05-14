@@ -19,6 +19,9 @@ string8 = B.string8
 intDec = B.intDec
 -- word8HexFixed = Builder . B.word8HexFixed
 byteString = B.byteString
+word8Dec = B.word8Dec
+word16Dec = B.word16Dec
+word32Dec = B.word32Dec
 
 -- TODO More fun: add a new C builder type that is sensitive to blocks and
 -- stuff and does indentation.

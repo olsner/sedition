@@ -254,6 +254,21 @@ emitInsn (TotalSwitch offset cm) = do
   -- Could skip the last comparison for a total switch.
   foldMap (emitCases True) (CM.toRanges cm)
   comment "} End of total switch"
+emitInsn (CmpByte offset c tl fl) = do
+  comment "Byte compare"
+  op "cmp" [byte_ptr (yycursor <> " + " <> intDec offset), word8Dec c]
+  jne (lblname fl)
+  gotoL tl
+emitInsn (CmpWord offset c tl fl) = do
+  comment "Word compare"
+  op "cmp" [word_ptr (yycursor <> " + " <> intDec offset), word16Dec c]
+  jne (lblname fl)
+  gotoL tl
+emitInsn (CmpDWord offset c tl fl) = do
+  comment "Double-word compare"
+  op "cmp" [dword_ptr (yycursor <> " + " <> intDec offset), word32Dec c]
+  jne (lblname fl)
+  gotoL tl
 emitInsn Fail = comment "fail" <> setInt 0 res0 <> goto ".end"
 emitInsn (Match tagMap) =
     comment ("Match: " <> showB tagMap) <>

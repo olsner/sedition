@@ -283,14 +283,16 @@ forceRegcomp = False
 needRegcomp (IR.RE _ s ere _) = forceRegcomp ||
     not (Regex2Asm.isCompatible (Regex.parseString ere s))
 
+useLiterals = True
+
 compileRE r@IR.RE{..} = wrapper body
   where
     ere = reERE
     s = reString
     usedTags = reUsedTags
     body | needRegexec = regexec
-         | Regex.Literal s <- re = literal (C.pack s)
-         | Regex.Char c    <- re = literalChar c
+         | useLiterals, Regex.Literal s <- re = literal (C.pack s)
+         | useLiterals, Regex.Char c    <- re = literalChar c
          | otherwise   = tdfa2asm re usedTags
     re = Regex.parseString ere s
     isLiteral | Regex.Literal _ <- re = True
@@ -314,7 +316,7 @@ compileRE r@IR.RE{..} = wrapper body
         " -> ERE: " <> showB res <> " (using " <> engineName <> ")"
 
     engineName | needRegexec = "regexec"
-               | isLiteral = "memmem"
+               | useLiterals && isLiteral = "memmem"
                | otherwise = "Regex2Asm"
 
 tdfa2asm re used = byteString (Regex2Asm.tdfa2asm used re)

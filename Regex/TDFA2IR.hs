@@ -96,9 +96,9 @@ debug _ = emptyGraph
 --debug msg = mkMiddle (Trace msg)
 
 moveCursor :: Int -> Graph Insn O O
-moveCursor 0 = emptyGraph
 moveCursor i | i > 0 = mkMiddle (MoveCursor i)
-             | i < 0 = error "Negative cursor movement!"
+             | i == 0 = emptyGraph
+             | otherwise = error "Negative cursor movement!"
 
 emitRegOp :: Int -> RegOp -> Graph Insn O O
 emitRegOp offset (r,val) = mkMiddle (g val) H.<*> yystats "regops" 1
@@ -126,12 +126,14 @@ labelBlock b = do
   return l
 
 emitTrans :: Set StateId -> Map StateId Int -> Int -> CharMap TDFATrans -> Label -> IRM (Graph Insn O C)
-emitTrans nocheckStates readOffsets offset trans fail | CM.null trans = return (goto fail)
-emitTrans nocheckStates readOffsets offset trans fail = do
+emitTrans nocheckStates readOffsets offset trans fail
+  | CM.null trans = return (goto fail)
+  | otherwise = do
     table <- emitCases nocheckStates readOffsets offset trans
     return (mkLast (mkSwitch offset table fail))
 
 mkSwitch pos table def | CM.isComplete table = TotalSwitch pos table
+                       | [(k,l)] <- CM.toList table = CmpByte pos (toEnum (fromEnum k)) l def
                        | otherwise           = Switch pos table def
 
 emitState :: TDFA -> StateId -> IRM ()

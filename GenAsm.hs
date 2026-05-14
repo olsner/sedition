@@ -19,6 +19,7 @@ import qualified Data.ByteString.Builder as B
 import Data.ByteString.Builder as B hiding (Builder, string8, intDec, byteString)
 import Data.Maybe
 import Data.String
+import Data.Word
 
 -- TODO Connect to an ABI or something
 data Reg = Reg {
@@ -91,7 +92,12 @@ string8 :: String -> Builder ()
 string8 = tell . B.string8
 intDec :: Int -> Builder ()
 intDec = tell . B.intDec
--- word8HexFixed = Builder . B.word8HexFixed
+word8Dec :: Word8 -> Builder ()
+word8Dec = tell . B.word8Dec
+word16Dec :: Word16 -> Builder ()
+word16Dec = tell . B.word16Dec
+word32Dec :: Word32 -> Builder ()
+word32Dec = tell . B.word32Dec
 byteString :: C.ByteString -> Builder ()
 byteString = tell . B.byteString
 
@@ -148,6 +154,7 @@ storeBool var val = storeImm8 var (fromEnum val)
 
 mem x = "[" <> x <> "]"
 byte_ptr x = "byte [" <> x <> "]"
+word_ptr x = "word [" <> x <> "]"
 dword_ptr x = "dword [" <> x <> "]"
 qword_ptr x = "qword [" <> x <> "]"
 

@@ -7,6 +7,7 @@ import Compiler.Hoopl as H
 import Data.Map (Map)
 import Data.Set (Set)
 import qualified Data.Set as S
+import Data.Word
 
 import Collections
 import CharMap (CharMap)
@@ -41,6 +42,10 @@ data Insn e x where
   -- then we'd want a corresponding transformation on the output side to e.g.
   -- use default for the most common target label.
   TotalSwitch   :: Int -> CharMap Label     -> Insn O C
+  -- Compare byte/word/dword at offset. Equal label then not-equal label.
+  CmpByte       :: Int -> Word8 -> Label -> Label -> Insn O C
+  CmpWord       :: Int -> Word16 -> Label -> Label -> Insn O C
+  CmpDWord      :: Int -> Word32 -> Label -> Label -> Insn O C
   -- Definitely did not match.
   Fail          ::                             Insn O C
   -- Definitely did match. Argument maps tags to final registers, including the
@@ -93,6 +98,9 @@ instance NonLocal Insn where
   successors (Branch l) = [l]
   successors (Switch _ cm l) = S.toList (S.insert l (CM.elemSet cm))
   successors (TotalSwitch _ cm) = S.toList (CM.elemSet cm)
+  successors (CmpByte _ _ t f) = [t, f]
+  successors (CmpWord _ _ t f) = [t, f]
+  successors (CmpDWord _ _ t f) = [t, f]
   successors Fail = []
   successors (Match _) = []
   successors (CheckBounds _ eof cont) = [eof, cont]

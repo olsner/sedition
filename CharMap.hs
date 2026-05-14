@@ -1,19 +1,20 @@
 module CharMap (
     CharMap(),
     -- construction
-    empty, singleton, fromList,
+    empty, singleton, fromList, toList,
     CharMap.null,
     -- access/update
     CharMap.lookup, findWithDefault, insert, delete,
     -- conversion/extraction
     elems,
     elemSet,
-    fromRanges,
-    toRanges,
+    fromRanges, toRanges,
     CharMap.traverse, CharMap.map,
     isComplete, CharMap.const,
     union
     ) where
+
+import Control.Arrow (first)
 
 import Data.Set (Set)
 import qualified Data.Set as S
@@ -39,6 +40,8 @@ null = RM.null
 
 singleton k = RM.singleton (w8 k)
 fromList xs = RM.fromList [(w8 k, v) | (k,v) <- xs]
+toList :: Eq a => CharMap a -> [(Char, a)]
+toList = Prelude.map (first c) . RM.toList
 
 lookup k = RM.lookup (w8 k)
 findWithDefault def k = RM.findWithDefault def (w8 k)

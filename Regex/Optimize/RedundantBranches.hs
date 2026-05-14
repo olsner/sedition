@@ -4,6 +4,9 @@ module Regex.Optimize.RedundantBranches (redundantBranchesPass) where
 
 import Compiler.Hoopl as H
 
+import Data.Bits
+import Data.Word
+
 import Debug.Trace
 
 import qualified CharMap as CM
@@ -53,6 +56,15 @@ rewrite = deepBwdRw rw
     rw i@(TotalSwitch offset m) f
         | Just l' <- oneLabel m      = rwLast i (Branch l')
         | Just m' <- mapLabels m f   = rwLast i (TotalSwitch offset m')
+    rw i@(CmpByte p c tl fl) f
+        | Just tl' <- label tl f     = rwLast i (CmpByte p c tl' fl)
+        | Just fl' <- label fl f     = rwLast i (CmpByte p c tl fl')
+    rw i@(CmpWord p c tl fl) f
+        | Just tl' <- label tl f     = rwLast i (CmpWord p c tl' fl)
+        | Just fl' <- label fl f     = rwLast i (CmpWord p c tl fl')
+    rw i@(CmpDWord p c tl fl) f
+        | Just tl' <- label tl f     = rwLast i (CmpDWord p c tl' fl)
+        | Just fl' <- label fl f     = rwLast i (CmpDWord p c tl fl')
     rw i@(Branch t) f                = rwInsn i t f
     rw _ _ = return Nothing
 
@@ -84,11 +96,16 @@ simplifySameIfs :: FuelMonad m => BwdRewrite m Insn RBFact
 simplifySameIfs = deepBwdRw rw
   where
     rw :: FuelMonad m => Insn e x -> Fact x RBFact -> m (Maybe (Graph Insn e x))
-    rw (IfBOL tl fl)       f | tl == fl = rwLast (Branch tl)
-                             | Just i' <- same tl fl f = rwLast i'
-    rw (CheckBounds _ tl fl) f | tl == fl = rwLast (Branch tl)
-                               | Just i' <- same tl fl f = rwLast i'
-    rw _ _ = return Nothing
+    rw (IfBOL tl fl)         f = rwSame tl fl f
+    rw (CheckBounds _ tl fl) f = rwSame tl fl f
+    rw (CmpByte _ _ tl fl)   f = rwSame tl fl f
+    rw (CmpWord _ _ tl fl)   f = rwSame tl fl f
+    rw (CmpDWord _ _ tl fl)  f = rwSame tl fl f
+    rw _                     _ = return Nothing
+
+    rwSame tl fl f | tl == fl = rwLast (Branch tl)
+                   | Just i' <- same tl fl f = rwLast i'
+                   | otherwise = return Nothing
 
     same l1 l2 f | Just i1 <- insn l1 f, Just i2 <- insn l2 f,
                    i1 == i2  = Just i1
@@ -99,9 +116,41 @@ simplifySameIfs = deepBwdRw rw
 
     rwLast new = return (Just (mkLast new))
 
+w16 :: Word8 -> Word16
+w16 = toEnum . fromEnum
+w32 :: Word16 -> Word32
+w32 = toEnum . fromEnum
+-- Assumes little-endian output.
+combine8 :: Word8 -> Word8 -> Word16
+combine8 i j = (w16 j `shiftL` 8) .|. w16 i
+combine16 :: Word16 -> Word16 -> Word32
+combine16 i j = (w32 j `shiftL` 16) .|. w32 i
+
+combineCompares :: FuelMonad m => BwdRewrite m Insn RBFact
+combineCompares = deepBwdRw rw
+  where
+    rw :: FuelMonad m => Insn e x -> Fact x RBFact -> m (Maybe (Graph Insn e x))
+    rw i@(CmpByte _ _ t _) f
+      | Just (PElem j@(CmpByte _ _ _ _)) <- mapLookup t f = tryCombine i j
+    rw i@(CmpWord _ _ t _) f
+      | Just (PElem j@(CmpWord _ _ _ _)) <- mapLookup t f = tryCombine i j
+    rw _                   _ = return Nothing
+
+    -- Only handle adjacent positions (in order for now - flipping would be
+    -- trivial though).
+    -- The not-equal label has to be the same.
+    tryCombine :: FuelMonad m => Insn O C -> Insn O C -> m (Maybe (Graph Insn O C))
+    tryCombine (CmpByte p1 c1 _ f1) (CmpByte p2 c2 t2 f2)
+      | p2 == p1 + 1, f1 == f2 = rwLast (CmpWord p1 (combine8 c1 c2) t2 f1)
+    tryCombine (CmpWord p1 w1 _ f1) (CmpWord p2 w2 t2 f2)
+      | p2 == p1 + 2, f1 == f2 = rwLast (CmpDWord p1 (combine16 w1 w2) t2 f1)
+    tryCombine _ _ = return Nothing
+
+    rwLast new = return (Just (mkLast new))
+
 redundantBranchesPass :: FuelMonad m => BwdPass m Insn RBFact
 redundantBranchesPass = BwdPass
   { bp_lattice = lattice
   , bp_transfer = transfer
-  , bp_rewrite = rewrite `thenBwdRw` simplifySameIfs }
+  , bp_rewrite = rewrite `thenBwdRw` simplifySameIfs `thenBwdRw` combineCompares }
 

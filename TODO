@@ -58,8 +58,6 @@
 ## Micro optimizations
 
 - Skip prologue/epilogue in asm output if no C functions are called
-- Delay/batch pointer increments so that adjacent comparisons can be merged
-  (Is this best done as optimization or with TNFA/TDFA extensions?)
 - On a single case, don't load to al first? (probably doesn't matter?)
 
 ## Regex
@@ -69,16 +67,17 @@
   2. Remove all transitions to failed states
   3. Remove failed states themselves (unless that happens automatically when
      they are not mentioned and have no transitions?)
-* Handle literals in TNFA/TDFA to make it more efficient (e.g. madding.sed)
-  - Doesn't seem feasible to keep literals through TNFA construction as they
-    would need to be split
-  - Rather recognize in TDFA? that there's a path where only one character can
-    match, and then you can string together more of them. Or even do it as an
-    optimization on the IR?
+* More optimizations of literal matching (e.g. madding.sed)
+  - Look for even larger blocks to combine
+    -> Replace the byte/word/dword IR with a block compare?
+  - Use SSE/AVX compares for 16/32-byte blocks (big constants though...)
   - Emit memcmp to match a long-enough literal
 * TNFA minimization - might make TDFA generation faster
 * TDFA minimization - combine equivalent states
+  NB: Implemented but never removes anything... Might already be minimal by
+  construction?
 * More efficient searching:
+  - Proper correct version of non-greedy .* to generate state machine for find
   - If regex starts with a single character, use memchr
   - If regex starts with a literal, use memmem for initial guess/skip
   - In a state where we match something like .*literal or .*char we can skip
@@ -93,13 +92,11 @@
     for non-greedy .* and returning shortest instead of longest match.
 * Do more with memmem - e.g. precalculate tables and constants, check for
   string search algorithms with more expensive precalculation.
-* Cursor optimizations
-  - Register allocation of registers to x86-64 registers
 * Bounds check should not lead to retry if that's just an impossible match
   The failed bounds check for the starting state seems to be going to the
   fallback label in cases where that would not be useful. Could special-case
-  bounds checks for the start state? (The amount of wasted work is very small
-  though - it's bounded by the minimum match length of the regex and only
+  bounds checks for the retry/start state? (The amount of wasted work is very
+  small though - it's bounded by the minimum match length of the regex and only
   happens near the end of the string.)
 * Something with regexes anchored at the end - at least things like "$" or
   "foo$" never need to search but can match relative the end of the string.
@@ -118,9 +115,14 @@
   - anchored at end: first match will contain the end of the string
   - matches any suffix / ends with .*: first match will match all
   - also when matching any prefix
+- Delay/batch pointer increments so that adjacent comparisons can be merged
 
 ### Abandoned
 
 * Port search with states as in SimulateTNFA to TDFA construction
   - Turns out this was wrong. Can it even work? Let's just do the other
     optimizations :)
+* Cursor optimizations
+  - In the end, this was better/easier done by analyzing the TDFA and deciding
+    on a read offset for each state. By adding offsets to compare and bounds
+    checks, we can still use a single cursor.

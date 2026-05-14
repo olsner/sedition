@@ -47,13 +47,13 @@ lookup k (RangeMap m) | Just (_,v) <- M.lookupLE k m = v
 findWithDefault :: (Bounded k, Enum k, Ord k) => a -> k -> RangeMap k a -> a
 findWithDefault def k = fromMaybe def . RangeMap.lookup k
 
-toList :: (Bounded k, Enum k, Ord k, Ord v) => RangeMap k v -> [(k, v)]
+toList :: (Bounded k, Enum k, Ord k, Eq v) => RangeMap k v -> [(k, v)]
 toList m = [(k, v) | (k1,k2,v) <- toRanges' m, k <- [k1..k2]]
 
 toRanges :: (Bounded k, Enum k, Ord k, Ord v) => RangeMap k v -> [([(k, k)], v)]
 toRanges m = uniqRanges (toRanges' m)
 
-toRanges' :: (Bounded k, Enum k, Ord k, Ord v) => RangeMap k v -> [(k, k, v)]
+toRanges' :: (Bounded k, Enum k, Ord k, Eq v) => RangeMap k v -> [(k, k, v)]
 toRanges' (RangeMap m) = go0 (M.toList m)
   where
     -- go0: last entry seen was Nothing, or start of list (i.e. iterating range
