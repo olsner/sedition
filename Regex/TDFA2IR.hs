@@ -210,22 +210,42 @@ emitIR tdfa@TDFA{..} = mdo
 
   let startNotBOL | onlyMatchAtBOL = justFail
                   | otherwise      = startLabelNotBOL
+  startNotBOL_unchecked <- getLabel (tdfaStartStateNotBOL, Unchecked)
+
+  let failLabel | onlyMatchAtBOL = justFail
+                | retryCheckEOF  = failRetryChecked
+                | otherwise      = failRetryUnchecked
+
+  let retry | retryCheckEOF = checkedRetry
+            | otherwise = uncheckedRetry
+
+  let retryEOF | retryCheckEOF = checkedRetry
+               | otherwise = justFail
 
   -- We get here if we reach the original fallback, i.e. we reach a state where
-  -- it's impossible to match the rest of the string.
-  -- TODO Instead of just checkEOF, use the min length of startNotBOL (plus one), then use the unchecked label for startNotBOL below.
-  failLabel <- labelBlock (mkMiddle (LoadCursor fc) H.<*> checkEOF 0 justFail retry)
+  -- it's impossible to match the rest of the string and want to try matching at
+  -- a different offset.
+  failRetryUnchecked <- labelBlock (mkMiddles [Trace "fail -> unchecked retry", LoadCursor fc] H.<*> checkBounds minLengthAtRetry retryEOF uncheckedRetry)
   justFail <- labelBlock (mkLast Fail)
-  -- We have a check bounds and restore cursor before this so we know we're not
-  -- at the end of the string and can safely move the cursor by one at least.
-  -- Then repeat matching from the starting not-BOL state.
-  retry <- labelBlock (mkMiddles [MoveCursor 1, Trace "retrying", SaveCursor fc 0, SetFallback failLabel]
+  uncheckedRetry <- labelBlock (mkMiddles [MoveCursor 1, Trace "retrying (unchecked)", SaveCursor fc 0, SetFallback failLabel]
+                       H.<*> goto startNotBOL_unchecked)
+
+  failRetryChecked <- labelBlock (mkMiddles [Trace "fail -> checked retry", LoadCursor fc] H.<*> checkEOF 0 justFail checkedRetry)
+  checkedRetry <- labelBlock (mkMiddles [MoveCursor 1, Trace "retrying (checked)", SaveCursor fc 0, SetFallback failLabel]
                        H.<*> goto startNotBOL)
   g <- gets graph
   return (finishProgram entry g)
 
   where
     onlyMatchAtBOL = not (M.member tdfaStartStateNotBOL tdfaMinLengths)
+    stateAcceptsAtEOL s = M.member s tdfaFallbackFunction || M.member s tdfaFinalFunction || M.member s tdfaEOL
+    retryCheckEOF = stateAcceptsAtEOL tdfaStartStateNotBOL
+
+    -- Checked before moving cursor, so add one to the minimum length at the
+    -- not-BOL starting state.
+    minLengthAtRetry | retryCheckEOF = 2
+                     | otherwise = 1 + M.findWithDefault 0 tdfaStartStateNotBOL tdfaMinLengths
+
 
 foldRegOps :: TagValue -> [RegOp] -> Map RegId TagValue
 foldRegOps cursor = foldl f M.empty
