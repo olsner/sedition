@@ -33,13 +33,12 @@ data IRState = IRState {
     firstFreeUnique :: Int,
     graph :: Graph Insn C C,
     labelMap :: Map StateLabel Label,
-    matchCode :: Graph Insn O C,
     fallbackReg :: R,
     freeRegister :: R
   } deriving (Show)
 
 nextReg (R r) = R (succ r)
-initState r1 = IRState 0 emptyClosedGraph M.empty undefined r1 r2
+initState r1 = IRState 0 emptyClosedGraph M.empty r1 r2
   where
     r2 = nextReg r1
 
@@ -66,7 +65,6 @@ getLabel s = do
       l <- freshLabel
       modify (addLabel s l)
       return l
-setMatchCode c = modify $ \s -> s { matchCode = c }
 
 newReg :: IRM R
 newReg = do
@@ -137,15 +135,15 @@ mkSwitch pos table def | CM.isComplete table = TotalSwitch pos table
                        | otherwise           = Switch pos table def
 
 emitState :: TDFA -> StateId -> IRM ()
-emitState TDFA{..} s = mdo
+emitState tdfa@TDFA{..} s = mdo
   body <- labelBlock (debug ("state " ++ show s) H.<*> yystats "visited_chars" 1 H.<*> switch)
   switch <- emitTrans nocheckStates readOffsets offset trans defaultLabel
 
   fc <- gets fallbackReg
 
-  matchL <- gets matchCode
-  fallbackLabel <- labelBlock (fallbackRegOps fc matchL)
-  eolLabel <- labelBlock (moveCursor offset H.<*> eolRegOps matchL)
+  matchL <- genMatchCode tdfa offset
+  fallbackLabel <- labelBlock (fallbackRegOps fc)
+  eolLabel <- labelBlock (eolRegOps matchL)
   entryLabel <- getLabel (s, Checked)
   nocheckLabel <- getLabel (s, Unchecked)
   addBlock (mkLabel nocheckLabel H.<*> maybeSetFallback fc fallbackLabel H.<*>
@@ -160,7 +158,6 @@ emitState TDFA{..} s = mdo
   defaultLabel <- if isFinalState
                     then labelBlock (debug ("default-transition from final " ++ show s) H.<*>
                                      emitEndRegOps offset tdfaFinalFunction H.<*>
-                                     moveCursor offset H.<*>
                                      matchL)
                     else return failLabel
   failLabel <- labelBlock (debug ("default-transition from non-final " ++ show s) H.<*> gofail)
@@ -176,18 +173,20 @@ emitState TDFA{..} s = mdo
 
     eolRegOps :: Graph Insn O C -> Graph Insn O C
     eolRegOps matchCode
-      | isEOLState = emitEndRegOps 0 tdfaEOL H.<*> matchCode
-      | isFinalState = emitEndRegOps 0 tdfaFinalFunction H.<*> matchCode
+      | isEOLState = emitEndRegOps offset tdfaEOL H.<*> matchCode
+      | isFinalState = emitEndRegOps offset tdfaFinalFunction H.<*> matchCode
       | otherwise = gofail
 
-    fallbackRegOps :: RegId -> Graph Insn O C -> Graph Insn O C
-    fallbackRegOps fc matchCode | isFallbackState || isFinalState =
+    fallbackRegOps :: RegId -> Graph Insn O C
+    fallbackRegOps fc | isFallbackState || isFinalState =
         mkMiddle (LoadCursor fc) H.<*>
         -- debug ("Fell back to " <> show s <> " at {{YYPOS}}") <>
         emitEndRegOps 0 (tdfaFallbackFunction `M.union` tdfaFinalFunction) H.<*>
-        matchCode
+        matchCode tdfa fc
                               | otherwise = gofail
 
+    -- TODO Remove the emitted reg ops - since we're already duplicating the
+    -- match code we should give that one a map instead.
     emitEndRegOps offset opfun = foldMap (emitRegOp offset) (M.findWithDefault [] s opfun)
 
     maybeSetFallback fc l | isFinalState = debug ("setting fallback in " ++ show s) H.<*> mkMiddles [SaveCursor fc offset, SetFallback l]
@@ -206,9 +205,6 @@ emitIR tdfa@TDFA{..} = mdo
 
   entry <- labelBlock (mkMiddles [SaveCursor fc 0, SetFallback failLabel] H.<*>
     mkLast (IfBOL startLabelBOL startNotBOL))
-
-  c <- newReg
-  setMatchCode (mkMiddle (SaveCursor c 0) H.<*> mkLast (Match (finalTagRegMap c)))
 
   startLabelNotBOL <- getLabel (tdfaStartStateNotBOL, Checked)
   startLabelBOL <- getLabel (tdfaStartState, Checked)
@@ -234,6 +230,14 @@ emitIR tdfa@TDFA{..} = mdo
   where
     onlyMatchAtBOL = not (M.member tdfaStartStateNotBOL tdfaMinLengths)
 
+genMatchCode :: TDFA -> Int -> IRM (Graph Insn O C)
+genMatchCode tdfa offset = do
+  c <- newReg
+  return (mkMiddle (SaveCursor c offset) H.<*> matchCode tdfa c)
+
+matchCode :: TDFA -> R -> Graph Insn O C
+matchCode TDFA{..} c = mkLast (Match (finalTagRegMap c))
+  where
     finalTagRegMap c = M.union finalTagRegs (fixedTags c)
     finalTagRegs = M.map (\r -> Reg r 0) tdfaFinalRegisters
     fixedTags c = M.map f tdfaFixedTags

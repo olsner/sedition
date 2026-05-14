@@ -17,6 +17,8 @@ import Regex.TaggedRegex (TagId)
 
 type R = RegId
 
+-- TODO add back cursor-relative values so we don't have to do SaveCursor so
+-- much.
 data TagValue
   = Reg R Int      -- ^ Register value minus offset
   | NoTag          -- ^ Tag not set in this branch
