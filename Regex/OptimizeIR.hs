@@ -11,6 +11,7 @@ import Regex.IR
 import Regex.Optimize.IdenticalBlocks (mergeIdenticalBlocks)
 import Regex.Optimize.LiveRegister (liveRegisterPass)
 import Regex.Optimize.LiveCursor (liveCursorPass)
+import Regex.Optimize.RedundantLoadCursor (redundantLoadCursorPass)
 import Regex.Optimize.LiveSetFallback (liveSetFallbackPass)
 import Regex.Optimize.PossibleFallback (possibleFallbackPass)
 import Regex.Optimize.ConstRegister (constRegisterPass)
@@ -57,6 +58,8 @@ optimizeOnce entry program = do
     analyzeAndRewriteFwd constRegisterPass entries program mapEmpty
   program <- tracePass "liveCursor" $
     analyzeAndRewriteBwd liveCursorPass entries program mapEmpty
+  program <- tracePass "redundantLoadCursor" $
+    analyzeAndRewriteFwd redundantLoadCursorPass entries program mapEmpty
   program <- tracePass "redundantCheckBounds" $
     analyzeAndRewriteFwd redundantCheckBoundsPass entries program mapEmpty
   program <- tracePass "sameResult" $

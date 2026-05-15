@@ -75,6 +75,7 @@ executable sedition
                       Regex.Cursor
                       Regex.Optimize.ConstRegister
                       Regex.Optimize.LiveCursor
+                      Regex.Optimize.RedundantLoadCursor
                       Regex.Optimize.LiveRegister
                       Regex.Optimize.LiveSetFallback
                       Regex.Optimize.PossibleFallback
@@ -120,6 +121,7 @@ executable tdfa2c
                       Regex.Cursor
                       Regex.Optimize.ConstRegister
                       Regex.Optimize.LiveCursor
+                      Regex.Optimize.RedundantLoadCursor
                       Regex.Optimize.LiveRegister
                       Regex.Optimize.LiveSetFallback
                       Regex.Optimize.PossibleFallback

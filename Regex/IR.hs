@@ -70,6 +70,7 @@ data Insn e x where
   -- Cursor := d
   MoveCursor    :: Int                              -> Insn O O
   -- R := Cursor + d
+  -- TODO offset appears to be unused now
   SaveCursor    :: R -> Int                         -> Insn O O
   -- Cursor := R
   LoadCursor    :: R                                -> Insn O O
