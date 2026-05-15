@@ -8,6 +8,7 @@ import Control.Monad
 import Control.Monad.Trans.Class
 import Control.Monad.Trans.State.Strict
 
+import Data.Bits
 import Data.Map (Map)
 import Data.Map qualified as M
 import Data.Maybe
@@ -45,6 +46,16 @@ type Result = Maybe (Map TagId Int)
 type M a = StateT S (Either Result) a
 
 char i = gets (\S{..} -> buffer !! (position + i))
+word8 :: (Bits a, Enum a) => Int -> M a
+word8 i = toEnum . fromEnum <$> char i
+word16 i = do
+  w1 <- word8 i
+  w2 <- word8 (i + 1)
+  return (w1 .|. (w2 `shiftL` 8))
+word32 i = do
+  w1 <- word16 i
+  w2 <- word16 (i + 2)
+  return (w1 .|. (w2 `shiftL` 16))
 
 setPos i = modify $ \s -> s { position = i }
 getReg r = gets (M.lookup r . registers)
@@ -87,6 +98,15 @@ run (Switch offset cm def) = do
 run (TotalSwitch offset cm) = do
   c <- char offset
   runLabel (fromJust $ CM.lookup c cm)
+run (CmpByte offset val tl fl) = do
+  c <- word8 offset
+  runLabel (if c == val then tl else fl)
+run (CmpWord offset val tl fl) = do
+  c <- word16 offset
+  runLabel (if c == val then tl else fl)
+run (CmpDWord offset val tl fl) = do
+  c <- word32 offset
+  runLabel (if c == val then tl else fl)
 run Fail = lift (Left Nothing)
 run (Match tagMap) = do
   regs <- gets registers
