@@ -173,7 +173,6 @@ emitInsn (Branch l) = gotoL l
 -- O O debugging
 emitInsn (Trace msg) = yydebug "\"%s\\n\"" [cstring (C.pack msg)]
 -- O O primitives
-emitInsn (Set r (r2, i)) = stmt (showB r <> " = " <> showB r2 <> " + " <> intDec i)
 emitInsn (Clear r) = stmt (showB r <> " = NULL")
 emitInsn (Copy r r2) = stmt (showB r <> " = " <> showB r2)
 -- O O cursor movement and transfer

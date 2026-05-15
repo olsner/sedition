@@ -33,7 +33,6 @@ constRegisterTransfer = mkFTransfer3 first middle last
     first :: Insn C O -> ConstRegFact -> ConstRegFact
     first _ f = f
     middle :: Insn O O -> ConstRegFact -> ConstRegFact
-    middle (Set r _) f = mapInsert r Top f
     middle (Copy r r2) f
       | Just v <- mapLookup r2 f = mapInsert r v f
       | otherwise           = mapDelete r f
@@ -65,12 +64,12 @@ rewriteTagMap f map | map' == map = Nothing
   where
     map' = M.map t map
     t NoTag = NoTag
+    t (Cursor d) = Cursor d
     t (Reg r d) | Just (PElem IsNil) <- mapLookup r f = NoTag
                 | otherwise = Reg r d
 
 enableTrace = False
 
-interesting (Set _ _) = True
 interesting (Copy _ _) = True
 interesting (Clear _) = True
 interesting (SaveCursor _ _) = True

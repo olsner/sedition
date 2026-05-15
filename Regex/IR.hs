@@ -62,9 +62,6 @@ data Insn e x where
 
   -- R := nil
   Clear         :: R                                -> Insn O O
-  -- R1 := R2 + Offset (not valid for nil source registers)
-  -- TODO May be unnecessary in the end.
-  Set           :: R -> (R,Int)                     -> Insn O O
   -- R1 := R2 (preserving nil)
   Copy          :: R -> R                           -> Insn O O
 
@@ -139,7 +136,6 @@ allRegs :: Program -> RegSet
 allRegs Program{..} = foldGraphNodes f programGraph setEmpty
   where
     f :: Insn e x -> RegSet -> RegSet
-    f (Set r (r2, _)) = setInsert r . setInsert r2
     f (Copy r r2) = setInsert r . setInsert r2
     f (Clear r) = setInsert r
     f (SaveCursor r _) = setInsert r

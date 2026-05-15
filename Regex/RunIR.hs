@@ -99,7 +99,6 @@ run (Branch l) = runLabel l
 run (Trace msg) = do
     s <- get
     when (debugEnabled s) $ traceM (msg ++ ": " ++ showState s)
-run (Set r (r2, i)) = setReg r =<< (+ i) <$> getReg' r2
 run (Clear r) = clearReg r
 run (Copy r r2) = setReg' r =<< getReg r2
 

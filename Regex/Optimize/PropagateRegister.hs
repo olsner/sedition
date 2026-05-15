@@ -49,9 +49,6 @@ propagateRegisterTransfer = mkFTransfer3 first middle last
     first :: Insn C O -> PropRegFact -> PropRegFact
     first _ f = f
     middle :: Insn O O -> PropRegFact -> PropRegFact
-    middle (Set r (r2,n)) f
-      | r == r2             = update r Top f
-      | otherwise           = update r (PElem (r2, n)) f
     middle (Copy r r2) f
       | r == r2             = trace "Copy to same register??" f
       | otherwise           = update r (PElem (r2, 0)) f
@@ -68,14 +65,6 @@ propagateRegister :: FuelMonad m => FwdRewrite m Insn PropRegFact
 propagateRegister = mkFRewrite rw
   where
     rw :: FuelMonad m => Insn e x -> PropRegFact -> m (Maybe (Graph Insn e x))
-    -- TODO Not very principled with just checking the index... The goal should
-    -- be to maximize the offset to try to do as much as possible from the
-    -- furthest-back register?
-    rw (Set r1 (r2,n)) f
-      | Just (PElem (r3,d)) <- doLookup r2 f, r3 < r1 = rwMid (Set r1 (r3, d + n))
-    rw (Copy r1 r2) f
-      | Just (PElem (r3,d)) <- doLookup r2 f, r3 < r1 = rwMid (Set r1 (r3, d))
-    rw (Set r1 (r2,0)) _ = rwMid (Copy r1 r2)
     rw (Match map) f
       | Just map' <- rewriteTagMap f map = trace (show f) $ rwLast (Match map')
     rw _ _ = return Nothing
@@ -92,7 +81,6 @@ rewriteTagMap f map | map' == map = Nothing
 
 enableTrace = True
 
-interesting (Set _ _) = False
 interesting (Copy _ _) = True
 interesting (Clear _) = True
 interesting (SaveCursor _ _) = True

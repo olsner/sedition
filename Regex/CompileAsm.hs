@@ -294,15 +294,6 @@ emitInsn (Branch l) = gotoL l
 -- O O debugging
 emitInsn (Trace msg) = comment (string8 msg)
 -- O O register primitives
-emitInsn (Set r (r2, 0)) = do
-  comment (showB r <> " := " <> showB r2)
-  loadAddr (yyreg r2) res0
-  storeAddr (yyreg r) res0
-emitInsn (Set r (r2, offset)) = do
-  comment (showB r <> " := " <> showB r2 <> " + " <> intDec offset)
-  loadAddr (yyreg r2) res0
-  op "add" [regA res0, intDec offset]
-  storeAddr (yyreg r) res0
 emitInsn (Clear r) = do
   comment (showB r <> " := nullptr")
   op "mov" [qword_ptr (yyreg r), "0"]
