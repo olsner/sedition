@@ -159,8 +159,7 @@ emitState tdfa@TDFA{..} s = mdo
   checkEOFLabel <- labelBlock (checkEOF offset eolLabel body)
   defaultLabel <- if isFinalState
                     then labelBlock (debug ("default-transition from final " ++ show s) H.<*>
-                                     emitEndRegOps offset tdfaFinalFunction H.<*>
-                                     matchCode tdfa offset)
+                                     emitEndRegOps offset tdfaFinalFunction)
                     else return failLabel
   failLabel <- labelBlock (debug ("default-transition from non-final " ++ show s) H.<*> gofail)
   return ()
@@ -175,21 +174,18 @@ emitState tdfa@TDFA{..} s = mdo
 
     eolRegOps :: Int -> Graph Insn O C
     eolRegOps offset
-      | isEOLState = emitEndRegOps offset tdfaEOL H.<*> matchCode tdfa offset
-      | isFinalState = emitEndRegOps offset tdfaFinalFunction H.<*> matchCode tdfa offset
+      | isEOLState = emitEndRegOps offset tdfaEOL
+      | isFinalState = emitEndRegOps offset tdfaFinalFunction
       | otherwise = gofail
 
     fallbackRegOps :: RegId -> Graph Insn O C
     fallbackRegOps fc | isFallbackState || isFinalState =
         mkMiddle (LoadCursor fc) H.<*>
         -- debug ("Fell back to " <> show s <> " at {{YYPOS}}") <>
-        emitEndRegOps 0 (tdfaFallbackFunction `M.union` tdfaFinalFunction) H.<*>
-        matchCode tdfa 0
+        emitEndRegOps 0 (tdfaFallbackFunction `M.union` tdfaFinalFunction)
                               | otherwise = gofail
 
-    -- TODO Remove the emitted reg ops - since we're already duplicating the
-    -- match code we should give that one a map instead.
-    emitEndRegOps offset opfun = foldMap (emitRegOp offset) (M.findWithDefault [] s opfun)
+    emitEndRegOps offset opfun = matchCode tdfa offset (M.findWithDefault [] s opfun)
 
     maybeSetFallback fc l | isFinalState = debug ("setting fallback in " ++ show s) H.<*> mkMiddles [SaveCursor fc offset, SetFallback l]
                        | otherwise    = debug ("no fallback from " ++ show s)
@@ -232,14 +228,30 @@ emitIR tdfa@TDFA{..} = mdo
   where
     onlyMatchAtBOL = not (M.member tdfaStartStateNotBOL tdfaMinLengths)
 
-matchCode :: TDFA -> Int -> Graph Insn O C
-matchCode TDFA{..} offset = mkLast (Match finalTagRegMap)
+foldRegOps :: Int -> [RegOp] -> Map RegId TagValue
+foldRegOps offset = foldl f M.empty
   where
+     f m (r, SetReg Pos) = M.insert r (Cursor offset) m
+     f m (r, SetReg Nil) = M.insert r NoTag m
+     f m (r, CopyReg r2) | Just op <- M.lookup r2 m = M.insert r op m
+                         | otherwise = M.insert r (Reg r2 0) m
+
+matchCode :: TDFA -> Int -> [RegOp] -> Graph Insn O C
+matchCode TDFA{..} offset regops = mkLast (Match finalTagRegMap)
+  where
+    regMap = foldRegOps offset regops
+    resolveReg r = M.findWithDefault (Reg r 0) r regMap
     finalTagRegMap = M.union finalTagRegs fixedTags
-    finalTagRegs = M.map (\r -> Reg r 0) tdfaFinalRegisters
+    finalTagRegs :: Map TagId TagValue
+    finalTagRegs = M.map resolveReg tdfaFinalRegisters
     fixedTags = M.map f tdfaFixedTags
       where f (TR.EndOfMatch d) = Cursor (offset - d)
-            f (TR.FixedTag t d) = Reg (fromJust (M.lookup t tdfaFinalRegisters)) d
+            f (TR.FixedTag t d) = offs (fromJust (M.lookup t finalTagRegs)) d
+            -- Offset is positive backwards, so adds in Reg but subtracts in
+            -- Cursor...
+            offs (Reg r d1) d2 = Reg r (d1 + d2)
+            offs (Cursor d1) d2 = Cursor (d1 - d2)
+            offs NoTag _ = NoTag
 
 genIR :: TDFA -> Program
 genIR tdfa = evalState (emitIR tdfa) (initState freeReg)
