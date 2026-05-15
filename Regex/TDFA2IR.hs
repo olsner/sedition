@@ -159,7 +159,7 @@ emitState tdfa@TDFA{..} s = mdo
   checkEOFLabel <- labelBlock (checkEOF offset eolLabel body)
   defaultLabel <- if isFinalState
                     then labelBlock (debug ("default-transition from final " ++ show s) H.<*>
-                                     emitEndRegOps offset tdfaFinalFunction)
+                                     emitEndRegOps (Cursor offset) tdfaFinalFunction)
                     else return failLabel
   failLabel <- labelBlock (debug ("default-transition from non-final " ++ show s) H.<*> gofail)
   return ()
@@ -174,18 +174,17 @@ emitState tdfa@TDFA{..} s = mdo
 
     eolRegOps :: Int -> Graph Insn O C
     eolRegOps offset
-      | isEOLState = emitEndRegOps offset tdfaEOL
-      | isFinalState = emitEndRegOps offset tdfaFinalFunction
+      | isEOLState = emitEndRegOps (Cursor offset) tdfaEOL
+      | isFinalState = emitEndRegOps (Cursor offset) tdfaFinalFunction
       | otherwise = gofail
 
     fallbackRegOps :: RegId -> Graph Insn O C
     fallbackRegOps fc | isFallbackState || isFinalState =
-        mkMiddle (LoadCursor fc) H.<*>
         -- debug ("Fell back to " <> show s <> " at {{YYPOS}}") <>
-        emitEndRegOps 0 (tdfaFallbackFunction `M.union` tdfaFinalFunction)
+        emitEndRegOps (Reg fc 0) (tdfaFallbackFunction `M.union` tdfaFinalFunction)
                               | otherwise = gofail
 
-    emitEndRegOps offset opfun = matchCode tdfa offset (M.findWithDefault [] s opfun)
+    emitEndRegOps cursor opfun = matchCode tdfa cursor (M.findWithDefault [] s opfun)
 
     maybeSetFallback fc l | isFinalState = debug ("setting fallback in " ++ show s) H.<*> mkMiddles [SaveCursor fc offset, SetFallback l]
                        | otherwise    = debug ("no fallback from " ++ show s)
@@ -228,24 +227,24 @@ emitIR tdfa@TDFA{..} = mdo
   where
     onlyMatchAtBOL = not (M.member tdfaStartStateNotBOL tdfaMinLengths)
 
-foldRegOps :: Int -> [RegOp] -> Map RegId TagValue
-foldRegOps offset = foldl f M.empty
+foldRegOps :: TagValue -> [RegOp] -> Map RegId TagValue
+foldRegOps cursor = foldl f M.empty
   where
-     f m (r, SetReg Pos) = M.insert r (Cursor offset) m
+     f m (r, SetReg Pos) = M.insert r cursor m
      f m (r, SetReg Nil) = M.insert r NoTag m
      f m (r, CopyReg r2) | Just op <- M.lookup r2 m = M.insert r op m
                          | otherwise = M.insert r (Reg r2 0) m
 
-matchCode :: TDFA -> Int -> [RegOp] -> Graph Insn O C
-matchCode TDFA{..} offset regops = mkLast (Match finalTagRegMap)
+matchCode :: TDFA -> TagValue -> [RegOp] -> Graph Insn O C
+matchCode TDFA{..} cursor regops = mkLast (Match finalTagRegMap)
   where
-    regMap = foldRegOps offset regops
+    regMap = foldRegOps cursor regops
     resolveReg r = M.findWithDefault (Reg r 0) r regMap
     finalTagRegMap = M.union finalTagRegs fixedTags
     finalTagRegs :: Map TagId TagValue
     finalTagRegs = M.map resolveReg tdfaFinalRegisters
     fixedTags = M.map f tdfaFixedTags
-      where f (TR.EndOfMatch d) = Cursor (offset - d)
+      where f (TR.EndOfMatch d) = offs cursor d
             f (TR.FixedTag t d) = offs (fromJust (M.lookup t finalTagRegs)) d
             -- Offset is positive backwards, so adds in Reg but subtracts in
             -- Cursor...
