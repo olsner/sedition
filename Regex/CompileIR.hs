@@ -44,12 +44,10 @@ matchFromTag (t,val) | possibleTag t = stmt ("m->tags[" <> tagix t <> "] = " <> 
 
 debugTag t = yydebug ("\"match[" <> tagix t <> "] = %td\\n\"") ["m[" <> tagix t <> "]"]
 
--- TODO YYPOS is just a macro, inline it?
-yypos p = fun "YYPOS" [showB p]
-
 tagValue :: IR.TagValue -> Builder
 tagValue (Reg r 0) = showB r <> " ? " <> showB r <> " - YYBEGIN : -1"
 tagValue (Reg r d) = showB r <> " ? " <> showB r <> " - YYBEGIN - " <> intDec d <> " : -1"
+tagValue (Cursor d) = "(YYCURSOR - YYBEGIN) + " <> intDec d
 tagValue NoTag = "-1"
 
 declareReg :: R -> Builder
@@ -89,7 +87,6 @@ genC program@Program{..} =
     stmt ("const uint8_t *const YYLIMIT = s->buf + s->len") <>
     sfun "YYSTATS" ["matched_chars", "s->len - orig_offset"] <>
     stmt ("const uint8_t *YYCURSOR = s->buf + orig_offset") <>
-    "#define YYPOS(cur) (cur - YYBEGIN)\n" <>
     stmt ("void *fallback_label = NULL") <>
     foldMap declareReg allRegs <>
     blockComment "Jump to entry point" <>

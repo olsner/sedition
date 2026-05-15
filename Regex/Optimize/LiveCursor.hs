@@ -4,6 +4,8 @@ module Regex.Optimize.LiveCursor (liveCursorPass) where
 
 import Compiler.Hoopl as H
 
+import qualified Data.Map as M
+
 import Debug.Trace
 
 import Regex.IR
@@ -19,8 +21,14 @@ liveLattice = DataflowLattice
               j = new || old
               ch = changeIf (new /= old)
 
+matchUsesCursor = any usesCursor . M.elems
+  where usesCursor (Cursor _) = True
+        usesCursor (Reg _ _) = False
+        usesCursor NoTag = False
+
 kill :: Insn e x -> LiveCursorFact -> LiveCursorFact
 kill (LoadCursor _) _ = False
+kill (Match tagmap) _ = matchUsesCursor tagmap
 kill _              f = f
 
 gen :: Insn e x -> LiveCursorFact -> LiveCursorFact

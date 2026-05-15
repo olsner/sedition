@@ -32,6 +32,7 @@ gen :: Insn e x -> LiveRegFact -> LiveRegFact
 gen (Copy _ r)     = setInsert r
 gen (Match tagMap) = setUnion (setFromList (mapMaybe reg (M.elems tagMap)))
   where reg (Reg r _) = Just r
+        reg (Cursor _) = Nothing
         reg NoTag     = Nothing
 gen (LoadCursor r) = setInsert r
 gen _              = id

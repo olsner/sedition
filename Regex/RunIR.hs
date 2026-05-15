@@ -90,7 +90,8 @@ run (TotalSwitch offset cm) = do
 run Fail = lift (Left Nothing)
 run (Match tagMap) = do
   regs <- gets registers
-  lift (Left (Just (resolveTagMap regs tagMap)))
+  pos <- gets position
+  lift (Left (Just (resolveTagMap regs pos tagMap)))
 run (CheckBounds n eof cont) = do
   S{..} <- get
   runLabel (if position + n > bufferLength then eof else cont)
@@ -109,10 +110,12 @@ run (MoveCursor i) = modify $ \s -> s { position = position s + i }
 run (Fallback _) = runLabel =<< gets (fromJust . fallbackLabel)
 run (SetFallback l) = modify $ \s -> s { fallbackLabel = Just l }
 
-resolveTagMap regs = M.map f
+resolveTagMap regs pos = M.map f
   where
+    f (IR.Cursor d) = pos + d
     f (IR.Reg r d) | Just val <- M.lookup r regs = val - d
-                   | otherwise = (-1)
+                   | otherwise = -1
+    f (IR.NoTag) = -1
 
 testRunIR :: String -> String -> Result
 testRunIR re s = runIR s . fst . optimize 10000 . testTDFA2IR $ re

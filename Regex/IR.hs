@@ -18,10 +18,12 @@ import Regex.TaggedRegex (TagId)
 
 type R = RegId
 
--- TODO add back cursor-relative values so we don't have to do SaveCursor so
--- much.
+-- TODO Use "plus offset" everywhere, but with negative values?
+-- (minus offsets are/were used because fixed tags and end of match relative
+-- tags are always looking backwards from the end.)
 data TagValue
   = Reg R Int      -- ^ Register value minus offset
+  | Cursor Int     -- ^ Cursor value plus offset
   | NoTag          -- ^ Tag not set in this branch
   deriving (Show,Ord,Eq)
 

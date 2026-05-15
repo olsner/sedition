@@ -63,6 +63,10 @@ tagValue (IR.Reg r d) res = do
   setInt (-1) res
   label isSet
 tagValue (IR.NoTag) res = setInt (-1) res
+tagValue (IR.Cursor d) res = do
+  when (d == 0) $ copy yycursor (regA res)
+  when (d /= 0) $ setAddr (yycursor <> " + " <> intDec d) res
+  sub (regA res) yybegin
 
 declareReg :: R -> Builder ()
 declareReg r = label ("." <> showB r) <> op1 "resq" "1"
