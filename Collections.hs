@@ -1,4 +1,4 @@
-{-# LANGUAGE TypeFamilies,GeneralizedNewtypeDeriving,DeriveTraversable #-}
+{-# LANGUAGE TypeFamilies,GeneralizedNewtypeDeriving,DeriveTraversable,FlexibleContexts #-}
 
 module Collections where
 
@@ -197,14 +197,6 @@ instance Show RegSet where
 newtype RegMap a = RM (M.IntMap a)
   deriving (Eq, Ord, Functor, Foldable, Traversable)
 
-instance Show a => Show (RegMap a) where
-  showsPrec _ (RM m) = showString "{" . showCommasWith showAssoc (M.toList m) . showString "}"
-    where
-      showCommasWith f [] = id
-      showCommasWith f [x] = f x
-      showCommasWith f (x:xs) = f x . showString "," . showCommasWith f xs
-      showAssoc (k,v) = shows (R k) . showString ":" . shows v
-
 instance IsMap RegMap where
   type KeyOf RegMap = RegId
 
@@ -237,3 +229,15 @@ instance IsMap RegMap where
   mapToList (RM m) = [(R k, v) | (k,v) <- M.toList m]
   mapFromList assocs = RM (M.fromList [(k, v) | (R k, v) <- assocs])
   mapFromListWith f assocs = RM (M.fromListWith f [(k, v) | (R k, v) <- assocs])
+
+showsMap :: (IsMap m, Show a, Show (KeyOf m)) => m a -> ShowS
+showsMap m = showChar '{' . showCommasWith showAssoc (mapToList m) . showChar '}'
+    where
+      showCommasWith _ [] = id
+      showCommasWith f [x] = f x
+      showCommasWith f (x:xs) = f x . showChar ',' . showCommasWith f xs
+      showAssoc (k,v) = shows k . showChar ':' . shows v
+
+instance Show a => Show (RegMap a) where
+  showsPrec _ m = showsMap m
+
