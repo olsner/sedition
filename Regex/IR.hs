@@ -28,59 +28,63 @@ data TagValue
 type Pos = (R, Int)
 
 data Insn e x where
-  Label         :: Label                    -> Insn C O
+  Label         :: Label                            -> Insn C O
 
   -- If register points to the first character of the string, go to the first
   -- label otherwise go to the second. Note that this is different from whether
   -- the cursor is at its initial value, in the case of repeated searching.
-  IfBOL         :: Label -> Label      -> Insn O C
+  IfBOL         :: Label -> Label                   -> Insn O C
   -- Match character at offset against label map, jump to matching label. For
   -- characters not in the label map, go to default-label instead.
-  Switch        :: Int -> CharMap Label -> Label -> Insn O C
+  Switch        :: Int -> CharMap Label -> Label    -> Insn O C
   -- Switch that does not need a default case.
   -- All switches could use this by augmenting them with missing entries, but
   -- then we'd want a corresponding transformation on the output side to e.g.
   -- use default for the most common target label.
-  TotalSwitch   :: Int -> CharMap Label     -> Insn O C
+  TotalSwitch   :: Int -> CharMap Label             -> Insn O C
   -- Compare byte/word/dword at offset. Equal label then not-equal label.
-  CmpByte       :: Int -> Word8 -> Label -> Label -> Insn O C
-  CmpWord       :: Int -> Word16 -> Label -> Label -> Insn O C
-  CmpDWord      :: Int -> Word32 -> Label -> Label -> Insn O C
+  CmpByte       :: Int -> Word8  -> Label -> Label  -> Insn O C
+  CmpWord       :: Int -> Word16 -> Label -> Label  -> Insn O C
+  CmpDWord      :: Int -> Word32 -> Label -> Label  -> Insn O C
   -- Definitely did not match.
-  Fail          ::                             Insn O C
+  Fail          ::                                     Insn O C
   -- Definitely did match. Argument maps tags to final registers, including the
   -- evaluation of fixed tags.
-  Match         :: Map TagId TagValue       -> Insn O C
+  Match         :: Map TagId TagValue               -> Insn O C
   -- If EOF is at or before Pos, i.e. if EOF is closer than n characters (0 =>
   -- at eof) from the given register, go to first label.
   -- Otherwise go to second label.
-  CheckBounds   :: Int -> Label -> Label    -> Insn O C
-  Branch        :: Label                    -> Insn O C
+  CheckBounds   :: Int -> Label -> Label            -> Insn O C
+  Branch        :: Label                            -> Insn O C
 
-  Trace         :: String                   -> Insn O O
+  Trace         :: String                           -> Insn O O
   -- TODO Add stats counters
 
   -- R := nil
-  Clear         :: R                        -> Insn O O
+  Clear         :: R                                -> Insn O O
   -- R1 := R2 + Offset (not valid for nil source registers)
   -- TODO May be unnecessary in the end.
-  Set           :: R -> (R,Int)             -> Insn O O
+  Set           :: R -> (R,Int)                     -> Insn O O
   -- R1 := R2 (preserving nil)
-  Copy          :: R -> R                   -> Insn O O
+  Copy          :: R -> R                           -> Insn O O
 
   -- Cursor := d
-  MoveCursor    :: Int                      -> Insn O O
+  MoveCursor    :: Int                              -> Insn O O
   -- R := Cursor + d
-  SaveCursor    :: R -> Int                 -> Insn O O
+  SaveCursor    :: R -> Int                         -> Insn O O
   -- Cursor := R
-  LoadCursor    :: R                        -> Insn O O
+  LoadCursor    :: R                                -> Insn O O
 
   -- Fallback and restore mechanism.
   -- Jump back to the last set fallback label. Must not be used before the first
   -- SetFallback. The entry point probably has a SetFallback that goes to Fail.
-  Fallback      :: LabelSet                 -> Insn O C
+  -- The label set is initialized to every possible SetFallback label to be able
+  -- to reason about its control flow. Later optimization passes will refine
+  -- based on which SetFallback(s) can reach that Fallback, and if possible
+  -- replace it with a direct branch.
+  Fallback      :: LabelSet                         -> Insn O C
   -- Set fallback to given label.
-  SetFallback   :: Label                    -> Insn O O
+  SetFallback   :: Label                            -> Insn O O
 
 deriving instance Show (Insn e x)
 deriving instance Eq (Insn e x)
