@@ -307,6 +307,7 @@ emitInsn (Copy r r2) = do
   storeAddr (yyreg r) res0
 
 -- O O cursor operations
+emitInsn (MoveCursor 1) = op "inc" [yycursor]
 emitInsn (MoveCursor n) = op "add" [yycursor, intDec n]
 emitInsn (SaveCursor r 0) = do
   op "mov" [mem (yyreg r), yycursor]
