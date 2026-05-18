@@ -11,9 +11,6 @@ import qualified Data.ByteString.Char8 as C
 
 --import Data.Map (Map)
 import qualified Data.Map as M
-import qualified Data.Set as S
-import Data.IntSet (IntSet)
-import qualified Data.IntSet as IS
 -- import Data.List
 
 import Debug.Trace
@@ -21,16 +18,8 @@ import Debug.Trace
 import qualified CharMap as CM
 -- import CharMap (CharMap)
 
-import Regex.Regex (Regex)
-import qualified Regex.Regex as Regex
-
 import Regex.IR as IR
 import Regex.TaggedRegex hiding (EndOfMatch)
-import Regex.TNFA (genTNFA)
-import Regex.TDFA (genTDFA)
-import Regex.Minimize (minimize)
-import Regex.TDFA2IR (genIR)
-import Regex.OptimizeIR (optimize)
 import GenC
 
 yystats name inc = sfun "YYSTATS" [name, inc]
@@ -100,29 +89,6 @@ genC program@Program{..} =
   where allRegs = setElems (IR.allRegs program)
 
 earlyOut l = sfun "YYSTATS" ["early_out", "1"] <> goto l
-
-tdfa2c :: Maybe IntSet -> Regex -> C.ByteString
-tdfa2c used = toByteString .
-    genC .
-    -- TODO Allow controlling optimization fuel here, preferrably integrated in
-    -- a way that lets you bisect both regex and Sed IR optimizations.
-    fst . optimize 1000000 .
-    genIR .
-    minimize .
-    genTDFA .
-    genTNFA .
-    fixTags .
-    makeSearchRegex .
-    unusedTags .
-    tagRegex
-  where unusedTags | Just s <- used = selectTags (\(T t) -> t `IS.member` s)
-                   | otherwise = id
-
-isCompatible :: Regex -> Bool
-isCompatible = Regex.tdfa2cCompatible
-
-testTDFA2C :: String -> IO ()
-testTDFA2C = C.putStrLn . tdfa2c Nothing . Regex.parseString True . C.pack
 
 postOrderFoldGraphNodes ::
   forall a . Monoid a => (forall e x . Insn e x -> a -> a) -> Program -> a -> a

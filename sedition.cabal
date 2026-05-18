@@ -70,6 +70,7 @@ executable sedition
                       Regex.IR
                       Regex.OptimizeIR
                       Regex.RunIR
+                      Regex.Compile
                       Regex.CompileIR
                       Regex.CompileAsm
                       Regex.Cursor
@@ -116,6 +117,7 @@ executable tdfa2c
                       Regex.TDFA2IR
                       Regex.OptimizeIR
                       Regex.RunIR
+                      Regex.Compile
                       Regex.CompileIR
                       Regex.CompileAsm
                       Regex.Cursor

@@ -19,7 +19,7 @@ import GenAsm
 import qualified IR
 import IR (Program)
 import qualified Regex.Regex as Regex
-import qualified Regex.CompileAsm as Regex2Asm
+import Regex.Compile (re2asm, isCompatible)
 
 seditionRuntime :: IsString a => a
 seditionRuntime = $(embedStringFile "sedition.s")
@@ -281,7 +281,7 @@ resolveStringIndex s ix = case ix of
 forceRegcomp = False
 
 needRegcomp (IR.RE _ s ere _) = forceRegcomp ||
-    not (Regex2Asm.isCompatible (Regex.parseString ere s))
+    not (isCompatible (Regex.parseString ere s))
 
 useLiterals = True
 
@@ -293,11 +293,11 @@ compileRE r@IR.RE{..} = wrapper body
     body | needRegexec = regexec
          | useLiterals, Regex.Literal s <- re = literal (C.pack s)
          | useLiterals, Regex.Char c    <- re = literalChar c
-         | otherwise   = tdfa2asm re usedTags
+         | otherwise   = byteString (re2asm usedTags re)
     re = Regex.parseString ere s
     isLiteral | Regex.Literal _ <- re = True
               | otherwise             = False
-    needRegexec = forceRegcomp || not (Regex2Asm.isCompatible re)
+    needRegexec = forceRegcomp || not (isCompatible re)
     res = C.pack $ Regex.reString re
     wrapper b =
         label (regexfun r) <>
@@ -318,5 +318,3 @@ compileRE r@IR.RE{..} = wrapper body
     engineName | needRegexec = "regexec"
                | useLiterals && isLiteral = "memmem"
                | otherwise = "Regex2Asm"
-
-tdfa2asm re used = byteString (Regex2Asm.tdfa2asm used re)

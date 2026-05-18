@@ -19,7 +19,7 @@ import GenC
 import qualified IR
 import IR (Program)
 import qualified Regex.Regex as Regex
-import qualified Regex.CompileIR as Regex2C
+import Regex.Compile (re2c, isCompatible)
 
 seditionRuntime :: IsString a => a
 seditionRuntime = $(embedStringFile "sedition.h")
@@ -255,7 +255,7 @@ testCompare = False
 forceRegcomp = False
 
 needRegcomp (IR.RE _ s ere _) = forceRegcomp ||
-    testCompare || not (Regex2C.isCompatible (Regex.parseString ere s))
+    testCompare || not (isCompatible (Regex.parseString ere s))
 
 compileRE r@IR.RE{..} = wrapper body
   where
@@ -273,7 +273,7 @@ compileRE r@IR.RE{..} = wrapper body
     re = Regex.parseString ere s
     isLiteral | Regex.Literal _ <- re = True
               | otherwise             = False
-    needRegexec = forceRegcomp || not (Regex2C.isCompatible re)
+    needRegexec = forceRegcomp || not (isCompatible re)
     res = C.pack $ Regex.reString re
     wrapper b =
         "NOINLINE static bool " <> regexfun r <>
@@ -303,4 +303,4 @@ compileRE r@IR.RE{..} = wrapper body
 
 tdfa2c re used =
     (if testCompare then sfun "clear_match" ["m"] else mempty) <>
-    byteString (Regex2C.tdfa2c used re)
+    byteString (re2c used re)

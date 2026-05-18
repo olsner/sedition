@@ -9,12 +9,8 @@ import Compiler.Hoopl as H
 
 import Control.Monad
 
-import qualified Data.ByteString.Char8 as C
-
 --import Data.Map (Map)
 import qualified Data.Map as M
-import Data.IntSet (IntSet)
-import qualified Data.IntSet as IS
 -- import Data.List
 
 import Debug.Trace
@@ -22,16 +18,8 @@ import Debug.Trace
 import qualified CharMap as CM
 -- import CharMap (CharMap)
 
-import Regex.Regex (Regex)
-import qualified Regex.Regex as Regex
-
 import Regex.IR as IR
 import Regex.TaggedRegex hiding (EndOfMatch)
-import Regex.TNFA (genTNFA)
-import Regex.TDFA (genTDFA)
-import Regex.Minimize (minimize)
-import Regex.TDFA2IR (genIR)
-import Regex.OptimizeIR (optimize)
 import GenAsm
 
 tagix (T t) = t
@@ -174,25 +162,6 @@ genAsm program@Program{..} = do
     -- to .end, if that's the only path we get rid of a redundant jump.
     label ".end"
   where allRegs = setElems (IR.allRegs program)
-
-tdfa2asm :: Maybe IntSet -> Regex -> C.ByteString
-tdfa2asm used = toByteString .
-    genAsm .
-    -- TODO Allow controlling optimization fuel here, preferrably integrated in
-    -- a way that lets you bisect both regex and Sed IR optimizations.
-    fst . optimize 1000000 .
-    genIR .
-    minimize .
-    genTDFA .
-    genTNFA .
-    fixTags .
-    unusedTags .
-    tagRegex
-  where unusedTags | Just s <- used = selectTags (\(T t) -> t `IS.member` s)
-                   | otherwise = id
-
-isCompatible :: Regex -> Bool
-isCompatible = Regex.tdfa2cCompatible
 
 postOrderFoldGraphNodes ::
   forall a . Monoid a => (forall e x . Insn e x -> a -> a) -> Program -> a -> a
