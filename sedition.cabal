@@ -107,6 +107,7 @@ executable tdfa2c
     main-is:          Regex/TestTDFA2C.hs
 
     other-modules:    Regex.Regex
+                      Regex.NFA
                       Regex.TaggedRegex
                       Regex.TNFA
                       Regex.TDFA

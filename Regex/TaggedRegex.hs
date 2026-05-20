@@ -15,7 +15,7 @@ import qualified Data.Map as M
 -- import Data.Set (Set)
 -- import qualified Data.Set as S
 
--- import Debug.Trace
+import Debug.Trace
 
 import Regex.Regex (Regex)
 import qualified Regex.Regex as Regex
@@ -36,15 +36,18 @@ data Term
 
 data TaggedRegex
   = Empty
+  | NoMatch
   | Term Term
   | TagTerm TagId
   | Cat TaggedRegex TaggedRegex
   | Or TaggedRegex TaggedRegex
   | Repeat Int (Maybe Int) TaggedRegex
-  deriving (Ord, Eq)
+  deriving (Show, Ord, Eq)
 
+{-
 instance Show TaggedRegex where
   show Empty = "()"
+  show NoMatch = "($nomatch^)"
   show (Term BOL) = "^"
   show (Term Any) = "."
   show (Term EOL) = "$"
@@ -56,6 +59,7 @@ instance Show TaggedRegex where
   show (Cat x y) = concatMap show $ catList (Cat x y)
   show (Or x y) = "(" ++ (intercalate " | " . map show $ orList (Or x y)) ++ ")"
   show (Repeat n m x) = "(" ++ show x ++ ")" ++ showRep n m
+-}
 
 showRep :: Int -> Maybe Int -> String
 showRep 0 Nothing = "*"
@@ -72,14 +76,14 @@ catList (Cat x y) = x : catList y
 catList x = [x]
 
 orList :: TaggedRegex -> [TaggedRegex]
-orList Empty = []
-orList (Or Empty y) = orList y
 orList (Or x y) = x : orList y
 orList x = [x]
 
 cat :: TaggedRegex -> TaggedRegex -> TaggedRegex
 cat Empty x = x
 cat x Empty = x
+cat NoMatch _ = NoMatch
+cat _ NoMatch = NoMatch
 cat (Cat x y) z = cat x (cat y z)
 cat x y = Cat x y
 
@@ -155,6 +159,7 @@ fixedTags :: Maybe FixedTag -> Maybe Int -> Maybe Int -> TaggedRegex -> FixTagM 
 fixedTags t d k = go
   where
     go Empty = return (t, d, k)
+    go NoMatch = return (t, d, k)
     go (Term BOL) = return (t, d, k)
     -- If we match EOL, we know that EndOfMatch can't be more than 0 away.
     -- (If that is false, this is an impossible match, but we're not worrying
@@ -202,18 +207,8 @@ fixTags re = (removeFixedTags m re, m)
 removeFixedTags :: FixedTagMap -> TaggedRegex -> TaggedRegex
 removeFixedTags m = selectTags (\t -> not (M.member t m))
 
--- When safe to do so, translate a regex into one that searches for a match
--- anywhere. Seems to be a bit slower than the retry-based search, perhaps due
--- to not having non-greedy matching and due to fallbacks being emitted (which
--- should not be necessary when we have no tags).
-makeSearchRegex :: TaggedRegex -> TaggedRegex
-makeSearchRegex re | True || hasTags re = re
-                   | otherwise  = cat prefix re
-  -- TODO We should use non-greedy match here to avoid pointlessly trying to
-  -- find longer matches after finding a prefix.
-  where prefix = cat (Term BOL) (Repeat 0 Nothing (Term Any))
-
-hasTags (Empty) = False
+hasTags Empty = False
+hasTags NoMatch = False
 hasTags (Term _) = False
 hasTags (TagTerm _) = True
 hasTags (Cat x y) = hasTags x || hasTags y
@@ -227,6 +222,44 @@ resolveFixedTags fts pos ts = foldr f ts (M.toList fts)
   where
     f (t, FixedTag b d) ts = M.alter (\_ -> (subtract d) <$> M.lookup b ts) t ts
     f (t, EndOfMatch d) ts = M.insert t (pos - d) ts
+
+-- Reanchor: take a regex with potential ^ anchors in it and adjust it for an
+-- implicit ^ anchor in the matching procedure.
+reanchor :: TaggedRegex -> TaggedRegex
+reanchor re = re'
+  where
+    (re', _, _) = go True False re
+
+    -- bol = True if we are in the branch leading up to the first non-eps
+    -- term, where any ^ anchors are to be removed and unanchored branches
+    -- need a .* added.
+    -- lastbol = True if the current set of epsilon terms to the left of the
+    -- regex includes a BOL anchor.
+    go True False Empty = (anyStar, False, False)
+    go bol lastbol Empty = (Empty, bol, lastbol)
+    go _   _ NoMatch = (NoMatch, False, False)
+    go bol lastbol t@(TagTerm _) = (t, bol, lastbol)
+    go bol _ (Term BOL) = (if bol then Empty else NoMatch, True, True)
+    -- Since EOL doesn't consume any characters it can preserve
+    -- beginning-of-line status. But if we see $ before a ^ it's an implicit
+    -- .*$.
+    go bol lastbol t@(Term EOL) = (if bol && not lastbol then Cat anyStar t else t, bol && lastbol, lastbol)
+    -- Add a .* since this part of the pattern did not start with a ^
+    go bol lastbol t@(Term _) = (if bol && not lastbol then Cat anyStar t else t, False, False)
+    go bol lastbol (Or x y) = (or x' y', b1 || b2, lb1&&lb2)
+      where (x',b1,lb1) = go bol lastbol x
+            (y',b2,lb2) = go bol lastbol y
+    go bol lastbol (Cat x y) = (cat x' y', b2, lb2)
+      where (x',b1,lb1) = go bol lastbol x
+            (y',b2,lb2) = go b1 lb1 y
+            lb3 | lb1 == lb2 = lb1
+                | otherwise  = error "Divergence after Or"
+    go bol lastbol (Repeat n m x) = (Repeat n m x', b1 || (bol && n == 0), lb1 || (lastbol && n == 0))
+      where (x',b1,lb1) = go bol lastbol x
+    any = Term Any
+    anyStar = Repeat 0 Nothing any
+    or Empty Empty = Empty
+    or x y = Or x y
 
 --  An example from the TDFA paper: (1a2)∗3(a|4b)5b∗
 exampleTaggedRegex = foldr cat Empty [

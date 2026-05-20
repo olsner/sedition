@@ -15,7 +15,7 @@ import qualified Data.Set as S
 
 import Debug.Trace
 
-import Regex.TaggedRegex hiding (Term(..))
+import Regex.TaggedRegex hiding (Term(..), NoMatch)
 import Regex.TNFA
 
 testTNFASimulation :: String -> String -> Maybe TagMap
