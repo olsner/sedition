@@ -139,7 +139,7 @@ executable tdfa2c
                       AST IR
                       EmitAsm GenAsm
 
-    build-depends:    time, process, file-embed, hoopl
+    build-depends:    time, process, file-embed, hoopl, array
     hs-source-dirs:   .
 
 test-suite parser-test
