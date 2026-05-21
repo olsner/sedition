@@ -107,7 +107,6 @@ executable tdfa2c
     main-is:          Regex/TestTDFA2C.hs
 
     other-modules:    Regex.Regex
-                      Regex.NFA
                       Regex.TaggedRegex
                       Regex.TNFA
                       Regex.TDFA
@@ -122,6 +121,9 @@ executable tdfa2c
                       Regex.CompileIR
                       Regex.CompileAsm
                       Regex.Cursor
+                      Regex.NFA
+                      Regex.NFA.Type
+                      Regex.NFA.Glushkov
                       Regex.Optimize.ConstRegister
                       Regex.Optimize.LiveCursor
                       Regex.Optimize.RedundantLoadCursor
