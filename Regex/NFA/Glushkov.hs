@@ -67,8 +67,8 @@ linearize re = evalState (go re) 0
     term :: TR.Term -> State Int LinearRegex
     term (TR.Literal cs) = foldr1 Cat <$> mapM char cs
     term (TR.Symbol c) = char c
-    term (TR.EOL) = mkt EOL
-    term (TR.BOL) = mkt BOL
+    term (TR.EOL) = error "$ anchor not supported here"
+    term (TR.BOL) = error "^ anchor not supported here"
     term (TR.Any) = mkt Any
     term (TR.CClass cs) = charSet (S.fromList cs)
     term (TR.CNotClass cs) = charSet (allChars S.\\ S.fromList cs)
@@ -76,70 +76,13 @@ linearize re = evalState (go re) 0
 -- reduce :: Set (Set Char) -> (Map (Set Char) (Set Int), Map Int (Set Char))
 -- reduce ss = go ss M.empty
 
--- TODO Could include no match perhaps?
-data Nullable = NotNull | NullAtStart | NullEmpty | NullAtEnd | NullMiddle
-  deriving (Show, Ord, Eq)
-
--- This implies a sequence between the two nullabilities, left leading into
--- the right, which I think changes the result? Might actually be
--- commutative though.
-instance Semigroup Nullable where
-  NotNull     <> _           = NotNull
-  _           <> NotNull     = NotNull
-
-  NullEmpty   <> _           = NullEmpty
-  _           <> NullEmpty   = NullEmpty
-
-  NullAtStart <> NullAtStart = NullAtStart
-  NullAtStart <> NullAtEnd   = NullEmpty
-  NullAtStart <> NullMiddle  = NullAtStart
-
-  NullAtEnd   <> NullAtStart = NullEmpty
-  NullAtEnd   <> NullAtEnd   = NullAtEnd
-  NullAtEnd   <> NullMiddle  = NullAtEnd
-
-  NullMiddle  <> NullAtStart = NullAtStart
-  NullMiddle  <> NullAtEnd   = NullAtEnd
-  NullMiddle  <> NullMiddle  = NullMiddle
-
-orNullable x y | x == y = x
-               | x > y = orNullable y x
-orNullable NotNull x = x
-orNullable NullAtStart NullEmpty = NullAtStart
--- This wants to return a status that means *either* at end or start but
--- *not* in the middle?
--- e.g. /(foo)?(^|$)(bar)?/ which is equivalent to /foo$|^bar/
-orNullable NullAtStart NullAtEnd = trace "hmm?" NullMiddle
-orNullable NullAtStart NullMiddle = NullMiddle
-orNullable NullEmpty NullAtEnd = NullAtEnd
-orNullable NullEmpty NullMiddle = NullMiddle
-orNullable x y = error ("Missing case: " ++ show x ++ " or " ++ show y)
-
 -- capital lambda == nullable
--- But extended to keep track of where in a string it is nullable, e.g. only
--- when the whole string is empty.
-nullable2 Empty = NullMiddle
-nullable2 NoMatch = NotNull
-nullable2 (Term (BOL,_)) = NullAtStart
-nullable2 (Term (EOL,_)) = NullAtEnd
-nullable2 (Term _) = NotNull
-nullable2 (Cat x y) = nullable2 x <> nullable2 y
-nullable2 (Or x y) = nullable2 x `orNullable` nullable2 y
-nullable2 (Repeat n _ x) | n == 0 = NullMiddle
-                         | otherwise = nullable2 x
-
--- Set of terms in the expression that could match an empty string, left
--- decides which direction to look inside a Cat
-emptyTerms _ Empty = S.empty
-emptyTerms _ NoMatch = S.empty
-emptyTerms _ (Term t@(BOL,_)) = S.singleton t
-emptyTerms _ (Term t@(EOL,_)) = S.singleton t
-emptyTerms _ (Term _) = S.empty
-emptyTerms left (Cat x y) = case nullable2 (if left then x else y) of
-    NotNull -> emptyTerms left (if left then x else y)
-    _ -> S.union (emptyTerms left x) (emptyTerms left y)
-emptyTerms left (Or x y) = S.union (emptyTerms left x) (emptyTerms left y)
-emptyTerms left (Repeat _ _ x) = emptyTerms left x
+nullable Empty = True
+nullable NoMatch = False
+nullable (Term _) = False
+nullable (Cat x y) = nullable x && nullable y
+nullable (Or x y) = nullable x || nullable y
+nullable (Repeat n _ x) = n == 0 || nullable x
 
 -- B = alphabet
 alphabet :: LinearRegex -> Set LinTrans
@@ -157,12 +100,8 @@ initials NoMatch = S.empty
 initials (Term t) = transFromTerm t
 initials (Or x y) = S.union (initials x) (initials y)
 initials (Repeat _ _ x) = initials x
-initials (Cat x y) = case nullable2 x of
-  NullAtStart -> S.union (initials x) (initials y)
-  NullMiddle -> S.union (initials x) (initials y)
-  NullAtEnd -> S.union (initials x) (emptyTerms True y)
-  NullEmpty -> S.union (initials x) (emptyTerms True y)
-  NotNull -> initials x
+initials (Cat x y) | nullable x = S.union (initials x) (initials y)
+                   | otherwise  = initials x
 
 -- D = finals
 finals :: LinearRegex -> Set LinTrans
@@ -171,14 +110,8 @@ finals NoMatch = S.empty
 finals (Term t) = transFromTerm t
 finals (Or x y) = S.union (finals x) (finals y)
 finals (Repeat _ _ x) = finals x
-finals (Cat x y) = case nullable2 y of
-  NullAtEnd -> S.union (finals x) (finals y)
-  NullMiddle -> S.union (finals x) (finals y)
-  -- if y only matches a whole empty string or at start, x must be empty
-  -- to match.
-  NullAtStart -> S.union (emptyTerms False x) (finals y)
-  NullEmpty -> S.union (emptyTerms False x) (finals y)
-  NotNull -> finals x
+finals (Cat x y) | nullable y = S.union (finals x) (finals y)
+                 | otherwise  = finals y
 
 -- F = factors
 type FactorMap = Map LinTrans (Set LinTrans)
@@ -191,9 +124,6 @@ fmCart x y | S.null y = M.empty
 
 cartesian :: Set LinTrans -> Set LinTrans -> FactorMap
 cartesian x y = M.fromSet (const y) x
--- cartesian x y = fmCart x' y' `fmUnion` fmCart ybol xeol `fmUnion` fmCart x' ybol `fmUnion` fmCart xeol y'
---   where (xeol, x') = partition EOL x
---         (ybol, y') = partition BOL y
 seams x y = cartesian (finals x) (initials y)
 
 partition :: NFATrans -> Set LinTrans -> (Set LinTrans, Set LinTrans)
@@ -209,22 +139,9 @@ factors (Repeat _ _ x) = factors x `fmUnion` seams x x
 
 -- API?
 
-addEOLState nfa@NFA{..} = nfa { nfaFinalStatesEOL = eolFinalStates,
-                                nfaTrans = removeEOLTrans nfaTrans }
-  where
-    -- Find all final states that have incoming transitions on EOL, add the
-    -- source states to eolFinalStates
-    allEOLTrans :: Map StateId (Set StateId)
-    allEOLTrans = M.filter (not . S.null) . M.map (S.intersection nfaFinalStates . M.findWithDefault S.empty EOL) $ nfaTrans
-
-    removeEOLTrans = M.map (M.delete EOL)
-
-    eolFinalStates = M.keysSet allEOLTrans `S.difference` nfaFinalStates
-
-genNFA re = compact . addEOLState . searchNFA $
+genNFA re = compact . searchNFA $
     NFA { nfaFinalStates = S.fromList finalStates,
-          -- At this stage we still have explicit EOL transitions
-          nfaFinalStatesEOL = S.fromList initEOL,
+          nfaFinalStatesEOL = S.empty,
           nfaTrans = transMap,
           nfaNumStates = 1 + M.size stateMap }
   where
@@ -234,21 +151,20 @@ genNFA re = compact . addEOLState . searchNFA $
     az = S.toList (alphabet lre)
     stateMap = M.fromList (zip az (S <$> [1..]))
     get a = fromJust (M.lookup a stateMap)
-    (initFinalState, initEOL) = case nullable2 lre of
-      NotNull -> ([], [])
-      NullAtEnd -> ([], [s0])
-      NullEmpty -> ([], [s0])
-      _ -> ([s0], [])
+    initFinalState = if nullable lre then [s0] else []
     finalStates = map get d ++ initFinalState
     transList = initTrans ++ factorsTrans
     initTrans = [(s0, fst q, get q) | q <- S.toList (initials lre)]
     factorsTrans = [(get p, fst q, get q) | (p,q) <- fmToList (factors lre)]
     transMap = tmFromList transList
 
--- TODO Could be possible to do something with completely anchored regexes,
--- where there is a single BOL or EOL at the start/end of the whole pattern.
--- In particular when parsing BRE we know that's the only allowed places.
+-- Could be possible to do something with completely anchored regexes, where
+-- there is a single BOL or EOL at the start/end of the whole pattern. In
+-- particular when parsing BRE we know that's the only allowed places.
 -- We can handle that outside of the "glushkov" automaton by adjusting how
 -- we add searching transitions and by making all final states EOL states.
+-- But: at least for start anchors that is pointless, the TNFA/TDFA mechanism
+-- produces good enough matching when anchored at the start, and also handles
+-- evil cases of mixing anchored and non-anchored subexpressions.
 
 glushkovCompatible re = not (TR.hasAnchors re || TR.hasTags re)
