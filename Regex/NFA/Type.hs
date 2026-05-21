@@ -6,11 +6,6 @@
 
 module Regex.NFA.Type where
 
-import Control.Monad
-
-import Data.Array.Unboxed
-import Data.Array.ST
-import Data.Bits
 import Data.Map (Map)
 import qualified Data.Map as M
 import Data.Maybe
@@ -130,55 +125,6 @@ searchNFA nfa@NFA{..} = nfa { nfaTrans = updatedTransMap,
       | s `S.member` done = close done ss
       | otherwise = close (S.insert s done) (ss ++ S.toList (tmLookup s BOL nfaTrans))
 
-
--- Stuff
--- TODO Move bit NFA construction to separate module
-
-data BitNFA w = BitNFA
-  { bitInitStates :: w
-  , bitFinalStates :: w
-  , bitFinalStatesEOL :: w
-  , bitNumStates :: Int
-  -- Used for reverse matching
-  -- , bitFollows :: Array w w
-  , bitT :: UArray w w
-  -- For compact printing etc, but expected to be a 256-word array in the
-  -- end.
-  , bitCommonB :: w
-  , bitB :: Map Char w
-  }
-
-deriving instance Show (BitNFA Word)
-
-bitwiseNFA :: NFA -> Maybe (BitNFA Word)
-bitwiseNFA nfa@NFA{..} | nfaNumStates > finiteBitSize commonB || nfaHasAnchors nfa = Nothing
-                       | otherwise = Just $ BitNFA {
-    bitInitStates = bit nfaStartState,
-    bitFinalStates = bits nfaFinalStates,
-    bitFinalStatesEOL = bits nfaFinalStatesEOL,
-    bitT = t, bitCommonB = commonB, bitB = bmap,
-    bitNumStates = nfaNumStates }
-  where
-    or = foldr (.|.) zeroBits
-    and = foldr (.&.) oneBits
-    bit (S i) = 1 `shiftL` i
-    bits s = or (map bit (S.toList s))
-    follow = tmReach nfaTrans
-    fbits = M.map bits follow
-    -- b = listArray (0, 255) (map getB ['\000'..'\255'])
-    bmap = M.fromList [(c,b) | c <- ['\000'..'\255'], let b = getB c .&. (complement commonB), b /= 0]
-    charsets = M.map bits (M.unionsWith S.union (M.elems nfaTrans))
-    anyB = M.findWithDefault 0 Any charsets
-    getB c = M.findWithDefault 0 (C c) charsets
-    commonB = and (map getB ['\000'..'\255']) .|. anyB
-
-    t = runSTUArray $ do
-      arr <- newArray (0, 1 `shiftL` nfaNumStates - 1) 0
-      forM_ (nfaStates nfa) $ \s ->
-        forM_ [0 .. bit s - 1] $ \j -> do
-          t_j <- readArray arr j
-          writeArray arr (bit s + j) (t_j .|. M.findWithDefault 0 s fbits)
-      return arr
 
 -- Helpers and testing functions
 

@@ -14,6 +14,7 @@ import qualified Data.Set as S
 import qualified Regex.TaggedRegex as TR
 import Regex.TNFA (StateId(..))
 
+import Regex.NFA.Bitwise
 import Regex.NFA.Type
 import Regex.NFA.Glushkov hiding (glushkovCompatible)
 import qualified Regex.NFA.Glushkov as G

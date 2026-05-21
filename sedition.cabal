@@ -122,6 +122,7 @@ executable tdfa2c
                       Regex.CompileAsm
                       Regex.Cursor
                       Regex.NFA
+                      Regex.NFA.Bitwise
                       Regex.NFA.Type
                       Regex.NFA.Glushkov
                       Regex.Optimize.ConstRegister
