@@ -215,6 +215,13 @@ hasTags (Cat x y) = hasTags x || hasTags y
 hasTags (Or x y) = hasTags x || hasTags y
 hasTags (Repeat _ _ x) = hasTags x
 
+hasAnchors (Term BOL) = True
+hasAnchors (Term EOL) = True
+hasAnchors (Cat x y) = hasAnchors x || hasAnchors y
+hasAnchors (Or x y) = hasAnchors x || hasAnchors y
+hasAnchors (Repeat _ _ x) = hasAnchors x
+hasAnchors _ = False
+
 type TagMap = Map TagId Int
 
 resolveFixedTags :: FixedTagMap -> Int -> TagMap -> TagMap
@@ -222,44 +229,6 @@ resolveFixedTags fts pos ts = foldr f ts (M.toList fts)
   where
     f (t, FixedTag b d) ts = M.alter (\_ -> (subtract d) <$> M.lookup b ts) t ts
     f (t, EndOfMatch d) ts = M.insert t (pos - d) ts
-
--- Reanchor: take a regex with potential ^ anchors in it and adjust it for an
--- implicit ^ anchor in the matching procedure.
-reanchor :: TaggedRegex -> TaggedRegex
-reanchor re = re'
-  where
-    (re', _, _) = go True False re
-
-    -- bol = True if we are in the branch leading up to the first non-eps
-    -- term, where any ^ anchors are to be removed and unanchored branches
-    -- need a .* added.
-    -- lastbol = True if the current set of epsilon terms to the left of the
-    -- regex includes a BOL anchor.
-    go True False Empty = (anyStar, False, False)
-    go bol lastbol Empty = (Empty, bol, lastbol)
-    go _   _ NoMatch = (NoMatch, False, False)
-    go bol lastbol t@(TagTerm _) = (t, bol, lastbol)
-    go bol _ (Term BOL) = (if bol then Empty else NoMatch, True, True)
-    -- Since EOL doesn't consume any characters it can preserve
-    -- beginning-of-line status. But if we see $ before a ^ it's an implicit
-    -- .*$.
-    go bol lastbol t@(Term EOL) = (if bol && not lastbol then Cat anyStar t else t, bol && lastbol, lastbol)
-    -- Add a .* since this part of the pattern did not start with a ^
-    go bol lastbol t@(Term _) = (if bol && not lastbol then Cat anyStar t else t, False, False)
-    go bol lastbol (Or x y) = (or x' y', b1 || b2, lb1&&lb2)
-      where (x',b1,lb1) = go bol lastbol x
-            (y',b2,lb2) = go bol lastbol y
-    go bol lastbol (Cat x y) = (cat x' y', b2, lb2)
-      where (x',b1,lb1) = go bol lastbol x
-            (y',b2,lb2) = go b1 lb1 y
-            lb3 | lb1 == lb2 = lb1
-                | otherwise  = error "Divergence after Or"
-    go bol lastbol (Repeat n m x) = (Repeat n m x', b1 || (bol && n == 0), lb1 || (lastbol && n == 0))
-      where (x',b1,lb1) = go bol lastbol x
-    any = Term Any
-    anyStar = Repeat 0 Nothing any
-    or Empty Empty = Empty
-    or x y = Or x y
 
 --  An example from the TDFA paper: (1a2)∗3(a|4b)5b∗
 exampleTaggedRegex = foldr cat Empty [

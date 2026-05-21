@@ -143,10 +143,14 @@ orNFA finalState x y = do
 emptyNFA :: StateId -> NFA
 emptyNFA s = NFA s s []
 
+failedNFA :: GenTNFA NFA
+failedNFA = emptyNFA <$> newState
+
 nfa :: StateId -> TaggedRegex -> GenTNFA NFA
 nfa finalState re =
   case re of
     Empty -> return (emptyNFA finalState)
+    NoMatch -> failedNFA
     TR.Term (TR.Literal []) -> return (emptyNFA finalState)
     TR.Term (TR.Literal (x:xs)) ->
       nfa finalState (Cat (TR.Term (TR.Symbol x))

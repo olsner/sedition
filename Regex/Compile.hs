@@ -18,6 +18,7 @@ import Regex.TaggedRegex
 import Regex.TDFA (genTDFA)
 import Regex.TDFA2IR (genIR)
 import Regex.TNFA (genTNFA)
+import Regex.NFA (glushkovCompatible)
 
 re2asm :: Maybe IntSet -> Regex -> C.ByteString
 re2asm used = GenAsm.toByteString .
@@ -43,9 +44,12 @@ re2c used = GenC.toByteString .
   where unusedTags | Just s <- used = selectTags (\(T t) -> t `IS.member` s)
                    | otherwise = id
 
+tdfaIR = genIR . minimize . genTDFA . genTNFA . fixTags
+
 re2ir :: TaggedRegex -> Program
-re2ir re | hasTags re = genIR . minimize . genTDFA . genTNFA . fixTags $ re
-         | otherwise = genIR . minimize . genTDFA . genTNFA . fixTags $ trace ("Could use pure NFA for " ++ show re) re -- TODO pure-NFA
+re2ir re | hasTags re = tdfaIR re
+         | glushkovCompatible re = tdfaIR $ trace ("Could use Glushkov NFA for " ++ show re) re
+         | otherwise = tdfaIR $ trace ("Could use other pure NFA for " ++ show re) re -- TODO pure-NFA
 
 isCompatible :: Regex -> Bool
 isCompatible = tdfa2cCompatible

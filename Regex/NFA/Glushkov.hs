@@ -245,5 +245,10 @@ genNFA re = compact . addEOLState . searchNFA $
     factorsTrans = [(get p, fst q, get q) | (p,q) <- fmToList (factors lre)]
     transMap = tmFromList transList
 
+-- TODO Could be possible to do something with completely anchored regexes,
+-- where there is a single BOL or EOL at the start/end of the whole pattern.
+-- In particular when parsing BRE we know that's the only allowed places.
+-- We can handle that outside of the "glushkov" automaton by adjusting how
+-- we add searching transitions and by making all final states EOL states.
 
--- TODO glushkovCompatible re = not (TR.hasAnchors re)
+glushkovCompatible re = not (TR.hasAnchors re || TR.hasTags re)

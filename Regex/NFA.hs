@@ -3,6 +3,7 @@
 
 module Regex.NFA where
 
+import Control.Monad
 import Control.Monad.Trans.Writer
 
 -- import Data.Map (Map)
@@ -14,7 +15,8 @@ import qualified Regex.TaggedRegex as TR
 import Regex.TNFA (StateId(..))
 
 import Regex.NFA.Type
-import Regex.NFA.Glushkov
+import Regex.NFA.Glushkov hiding (glushkovCompatible)
+import qualified Regex.NFA.Glushkov as G
 
 -- API?
 
@@ -46,7 +48,19 @@ simulateNFA NFA{..} xs = runWriter (go (S.singleton nfaStartState) xs)
 
 -- Test functions
 
+glushkovCompatible = G.glushkovCompatible
+
 removeTags = TR.selectTags (const False)
+
+testCompatible :: String -> IO ()
+testCompatible s = do
+  putStrLn ("Regular expression: " ++ s)
+  let parsed = TR.testParseTagRegex s
+  when (TR.hasTags parsed) $ putStrLn "Contains tags (will be stripped for NFA)"
+  let re = removeTags parsed
+  print re
+  when (TR.hasAnchors re) $ putStrLn "Contains anchors - cannot use Glushkov construction"
+  when (glushkovCompatible re) $ putStrLn "Can use Glushkov construction"
 
 testLinearize :: String -> LinearRegex
 testLinearize = linearize . removeTags . TR.testParseTagRegex
