@@ -26,9 +26,8 @@ simulateNFA NFA{..} xs = runWriter (go (S.singleton nfaStartState) xs)
   where
     intersects x y = not (S.null (x `S.intersection` y))
     hasFinalState s = s `intersects` nfaFinalStates
-    go s []     | hasFinalState s = logFinal s "EOL -> MATCH: final" >> return True
-                -- | hasFinalStateEOL s = logFinal s "EOL" >> logFinal s "MATCH: EOL-final" >> return True
-                | otherwise       = logFinal s "EOL -> NO MATCH" >> return False
+    go s []     | hasFinalState s = logFinal s "End -> MATCH: final" >> return True
+                | otherwise       = logFinal s "End -> NO MATCH" >> return False
     go s (x:xs) | hasFinalState s = logFinal s "MATCH: final state" >> return True
                 | S.null s        = tell ["NO MATCH"] >> return False
                 -- Special case only for prettier printouts.
@@ -66,11 +65,22 @@ testCompatible s = do
 testLinearize :: String -> LinearRegex
 testLinearize = linearize . removeTags . TR.testParseTagRegex
 
+nfaFromRegex = compact . genNFA . removeTags . TR.testParseTagRegex
+
+testCompact :: Bool -> String -> IO ()
+testCompact showPre re = do
+  let nfa = genNFA . removeTags . TR.testParseTagRegex $ re
+  when showPre $ putStr (prettyStates nfa)
+  let nfa' = compact nfa
+  -- TODO Clean up trace stuff in compact so we don't need an ugly `seq`
+  length (prettyStates nfa') `seq` putStrLn ("compacted from " ++ show (nfaNumStates nfa) ++ " to " ++ show (nfaNumStates nfa') ++ " states, " ++ show (nfaNumTrans nfa) ++ " to " ++ show (nfaNumTrans nfa') ++ " transitions")
+  putStr (prettyStates nfa')
+
 testNFA :: String -> IO ()
-testNFA = putStr . prettyStates . genNFA . removeTags . TR.testParseTagRegex
+testNFA = putStr . prettyStates . nfaFromRegex
 
 testBitwise :: String -> IO ()
-testBitwise = print . bitwiseNFA . genNFA . removeTags . TR.testParseTagRegex
+testBitwise = print . bitwiseNFA . nfaFromRegex
 
 testSimulate :: String -> String -> IO ()
 testSimulate re s = putStr (prettyStates nfa) >> mapM_ putStrLn log >> print result

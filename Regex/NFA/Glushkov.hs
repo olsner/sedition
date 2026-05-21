@@ -17,8 +17,6 @@ import Data.Maybe
 import Data.Set (Set)
 import qualified Data.Set as S
 
-import Debug.Trace
-
 import qualified Regex.TaggedRegex as TR
 import Regex.TNFA (StateId(..))
 
@@ -139,9 +137,8 @@ factors (Repeat _ _ x) = factors x `fmUnion` seams x x
 
 -- API?
 
-genNFA re = compact . searchNFA $
+genNFA re = searchNFA $
     NFA { nfaFinalStates = S.fromList finalStates,
-          nfaFinalStatesEOL = S.empty,
           nfaTrans = transMap,
           nfaNumStates = 1 + M.size stateMap }
   where
