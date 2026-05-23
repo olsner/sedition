@@ -79,8 +79,8 @@ testCompact showPre re = do
 testNFA :: String -> IO ()
 testNFA = putStr . prettyStates . nfaFromRegex
 
-testBitwise :: String -> IO ()
-testBitwise = print . bitwiseNFA . nfaFromRegex
+testBitwise :: String -> Maybe (BitNFA Word)
+testBitwise = bitwiseNFA . nfaFromRegex
 
 testSimulate :: String -> String -> IO ()
 testSimulate re s = putStr (prettyStates nfa) >> mapM_ putStrLn log >> print result

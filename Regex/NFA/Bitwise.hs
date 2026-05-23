@@ -1,5 +1,5 @@
 {-# LANGUAGE RecordWildCards,RecursiveDo #-}
-{-# LANGUAGE StandaloneDeriving,FlexibleInstances #-}
+{-# LANGUAGE StandaloneDeriving,FlexibleInstances,FlexibleContexts #-}
 
 -- Type for NFA automaton without tags, and possible with BOL and EOL
 -- transitions although Glushkov's construction will not use them.
@@ -24,14 +24,19 @@ data BitNFA w = BitNFA
   { bitInitStates :: w
   , bitFinalStates :: w
   , bitNumStates :: Int
-  -- Used for reverse matching
-  -- , bitFollows :: Array w w
+  , bitMinLength :: Int
   , bitT :: UArray w w
+  -- Reverse T array, i.e. mask of all preceding states for each state mask.
+  , bitTR :: UArray w w
   -- For compact printing etc, but expected to be a 256-word array in the
   -- end.
   , bitCommonB :: w
   , bitB :: Map Char w
   }
+
+class (IArray UArray w, Ix w, Bits w, Num w) => BitNFAWord w where
+
+instance BitNFAWord Word where
 
 deriving instance Show (BitNFA Word)
 
@@ -47,7 +52,9 @@ bitwiseNFA nfa@NFA{..} | nfaNumStates > maxBitwiseStates = Nothing
     bitInitStates = bit nfaStartState,
     bitFinalStates = bits nfaFinalStates,
     bitT = t, bitCommonB = commonB, bitB = bmap,
-    bitNumStates = nfaNumStates }
+    bitTR = tr,
+    bitNumStates = nfaNumStates,
+    bitMinLength = nfaMinLength nfa }
   where
     or = foldr (.|.) zeroBits
     and = foldr (.&.) oneBits
@@ -62,10 +69,61 @@ bitwiseNFA nfa@NFA{..} | nfaNumStates > maxBitwiseStates = Nothing
     getB c = M.findWithDefault 0 (C c) charsets
     commonB = and (map getB ['\000'..'\255']) .|. anyB
 
-    t = runSTUArray $ do
-      arr <- newArray (0, 1 `shiftL` nfaNumStates - 1) 0
+    buildT tbits = runSTUArray $ do
+      arr <- newArray (0, 1 `shiftL` nfaNumStates - 1) (0 :: Word)
       forM_ (nfaStates nfa) $ \s ->
         forM_ [0 .. bit s - 1] $ \j -> do
           t_j <- readArray arr j
-          writeArray arr (bit s + j) (t_j .|. M.findWithDefault 0 s fbits)
+          writeArray arr (bit s + j) (t_j .|. M.findWithDefault 0 s tbits)
       return arr
+    t = buildT fbits
+
+    precede = invertMap follow
+    pbits = M.map bits precede
+    tr = buildT pbits
+
+bitMatchesEmpty BitNFA{..} =  0 /= (bitInitStates .&. bitFinalStates)
+
+prevState :: BitNFAWord w => BitNFA w -> Char -> w -> w
+prevState BitNFA{..} c d = bitTR ! (d .&. M.findWithDefault 0 c bitB)
+nextState :: (IArray UArray w, Ix w, Bits w, Num w) => BitNFA w -> Char -> w -> w
+nextState BitNFA{..} c d = (bitT ! d) .&. M.findWithDefault 0 c bitB
+
+data MatchResult = MatchedAt Int | FailedAt Int deriving (Show, Eq)
+
+isMatch (MatchedAt _) = True
+isMatch (FailedAt _) = False
+
+matchWith :: (BitNFAWord w) =>
+             (BitNFA w -> Char -> w -> w) -> (BitNFA w -> w) -> (BitNFA w -> w)
+          -> BitNFA w -> String -> MatchResult
+matchWith transF init final nfa = go 0 (init nfa)
+  where
+    trans = transF nfa
+    isMatch d = 0 /= (d .&. final nfa)
+
+    go pos d _ | isMatch d = MatchedAt pos
+    go pos _ [] = FailedAt pos
+    go pos d (c:cs) = go (pos + 1) (trans c d) cs
+
+-- Note takes a reversed String
+matchReverse :: (BitNFAWord w) => BitNFA w -> String -> MatchResult
+matchReverse = matchWith prevState bitFinalStates bitInitStates
+
+matchForward :: (BitNFAWord w) => BitNFA w -> String -> MatchResult
+matchForward = matchWith nextState bitInitStates bitFinalStates
+
+findBitwise nfa [] = bitMatchesEmpty nfa
+findBitwise nfa@BitNFA{..} s
+  | Just prefix <- maybeTake n s =
+    case matchReverse nfa (reverse prefix) of
+      FailedAt m -> findBitwise nfa (drop (max 1 (n - m)) s)
+      -- TODO Isn't it guaranteed that a reverse match is a forward match?
+      -- (Note in this case we do not care about the exact location of the
+      -- first match - using this approach for proper regexes would need that.)
+      MatchedAt _ -> isMatch (matchForward nfa s)
+  | otherwise = False
+  where
+    maybeTake n s | prefix <- take n s, length prefix == n = Just prefix
+                  | otherwise = Nothing
+    n = bitMinLength

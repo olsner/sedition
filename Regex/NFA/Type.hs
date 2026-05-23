@@ -107,6 +107,23 @@ nfaStates nfa = map S [0..nfaNumStates nfa - 1]
 
 nfaNumTrans = length . tmToList . nfaTrans
 
+-- Minimum length from the initial state to any final state.
+nfaMinLength :: NFA -> Int
+nfaMinLength NFA{..} = M.findWithDefault 0 nfaStartState (go M.empty 0 nfaFinalStates)
+  where
+    -- States in "new" are newly discovered states at distance "dist" from a
+    -- final state. Start at dist = 0 with the final states, than increase
+    -- distance by one and add all previous states (that we haven't already
+    -- seen).
+    go res dist new | S.null new = res
+                    | otherwise  = go res' (dist + 1) new'
+      where
+        res' = res `M.union` M.fromSet (const dist) new
+        new' = S.unions (map ps (S.toList new)) `S.difference` M.keysSet res'
+        ps s = M.findWithDefault S.empty s allPrevStates
+
+    allPrevStates = invertMap (tmReach nfaTrans)
+
 prettyStates :: NFA -> String
 prettyStates nfa@NFA{..} = foldMap showState ss <> "\n"
   where
