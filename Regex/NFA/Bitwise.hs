@@ -85,9 +85,9 @@ bitwiseNFA nfa@NFA{..} | nfaNumStates > maxBitwiseStates = Nothing
 bitMatchesEmpty BitNFA{..} =  0 /= (bitInitStates .&. bitFinalStates)
 
 prevState :: BitNFAWord w => BitNFA w -> Char -> w -> w
-prevState BitNFA{..} c d = bitTR ! (d .&. M.findWithDefault 0 c bitB)
+prevState BitNFA{..} c d = bitTR ! (d .&. (M.findWithDefault 0 c bitB .|. bitCommonB))
 nextState :: (IArray UArray w, Ix w, Bits w, Num w) => BitNFA w -> Char -> w -> w
-nextState BitNFA{..} c d = (bitT ! d) .&. M.findWithDefault 0 c bitB
+nextState BitNFA{..} c d = (bitT ! d) .&. (M.findWithDefault 0 c bitB .|. bitCommonB)
 
 data MatchResult = MatchedAt Int | FailedAt Int deriving (Show, Eq)
 
