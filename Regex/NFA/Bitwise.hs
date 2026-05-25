@@ -7,6 +7,7 @@
 module Regex.NFA.Bitwise where
 
 import Control.Monad
+import Control.Monad.Trans.Writer
 
 import Data.Array.Unboxed
 import Data.Array.ST
@@ -16,6 +17,8 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 
 import Debug.Trace
+
+import Numeric
 
 import Regex.NFA.Type
 import Regex.TNFA (StateId(..))
@@ -34,21 +37,15 @@ data BitNFA w = BitNFA
   , bitB :: Map Char w
   }
 
-class (IArray UArray w, Ix w, Bits w, Num w) => BitNFAWord w where
+class (IArray UArray w, Ix w, Bits w, Num w, Integral w) => BitNFAWord w where
 
 instance BitNFAWord Word where
 
 deriving instance Show (BitNFA Word)
 
--- Pretty low number - at least 16 is somewhat reasonable. Mainly this blows
--- up the printouts in ghci :)
--- Note: could also implement splitting of tables - e.g. two 8-bit tables for
--- the two halves of a 16-bit state word reduces space from 128kB to 1kB.
-maxBitwiseStates = 10
-
-bitwiseNFA :: NFA -> Maybe (BitNFA Word)
-bitwiseNFA nfa@NFA{..} | nfaNumStates > maxBitwiseStates = Nothing
-                       | otherwise = Just $ BitNFA {
+bitwiseNFA :: Int -> NFA -> Maybe (BitNFA Word)
+bitwiseNFA maxBits nfa@NFA{..} | nfaNumStates > maxBits = Nothing
+                               | otherwise = Just $ BitNFA {
     bitInitStates = bit nfaStartState,
     bitFinalStates = bits nfaFinalStates,
     bitT = t, bitCommonB = commonB, bitB = bmap,
@@ -83,6 +80,7 @@ bitwiseNFA nfa@NFA{..} | nfaNumStates > maxBitwiseStates = Nothing
     tr = buildT pbits
 
 bitMatchesEmpty BitNFA{..} =  0 /= (bitInitStates .&. bitFinalStates)
+bitAllStates BitNFA{..} = (1 `shiftL` bitNumStates) - 1
 
 prevState :: BitNFAWord w => BitNFA w -> Char -> w -> w
 prevState BitNFA{..} c d = bitTR ! (d .&. (M.findWithDefault 0 c bitB .|. bitCommonB))
@@ -95,35 +93,62 @@ isMatch (MatchedAt _) = True
 isMatch (FailedAt _) = False
 
 matchWith :: (BitNFAWord w) =>
-             (BitNFA w -> Char -> w -> w) -> (BitNFA w -> w) -> (BitNFA w -> w)
-          -> BitNFA w -> String -> MatchResult
-matchWith transF init final nfa = go 0 (init nfa)
+             Bool
+          -> (BitNFA w -> Char -> w -> w)
+          -> (BitNFA w -> w)
+          -> (BitNFA w -> w)
+          -> BitNFA w -> String -> Writer String MatchResult
+matchWith earlyOut transF init final nfa = go 0 (init nfa)
   where
     trans = transF nfa
     isMatch d = 0 /= (d .&. final nfa)
 
-    go pos d _ | isMatch d = MatchedAt pos
-    go pos _ [] = FailedAt pos
-    go pos d (c:cs) = go (pos + 1) (trans c d) cs
+    log s = tell s >> tell "\n"
+    logState pos d msg = log ("@" ++ show pos ++ " " ++ showHex d ": " ++ msg)
+
+    -- The initial state when searching backwards will always be accepting
+    -- since it includes all states, so delay the isMatch check until we've
+    -- tried at least one character?
+    go pos d [] | isMatch d = logState pos d "EOL/match" >> return (MatchedAt pos)
+                | otherwise = logState pos d "EOL/failed" >> return (FailedAt pos)
+    go pos d _ | d == 0 = logState pos d "no active states" >> return (FailedAt pos)
+               | earlyOut && isMatch d = logState pos d "match" >> return (MatchedAt pos)
+    go pos d (c:cs) = logState pos d (show c) >> go (succ pos) (trans c d) cs
 
 -- Note takes a reversed String
-matchReverse :: (BitNFAWord w) => BitNFA w -> String -> MatchResult
-matchReverse = matchWith prevState bitFinalStates bitInitStates
+-- Check if the reversed string matches a revese prefix of the pattern.
+matchReversePrefix :: (BitNFAWord w) => BitNFA w -> String -> Writer String MatchResult
+matchReversePrefix = matchWith False prevState bitAllStates bitInitStates
 
-matchForward :: (BitNFAWord w) => BitNFA w -> String -> MatchResult
-matchForward = matchWith nextState bitInitStates bitFinalStates
+matchForward :: (BitNFAWord w) => BitNFA w -> String -> Writer String MatchResult
+matchForward = matchWith True nextState bitInitStates bitFinalStates
 
-findBitwise nfa [] = bitMatchesEmpty nfa
+findBitwise :: (BitNFAWord w) => BitNFA w -> String -> Writer String Bool
 findBitwise nfa@BitNFA{..} s
-  | Just prefix <- maybeTake n s =
-    case matchReverse nfa (reverse prefix) of
-      FailedAt m -> findBitwise nfa (drop (max 1 (n - m)) s)
-      -- TODO Isn't it guaranteed that a reverse match is a forward match?
-      -- (Note in this case we do not care about the exact location of the
-      -- first match - using this approach for proper regexes would need that.)
-      MatchedAt _ -> isMatch (matchForward nfa s)
-  | otherwise = False
+  | Just prefix <- maybeTake n s = do
+    log ("Trying reverse match on: " ++ show prefix)
+    rm <- q $ matchReversePrefix nfa (reverse prefix)
+    log ("Reverse match result: " ++ show rm)
+    case rm of
+      FailedAt m -> do
+        let skip = max 1 (n - m)
+        log ("Skipping by " ++ show skip)
+        findBitwise nfa (drop skip s)
+      -- Note that what we find is not exactly that the backwards pattern
+      -- matched, but rather we matched something that is a possible prefix of
+      -- a true match. For strings or fixed-length patterns, it is the same and
+      -- we don't need to verify anything, but for regular expressions we do
+      -- need it.
+      MatchedAt _ -> do
+        match <- q $ matchForward nfa s
+        log ("Forward-match test: " ++ show match)
+        if isMatch match then return True else log "Skipping by 1" >> findBitwise nfa (tail s)
+  | bitMatchesEmpty nfa = log "End: matched empty" >> return True
+  | otherwise = log "String too short => no match" >> return False
   where
     maybeTake n s | prefix <- take n s, length prefix == n = Just prefix
                   | otherwise = Nothing
     n = bitMinLength
+    log :: String -> Writer String ()
+    log s = tell s >> tell "\n"
+    q = censor (const mempty)

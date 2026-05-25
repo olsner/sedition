@@ -137,10 +137,8 @@ factors (Repeat _ _ x) = factors x `fmUnion` seams x x
 
 -- API?
 
-genNFA re = searchNFA $
-    NFA { nfaFinalStates = S.fromList finalStates,
-          nfaTrans = transMap,
-          nfaNumStates = 1 + M.size stateMap }
+genNFA re = NFA { nfaFinalStates = S.fromList finalStates, nfaTrans = transMap,
+                  nfaNumStates = 1 + M.size stateMap }
   where
     s0 = S 0
     lre = linearize re

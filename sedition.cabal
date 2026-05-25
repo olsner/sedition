@@ -74,6 +74,10 @@ executable sedition
                       Regex.CompileIR
                       Regex.CompileAsm
                       Regex.Cursor
+                      Regex.NFA
+                      Regex.NFA.Bitwise
+                      Regex.NFA.Type
+                      Regex.NFA.Glushkov
                       Regex.Optimize.ConstRegister
                       Regex.Optimize.LiveCursor
                       Regex.Optimize.RedundantLoadCursor

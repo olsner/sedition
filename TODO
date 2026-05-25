@@ -74,10 +74,9 @@
   - Emit memcmp to match a long-enough literal
 * TNFA minimization - might make TDFA generation faster
 * TDFA minimization - combine equivalent states
-  NB: Implemented but never removes anything... Might already be minimal by
-  construction?
+  NB: Implemented but seldom removes anything... Seems we are close to doing
+  this by construction already, should investigate when it's not.
 * More efficient searching:
-  - Proper correct version of non-greedy .* to generate state machine for find
   - If regex starts with a single character, use memchr
   - If regex starts with a literal, use memmem for initial guess/skip
   - In a state where we match something like .*literal or .*char we can skip
@@ -94,6 +93,28 @@
   string search algorithms with more expensive precalculation.
 * Something with regexes anchored at the end - at least things like "$" or
   "foo$" never need to search but can match relative the end of the string.
+* Incorporate Horspool (or similar) in regex matching?
+  - Start at the minimum length of the pattern
+  - For each character, remember the last position in the pattern that it can
+    appear and skip forward accordingly
+  - Doesn't need to be the end of the pattern - if e.g. looking for "foo." you
+    can try to match 'o' first? The '.' means the last position of the pattern
+    can be anything anywhere, so the relevant thing is finding a position that
+    has a small number of possible characters or the largest average skip?
+  - Very similar ideas to the nrgrep paper!
+
+### NFA and Bitwise searching
+
+* Add plain NFA/DFA and switch depending on use case (should share IR)
+* For regular/complicated regexes to speed up searching
+  - Look at tdfaMinLength at start state to see if it's useful
+  - At each forward position, try to match the suffix at tdfaMinLength and
+    skip ahead.
+  - Since the bitwise automaton has some maximum practical size, is it worth
+    having a full NFA or DFA for the backwards search?
+    Can also split the tables, trading more memory accesses for larger possible
+    automaton size.
+* Use instead of memmem for literal searching
 
 ### Done
 

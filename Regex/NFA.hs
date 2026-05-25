@@ -79,8 +79,23 @@ testCompact showPre re = do
 testNFA :: String -> IO ()
 testNFA = putStr . prettyStates . nfaFromRegex
 
-testBitwise :: String -> Maybe (BitNFA Word)
-testBitwise = bitwiseNFA . nfaFromRegex
+testSearchNFA :: String -> IO ()
+testSearchNFA = putStr . prettyStates . searchNFA . nfaFromRegex
+
+testBitNFA :: String -> Maybe (BitNFA Word)
+testBitNFA = bitwiseNFA 10 . nfaFromRegex
+
+-- Slight subtlety with this is that you shoud not "searchify" the NFA to use
+-- it with the backwards matching algorithm.
+-- I think at a small minimum length, there is a benefit to searchifying and
+-- matching only forwards instead of trying to backwards-match. The forwards
+-- match reads every character exactly once, where the backwards search can
+-- scan multiple times when it doesn't skip.
+testBitwise :: String -> String -> IO ()
+testBitwise re s
+  | Just nfa <- bitwiseNFA 16 (nfaFromRegex re)
+  , (res, log) <- runWriter (findBitwise nfa s) = putStr log >> print res
+  | otherwise = putStrLn "<<too big nfa>>"
 
 testSimulate :: String -> String -> IO ()
 testSimulate re s = putStr (prettyStates nfa) >> mapM_ putStrLn log >> print result

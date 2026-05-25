@@ -432,6 +432,54 @@ static bool match_char(match_t* m, string* s, size_t offset, char c)
     return res != NULL;
 }
 
+// BNDM matching with up to 16-bit state masks.
+//
+// Machine description word:
+// bits 0-15: initial state (for a forward match!)
+// bits 16-31: final states (for a forward match!)
+// bits 32-39: minimum length from initial state to any final state.
+//
+// This version includes both forward and reverse machines in order to verify
+// matches.
+static bool match_bndm16(string* s, uint64_t m, const uint16_t* t, const uint16_t* tr, const uint16_t* b)
+{
+    const uint16_t init = m;
+    const uint16_t fini = m >> 16;
+    const size_t min_length = (m >> 32) & 0xff;
+    const char* buf = s->buf;
+    const size_t len = s->len;
+
+    // TODO Always-matching regexes should avoid even calling this function...
+    if (init & fini)
+        return true;
+
+    for (size_t i = 0; i < len; i++) {
+        if (i + min_length > len) return false;
+
+        uint64_t d = 0xffff;
+        for (size_t j = min_length; j--;) {
+            d = tr[d & b[(unsigned char)buf[i + j]]];
+            if (!d) {
+                // We actually advance by j + 1 since i is also incremented.
+                i += j;
+                break;
+            }
+        }
+        if (d & init) {
+            // We matched a possible reverse prefix of the expression, now
+            // verify the match forwards and fall back to advancing only one
+            // step.
+            d = init;
+            for (size_t j = i; d && j < len; j++) {
+                unsigned char c = buf[j];
+                d = t[d] & b[c];
+                if (d & init) return true;
+            }
+        }
+    }
+    return (init & fini) != 0;
+}
+
 static bool next_match(match_t* dst, match_t* src, regex_match_fun_t fun, string* s)
 {
     size_t offset = src->tags[1];
