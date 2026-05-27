@@ -61,10 +61,15 @@ bitwiseNFA maxBits nfa@NFA{..} | nfaNumStates > maxBits = Nothing
     fbits = M.map bits follow
     -- b = listArray (0, 255) (map getB ['\000'..'\255'])
     bmap = M.fromList [(c,b) | c <- ['\000'..'\255'], let b = getB c .&. (complement commonB), b /= 0]
-    charsets = M.map bits (M.unionsWith S.union (M.elems nfaTrans))
+    charsets_ = M.map bits (M.unionsWith S.union (M.elems nfaTrans))
+    charsets = M.fromListWith (.|.) . concatMap expandSets . M.toList $ charsets_
     anyB = M.findWithDefault 0 Any charsets
     getB c = M.findWithDefault 0 (C c) charsets
     commonB = and (map getB ['\000'..'\255']) .|. anyB
+
+    expandSets x@(Any,_) = [x]
+    expandSets x@(C _,_) = [x]
+    expandSets (CS cs,v) = [(C c, v) | c <- S.toList cs]
 
     buildT tbits = runSTUArray $ do
       arr <- newArray (0, 1 `shiftL` nfaNumStates - 1) (0 :: Word)
