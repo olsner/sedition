@@ -13,7 +13,7 @@ import Data.Map (Map)
 import qualified Data.Map as M
 -- import Data.Maybe
 -- import Data.Set (Set)
--- import qualified Data.Set as S
+import qualified Data.Set as S
 
 import Debug.Trace
 
@@ -214,6 +214,14 @@ hasTags (TagTerm _) = True
 hasTags (Cat x y) = hasTags x || hasTags y
 hasTags (Or x y) = hasTags x || hasTags y
 hasTags (Repeat _ _ x) = hasTags x
+
+allTags Empty = S.empty
+allTags NoMatch = S.empty
+allTags (Term _) = S.empty
+allTags (TagTerm t) = S.singleton t
+allTags (Cat x y) = allTags x `S.union` allTags y
+allTags (Or x y) = allTags x `S.union` allTags y
+allTags (Repeat _ _ x) = allTags x
 
 hasAnchors (Term BOL) = True
 hasAnchors (Term EOL) = True

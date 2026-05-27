@@ -1,5 +1,6 @@
 {-# LANGUAGE RecordWildCards,RecursiveDo #-}
 {-# LANGUAGE StandaloneDeriving,FlexibleInstances,FlexibleContexts #-}
+{-# LANGUAGE OverloadedStrings #-}
 
 -- Type for NFA automaton without tags, and possible with BOL and EOL
 -- transitions although Glushkov's construction will not use them.
@@ -18,6 +19,7 @@ import qualified Data.Set as S
 
 import Debug.Trace
 
+import GenC
 import Numeric
 
 import Regex.NFA.Type
@@ -157,3 +159,21 @@ findBitwise nfa@BitNFA{..} s
     log :: String -> Writer String ()
     log s = tell s >> tell "\n"
     q = censor (const mempty)
+
+
+bitwiseToC BitNFA{..} =
+  cArray stateType "t" bitT <>
+  cArray stateType "tr" bitTR <>
+  cArray stateType "b" bArray <>
+  stmt ("const uint64_t init = " <> wordHex bitInitStates) <>
+  stmt ("const uint64_t fini = " <> wordHex bitFinalStates) <>
+  stmt ("const uint64_t minLength = " <> intDec bitMinLength) <>
+  stmt ("const uint64_t machine = (minLength << 32) | (fini << 16) | init") <>
+  stmt ("result = match_bndm" <> bitWidth <> "(m, s, orig_offset, machine, t, tr, b)")
+  where
+    getB c = M.findWithDefault 0 c bitB .|. bitCommonB
+    bArray = listArray (0 :: Word, 255) (map getB ['\000'..'\255']) `asTypeOf` bitT
+    stateType = "uint" <> bitWidth <> "_t"
+    bitWidth | bitNumStates <= 8 = {-trace ("TODO: Could use 8-bit BNDM for " ++ show bitNumStates ++ " states")-} "16"
+             | bitNumStates <= 16 = "16"
+             | otherwise = error ("Support max 16 states in output, got " ++ show bitNumStates)

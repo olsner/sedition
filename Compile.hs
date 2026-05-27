@@ -266,10 +266,8 @@ compileRE r@IR.RE{..} = wrapper body
     usedTags | testCompare = Nothing
              | otherwise   = reUsedTags
     body | needRegexec = regexec
-         | testCompare = match_for_compare <> tdfa2c re usedTags <> compare_matches
-         | Regex.Literal s <- re = literal (C.pack s)
-         | Regex.Char c    <- re = literalChar c
-         | otherwise   = tdfa2c re usedTags
+         | testCompare = match_for_compare <> re2c usedTags re <> compare_matches
+         | otherwise   = re2c usedTags re
     re = Regex.parseString ere s
     isLiteral | Regex.Literal _ <- re = True
               | otherwise             = False
@@ -285,22 +283,19 @@ compileRE r@IR.RE{..} = wrapper body
     match m = fun "match_regexp" [m, "s", "orig_offset", regex r]
     -- regcomp is run at start of main so we just need to forward the arguments.
     regexec = stmt ("result = " <> match "m")
-    literal s = stmt ("result = " <> fun "match_literal" ["m", "s", "orig_offset", cstring s, intDec (C.length s)])
-    literalChar c = stmt ("result = " <> fun "match_char" ["m", "s", "orig_offset", intDec (fromEnum c)])
     match_for_compare =
         stmt "match_t m2" <>
         sfun "clear_match" ["&m2"] <>
-        stmt ("const bool result2 = " <> match "&m2")
+        stmt ("const bool result2 = " <> match "&m2") <>
+        -- When comparing, clear m completely (normally only the used parts are
+        -- overwritten).
+        sfun "clear_match" ["m"]
     compare_matches = sfun "compare_regexp_matches" ["result2", "&m2", "result", "m", "s", "orig_offset", "__PRETTY_FUNCTION__", cstring res]
 
     description =
         (if ere then "ERE: "  else "BRE: ") <> cstring s <>
         " -> ERE: " <> cstring res <> " (using " <> engineName <> ")"
 
+    -- TOOD We no longer know the engine name...
     engineName | needRegexec = "regexec"
-               | isLiteral = "memmem"
                | otherwise = "Regex2C"
-
-tdfa2c re used =
-    (if testCompare then sfun "clear_match" ["m"] else mempty) <>
-    byteString (re2c used re)

@@ -339,9 +339,12 @@ static void compare_regexp_matches(
     }
     if (diff) {
         fprintf(stderr, "%s: diff for regexp \"%s\"\n", function, original_re);
-        fprintf(stderr, "%s: on input \"%.*s\"\n",
-                function,
-                (int)(s->len - offset), s->buf + offset);
+        fprintf(stderr, "%s: on input \"%.*s\"\n", function,
+                (int)s->len, s->buf);
+        if (offset > 0) {
+            fprintf(stderr, "%s: at offset %zu: \"%.*s\"\n", function,
+                    offset, (int)(s->len - offset), s->buf + offset);
+        }
         abort();
     }
 }
@@ -441,7 +444,7 @@ static bool match_char(match_t* m, string* s, size_t offset, char c)
 //
 // This version includes both forward and reverse machines in order to verify
 // matches.
-static bool match_bndm16(string* s, uint64_t m, const uint16_t* t, const uint16_t* tr, const uint16_t* b)
+static bool match_bndm16(match_t* dst, string* s, const size_t orig_offset, uint64_t m, const uint16_t* t, const uint16_t* tr, const uint16_t* b)
 {
     const uint16_t init = m;
     const uint16_t fini = m >> 16;
@@ -450,10 +453,13 @@ static bool match_bndm16(string* s, uint64_t m, const uint16_t* t, const uint16_
     const size_t len = s->len;
 
     // TODO Always-matching regexes should avoid even calling this function...
-    if (init & fini)
+    if (init & fini) {
+        dst->tags[0] = orig_offset;
+        dst->tags[1] = orig_offset;
         return true;
+    }
 
-    for (size_t i = 0; i < len; i++) {
+    for (size_t i = orig_offset; i < len; i++) {
         if (i + min_length > len) return false;
 
         uint64_t d = 0xffff;
@@ -473,11 +479,16 @@ static bool match_bndm16(string* s, uint64_t m, const uint16_t* t, const uint16_
             for (size_t j = i; d && j < len; j++) {
                 unsigned char c = buf[j];
                 d = t[d] & b[c];
-                if (d & init) return true;
+                if (d & fini) {
+                    dst->tags[0] = i;
+                    dst->tags[1] = j + 1;
+                    return true;
+                }
             }
         }
     }
-    return (init & fini) != 0;
+
+    return false;
 }
 
 static bool next_match(match_t* dst, match_t* src, regex_match_fun_t fun, string* s)

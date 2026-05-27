@@ -69,16 +69,16 @@ compact nfa@NFA{..} = NFA {
     -- Don't care about the symbols/characters for these, just reachability
     -- Remove normal final states from transitions - we've already matched so
     -- we shouldn't keep going from those.
-    forwards = trace ("final states: " ++ show nfaFinalStates) $ tmReach nfaTrans `M.withoutKeys` nfaFinalStates
-    backwards = trace ("forwards map: " ++ show forwards) $ invertMap forwards
+    forwards = trace_ ("final states: " ++ show nfaFinalStates) $ tmReach nfaTrans `M.withoutKeys` nfaFinalStates
+    backwards = trace_ ("forwards map: " ++ show forwards) $ invertMap forwards
     -- Find all final states reachable from the start state
     liveFromStart = close originalStates forwards S.empty [s0]
     allFinalStates = nfaFinalStates
-    keptFinalStates = trace ("live from start: " ++ show liveFromStart) liveFromStart `S.intersection` allFinalStates
+    keptFinalStates = trace_ ("live from start: " ++ show liveFromStart) liveFromStart `S.intersection` allFinalStates
     -- Keep any states that can eventually reach a kept final state
-    kept = trace ("kept final states: " ++ show keptFinalStates) $ close liveFromStart backwards S.empty (S.toList keptFinalStates)
-    stateMap | not (s0 `S.member` kept) = trace "s0 not reachable - will always fail" M.empty
-             | otherwise = trace ("kept: " ++ show kept) $ M.fromList (zip (S.toList kept) (S <$> [0..]))
+    kept = trace_ ("kept final states: " ++ show keptFinalStates) $ close liveFromStart backwards S.empty (S.toList keptFinalStates)
+    stateMap | not (s0 `S.member` kept) = trace_ "s0 not reachable - will always fail" M.empty
+             | otherwise = trace_ ("kept: " ++ show kept) $ M.fromList (zip (S.toList kept) (S <$> [0..]))
 
     close limit trans = go
       where
@@ -91,6 +91,9 @@ compact nfa@NFA{..} = NFA {
     mapState s = M.lookup s stateMap
     mapStateSet = S.fromList . mapMaybe mapState . S.toList
     mapStateTM = mapKeysMaybe mapState . M.map (M.map mapStateSet)
+
+    -- trace_ s x = trace s x
+    trace_ _ x = x
 
 
 searchNFA nfa@NFA{..} = nfa { nfaTrans = addRetries s0 origStates nfaTrans }

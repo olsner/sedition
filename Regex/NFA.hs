@@ -65,7 +65,8 @@ testCompatible s = do
 testLinearize :: String -> LinearRegex
 testLinearize = linearize . removeTags . TR.testParseTagRegex
 
-nfaFromRegex = compact . genNFA . removeTags . TR.testParseTagRegex
+nfaFromRegexString = nfaFromRegex . TR.testParseTagRegex
+nfaFromRegex = compact . genNFA . removeTags
 
 testCompact :: Bool -> String -> IO ()
 testCompact showPre re = do
@@ -77,13 +78,13 @@ testCompact showPre re = do
   putStr (prettyStates nfa')
 
 testNFA :: String -> IO ()
-testNFA = putStr . prettyStates . nfaFromRegex
+testNFA = putStr . prettyStates . nfaFromRegexString
 
 testSearchNFA :: String -> IO ()
-testSearchNFA = putStr . prettyStates . searchNFA . nfaFromRegex
+testSearchNFA = putStr . prettyStates . searchNFA . nfaFromRegexString
 
 testBitNFA :: String -> Maybe (BitNFA Word)
-testBitNFA = bitwiseNFA 10 . nfaFromRegex
+testBitNFA = bitwiseNFA 10 . nfaFromRegexString
 
 -- Slight subtlety with this is that you shoud not "searchify" the NFA to use
 -- it with the backwards matching algorithm.
@@ -93,7 +94,7 @@ testBitNFA = bitwiseNFA 10 . nfaFromRegex
 -- scan multiple times when it doesn't skip.
 testBitwise :: String -> String -> IO ()
 testBitwise re s
-  | Just nfa <- bitwiseNFA 16 (nfaFromRegex re)
+  | Just nfa <- bitwiseNFA 16 (nfaFromRegexString re)
   , (res, log) <- runWriter (findBitwise nfa s) = putStr log >> print res
   | otherwise = putStrLn "<<too big nfa>>"
 

@@ -7,6 +7,7 @@ import qualified Compiler.Hoopl as H
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy.Char8 as L
 import qualified Data.ByteString.Builder as B
+import qualified Data.Array.IArray as A
 import Data.ByteString.Builder as B hiding (Builder, string8, intDec, byteString)
 import Data.Semigroup
 import Data.Word
@@ -17,6 +18,7 @@ type Builder = B.Builder
 
 string8 = B.string8
 intDec = B.intDec
+wordHex w = "0x" <> B.wordHex w
 -- word8HexFixed = Builder . B.word8HexFixed
 byteString = B.byteString
 word8Dec = B.word8Dec
@@ -86,3 +88,9 @@ cIf cond t f = fun "if " [cond] <> " {\n  " <> t <> "} else {\n  " <> f <> "}\n"
 cWhen cond t = fun "if " [cond] <> " {\n  " <> t <> "}\n"
 cWhile cond t = fun "while" [cond] <> "{\n  " <> t <> "}\n"
 
+cArray :: (A.IArray a e, A.Ix i, Show i, Num i, Show e) => Builder -> Builder -> a i e -> Builder
+cArray tp name array | fst (A.bounds array) == 0 =
+  comment (tp <> " " <> " " <> name <> ": " <> showB (A.bounds array)) <>
+  "static const " <> tp <> " " <> name <> "[] = {" <>
+  intercalateB ", " (map showB (A.elems array)) <>
+  "};\n"
