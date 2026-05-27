@@ -30,7 +30,7 @@ data LinearRegex
   | Term LinTrans
   | Cat LinearRegex LinearRegex
   | Or LinearRegex LinearRegex
-  | Repeat Int (Maybe Int) LinearRegex
+  | Repeat LinearRegex -- 0 to Inf repetitions -- TODO Would it be better to treat this as 1 or more? Can always or with empty...
   deriving (Show, Ord, Eq)
 
 allChars = S.fromList ['\000'..'\255']
@@ -54,7 +54,13 @@ linearize re = evalState (go re) 0
     go (TR.TagTerm _) = error "Tags should not be present here"
     go (TR.Cat x y) = Cat <$> go x <*> go y
     go (TR.Or x y) = Or <$> go x <*> go y
-    go (TR.Repeat n m x) = Repeat n m <$> go x
+    go (TR.Repeat m n x) = rep m n x
+
+    rep 0 Nothing x = Repeat <$> go x
+    rep n Nothing x = Cat <$> go x <*> rep (pred n) Nothing x
+    rep 0 (Just 0) _ = return Empty
+    rep 0 (Just m) x = Or Empty <$> rep 1 (Just m) x
+    rep n (Just m) x = Cat <$> go x <*> rep (pred n) (Just (pred m)) x
 
     mkt :: NFATrans -> State Int LinearRegex
     mkt t = nexts (\n -> Term (t, n))
@@ -80,7 +86,7 @@ nullable NoMatch = False
 nullable (Term _) = False
 nullable (Cat x y) = nullable x && nullable y
 nullable (Or x y) = nullable x || nullable y
-nullable (Repeat n _ x) = n == 0 || nullable x
+nullable (Repeat _) = True
 
 -- B = alphabet
 alphabet :: LinearRegex -> Set LinTrans
@@ -89,7 +95,7 @@ alphabet NoMatch = S.empty
 alphabet (Term t) = transFromTerm t
 alphabet (Or x y) = S.union (alphabet x) (alphabet y)
 alphabet (Cat x y) = S.union (alphabet x) (alphabet y)
-alphabet (Repeat _ _ x) = alphabet x
+alphabet (Repeat x) = alphabet x
 
 -- P = initials
 initials :: LinearRegex -> Set LinTrans
@@ -97,7 +103,7 @@ initials Empty = S.empty
 initials NoMatch = S.empty
 initials (Term t) = transFromTerm t
 initials (Or x y) = S.union (initials x) (initials y)
-initials (Repeat _ _ x) = initials x
+initials (Repeat x) = initials x
 initials (Cat x y) | nullable x = S.union (initials x) (initials y)
                    | otherwise  = initials x
 
@@ -107,7 +113,7 @@ finals Empty = S.empty
 finals NoMatch = S.empty
 finals (Term t) = transFromTerm t
 finals (Or x y) = S.union (finals x) (finals y)
-finals (Repeat _ _ x) = finals x
+finals (Repeat x) = finals x
 finals (Cat x y) | nullable y = S.union (finals x) (finals y)
                  | otherwise  = finals y
 
@@ -133,7 +139,7 @@ factors NoMatch = fmEmpty
 factors (Term _) = fmEmpty
 factors (Or x y) = factors x `fmUnion` factors y
 factors (Cat x y) = factors x `fmUnion` factors y `fmUnion` seams x y
-factors (Repeat _ _ x) = factors x `fmUnion` seams x x
+factors (Repeat x) = factors x `fmUnion` seams x x
 
 -- API?
 
