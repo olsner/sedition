@@ -174,6 +174,6 @@ bitwiseToC BitNFA{..} =
     getB c = M.findWithDefault 0 c bitB .|. bitCommonB
     bArray = listArray (0 :: Word, 255) (map getB ['\000'..'\255']) `asTypeOf` bitT
     stateType = "uint" <> bitWidth <> "_t"
-    bitWidth | bitNumStates <= 8 = {-trace ("TODO: Could use 8-bit BNDM for " ++ show bitNumStates ++ " states")-} "16"
+    bitWidth | bitNumStates <= 8 = "8"
              | bitNumStates <= 16 = "16"
              | otherwise = error ("Support max 16 states in output, got " ++ show bitNumStates)

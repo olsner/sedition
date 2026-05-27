@@ -462,9 +462,9 @@ static bool match_bndm16(match_t* dst, string* s, const size_t orig_offset, uint
     for (size_t i = orig_offset; i < len; i++) {
         if (i + min_length > len) return false;
 
-        uint64_t d = 0xffff;
+        uint32_t d = 0xffff;
         for (size_t j = min_length; j--;) {
-            d = tr[d & b[(unsigned char)buf[i + j]]];
+            d = tr[d & b[(uint8_t)buf[i + j]]];
             if (!d) {
                 // We actually advance by j + 1 since i is also incremented.
                 i += j;
@@ -477,7 +477,55 @@ static bool match_bndm16(match_t* dst, string* s, const size_t orig_offset, uint
             // step.
             d = init;
             for (size_t j = i; d && j < len; j++) {
-                unsigned char c = buf[j];
+                uint8_t c = buf[j];
+                d = t[d] & b[c];
+                if (d & fini) {
+                    dst->tags[0] = i;
+                    dst->tags[1] = j + 1;
+                    return true;
+                }
+            }
+        }
+    }
+
+    return false;
+}
+
+// BNDM matching with up to 8-bit state masks.
+static bool match_bndm8(match_t* dst, string* s, const size_t orig_offset, uint64_t m, const uint8_t* t, const uint8_t* tr, const uint8_t* b)
+{
+    const uint8_t init = m;
+    const uint8_t fini = m >> 16;
+    const size_t min_length = (m >> 32) & 0xff;
+    const char* buf = s->buf;
+    const size_t len = s->len;
+
+    // TODO Always-matching regexes should avoid even calling this function...
+    if (init & fini) {
+        dst->tags[0] = orig_offset;
+        dst->tags[1] = orig_offset;
+        return true;
+    }
+
+    for (size_t i = orig_offset; i < len; i++) {
+        if (i + min_length > len) return false;
+
+        uint32_t d = 0xff;
+        for (size_t j = min_length; j--;) {
+            d = tr[d & b[(uint8_t)buf[i + j]]];
+            if (!d) {
+                // We actually advance by j + 1 since i is also incremented.
+                i += j;
+                break;
+            }
+        }
+        if (d & init) {
+            // We matched a possible reverse prefix of the expression, now
+            // verify the match forwards and fall back to advancing only one
+            // step.
+            d = init;
+            for (size_t j = i; d && j < len; j++) {
+                uint8_t c = buf[j];
                 d = t[d] & b[c];
                 if (d & fini) {
                     dst->tags[0] = i;
