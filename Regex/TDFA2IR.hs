@@ -278,7 +278,7 @@ genIR tdfa = evalState (emitIR tdfa) (initState freeReg)
                | otherwise = R 0
 
 tdfa2ir :: Maybe IntSet -> Regex -> Program
-tdfa2ir used = genIR . genTDFA . genTNFA . fixTags . makeSearchRegex . unusedTags . tagRegex
+tdfa2ir used = genIR . genTDFA . genTNFA . fixTags . unusedTags . tagRegex
   where unusedTags | Just s <- used = selectTags (\(T t) -> t `IS.member` s)
                    | otherwise = id
 
