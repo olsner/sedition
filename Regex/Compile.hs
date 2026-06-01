@@ -33,16 +33,16 @@ data REImpl
   deriving (Show)
 
 re2asm :: Maybe IntSet -> Regex -> GenAsm.Builder ()
-re2asm used re = case re2ir used re of
+re2asm used re = case re2ir False used re of
   IR ir -> genAsm . fst . optimize 1000000 $ ir
-  Bitwise _ -> error "Call to bndm16 not implemented in Assembly" -- GenC.toByteString (bitwiseToC nfa)
+  Bitwise _ -> error "Call to bndm not implemented in Assembly" -- bitwiseToAsm nfa
   Literal s -> GenAsm.sfun "match_literal" [GenAsm.already arg0, GenAsm.already arg1, GenAsm.already arg2, GenAsm.setCString s, GenAsm.setInt (C.length s)]
   LiteralChar c -> GenAsm.sfun "match_char" [GenAsm.already arg0, GenAsm.already arg1, GenAsm.already arg2, GenAsm.setInt (fromEnum c)]
 
 -- TODO Allow controlling optimization fuel here, preferrably integrated in a
 -- way that lets you bisect both regex and Sed IR optimizations.
 re2c :: Maybe IntSet -> Regex -> GenC.Builder
-re2c used re = case re2ir used re of
+re2c used re = case re2ir True used re of
   IR ir -> genC . fst . optimize 1000000 $ ir
   Bitwise nfa -> bitwiseToC nfa
   Literal s -> GenC.stmt ("result = " <> fun "match_literal" ["m", "s", "orig_offset", cstring s, GenC.intDec (C.length s)])
@@ -51,12 +51,12 @@ re2c used re = case re2ir used re of
 -- TODO fixTags is done twice
 tdfaIR = genIR . minimize . genTDFA . genTNFA . fixTags
 
-re2ir :: Maybe IntSet -> Regex -> REImpl
-re2ir used orig_re
+re2ir :: Bool -> Maybe IntSet -> Regex -> REImpl
+re2ir useBNDM used orig_re
   -- start/end tags are set by both literal and BNDM matchers, but if more tags
   -- are used we need to use the complete TDFA construction.
   | hasSignificantTags          = IR (tdfaIR re)
-  | glushkovCompatible (removeTags re)
+  | useBNDM, glushkovCompatible (removeTags re)
   , Just nfa <- bitwiseNFA 16 (nfaFromRegex re) = Bitwise (trace_ ("Using BNDM for " ++ show re) nfa)
   | Regex.Literal s <- orig_re  = Literal (C.pack s)
   | Regex.Char c <- orig_re     = LiteralChar c
