@@ -19,6 +19,7 @@ import qualified Data.Set as S
 
 import Debug.Trace
 
+import GenAsm
 import GenC
 import Numeric
 
@@ -161,19 +162,45 @@ findBitwise nfa@BitNFA{..} s
     q = censor (const mempty)
 
 
-bitwiseToC BitNFA{..} =
+machineWord :: BitNFA Word -> Word
+machineWord BitNFA{..} =
+  (fromIntegral bitMinLength `shiftL` 32) .|.
+  (bitFinalStates `shiftL` 16) .|.
+  bitInitStates
+
+bitwiseToC nfa@BitNFA{..} =
   cArray stateType "t" bitT <>
   cArray stateType "tr" bitTR <>
   cArray stateType "b" bArray <>
-  stmt ("const uint64_t init = " <> wordHex bitInitStates) <>
-  stmt ("const uint64_t fini = " <> wordHex bitFinalStates) <>
-  stmt ("const uint64_t minLength = " <> intDec bitMinLength) <>
-  stmt ("const uint64_t machine = (minLength << 32) | (fini << 16) | init") <>
-  stmt ("result = match_bndm" <> bitWidth <> "(m, s, orig_offset, machine, t, tr, b)")
+  GenC.stmt ("const uint64_t machine = " <> wordHex (machineWord nfa)) <>
+  GenC.stmt ("result = match_bndm" <> bitWidth <> "(m, s, orig_offset, machine, t, tr, b)")
   where
     getB c = M.findWithDefault 0 c bitB .|. bitCommonB
     bArray = listArray (0 :: Word, 255) (map getB ['\000'..'\255']) `asTypeOf` bitT
     stateType = "uint" <> bitWidth <> "_t"
+    bitWidth | bitNumStates <= 8 = "8"
+             | bitNumStates <= 16 = "16"
+             | otherwise = error ("Support max 16 states in output, got " ++ show bitNumStates)
+
+bitwiseToAsm nfa@BitNFA{..} =
+  asmArray stateType ".t" bitT <>
+  asmArray stateType ".tr" bitTR <>
+  asmArray stateType ".b" bArray <>
+  -- m, s, orig_offset are already in the correct registers on entry, we can
+  -- just leave them.
+  -- arg3 = machine word
+  -- arg4 = t
+  -- arg5 = tr
+  -- arg6 = b
+  GenAsm.setAddr ".b" rax <>
+  op1 "push" "rax" <>
+  GenAsm.sfun ("match_bndm" <> bitWidth) [GenAsm.already arg0, GenAsm.already arg1, GenAsm.already arg2, GenAsm.setWord (machineWord nfa), GenAsm.setAddr ".t", GenAsm.setAddr ".tr"] <>
+  op "add" ["rsp", "8"]
+  where
+    getB c = M.findWithDefault 0 c bitB .|. bitCommonB
+    bArray = listArray (0 :: Word, 255) (map getB ['\000'..'\255']) `asTypeOf` bitT
+    stateType | bitNumStates <= 8 = "db"
+              | otherwise = "dw"
     bitWidth | bitNumStates <= 8 = "8"
              | bitNumStates <= 16 = "16"
              | otherwise = error ("Support max 16 states in output, got " ++ show bitNumStates)

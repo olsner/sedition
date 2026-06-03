@@ -13,6 +13,7 @@ import Control.Monad.Trans.Class
 import Control.Monad.Trans.State
 import Control.Monad.Trans.Writer
 
+import qualified Data.Array.IArray as A
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy.Char8 as L
 import qualified Data.ByteString.Builder as B
@@ -113,7 +114,10 @@ setInt val reg
   | val >= 0 && val < 2^(32 :: Int) = op "mov" [reg32 reg, intDec val]
   -- 32-bit immediate to 64-bit register is 7 bytes
   | val < 0 && val >= -2^(31 :: Int) = op "mov" [reg64 reg, intDec val]
-  | otherwise = op "movabs" [reg64 reg, intDec val]
+  | otherwise = op "mov" [reg64 reg, intDec val]
+
+setWord :: Word -> Reg -> Builder ()
+setWord w = setInt (fromIntegral w)
 
 setCChar val = setInt (fromEnum val)
 
@@ -264,7 +268,7 @@ intercalateB sep (x:xs) = x <> foldMap (sep <>) xs
 
 sfun :: Builder () -> [Reg -> Builder ()] -> Builder ()
 sfun function argFuns = do
-  when (length argFuns > length argRegs) (error "Too many arguments")
+  when (length argFuns > length argRegs) (error ("Too many arguments: " ++ show (length argFuns)))
   sequence_ (zipWith id argFuns argRegs)
   op1 "call" function
 
@@ -303,7 +307,7 @@ matchTagOffset i = 8 * i :: Int
 
 externalSymbols =
   -- functions
-  C.words "enable_stats_on_sigint compile_regexp next_input stdout match_char match_literal match_regexp clear_match copy_match next_match print_match clear_string append_char append_str append_substr append_cstr set_cstrz set_str set_str_const print wait_or_event is_all_eof is_eof read_line open_file read_file close_file free_regexp free_string tdfa2c_statistics random_string append_random_string format_int format_literal trans append_trans" ++
+  C.words "enable_stats_on_sigint compile_regexp next_input stdout match_char match_literal match_regexp clear_match copy_match next_match print_match clear_string append_char append_str append_substr append_cstr set_cstrz set_str set_str_const print wait_or_event is_all_eof is_eof read_line open_file read_file close_file free_regexp free_string tdfa2c_statistics random_string append_random_string format_int format_literal trans append_trans match_bndm8 match_bndm16" ++
   -- variables
   C.words "lineNumber"
 
@@ -344,3 +348,12 @@ matcherAssemblyFooter = do
   label ".end"
   setInt 0 res0
   epilogue
+
+asmArray :: (A.IArray a e, A.Ix i, Show i, Num i, Show e) => Builder () -> Builder () -> a i e -> Builder ()
+asmArray tp name array | fst (A.bounds array) == 0 =
+  section ".rodata" <>
+  comment (tp <> " " <> " " <> name <> ": " <> showB (A.bounds array)) <>
+  label name <>
+  (forM_ (A.elems array) $ \elem -> op1 tp (showB elem)) <>
+  section ".text"
+  | otherwise = error "Array lower bound must be 0"

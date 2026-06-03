@@ -292,10 +292,10 @@ compileRE r@IR.RE{..} = wrapper body
         sfun "clear_match" ["m"]
     compare_matches = sfun "compare_regexp_matches" ["result2", "&m2", "result", "m", "s", "orig_offset", "__PRETTY_FUNCTION__", cstring res]
 
-    description =
-        (if ere then "ERE: "  else "BRE: ") <> cstring s <>
-        " -> ERE: " <> cstring res <> " (using " <> engineName <> ")"
+    pattern | isLiteral = "Literal: " <> showB s
+            | ere = "ERE: " <> showB s
+            | otherwise = "BRE: " <> showB s <> " -> ERE: " <> showB res
+    description = pattern <> engineName
 
-    -- TOOD We no longer know the engine name...
-    engineName | needRegexec = "regexec"
-               | otherwise = "Regex2C"
+    engineName | needRegexec = " (using regexec)"
+               | otherwise = mempty

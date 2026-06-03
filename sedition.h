@@ -385,6 +385,8 @@ static void copy_match(match_t* dst, match_t* src)
     memcpy(dst, src, sizeof(match_t));
 }
 
+// TODO rename all these functions from match to search, so we can add a few
+// that actually do matching later (e.g. match whole string or prefix).
 static bool match_regexp(match_t* m, string* s, size_t offset, re_t* regex)
 {
     // Stop matching when we've consumed the whole string, but allow a zero
@@ -435,7 +437,7 @@ static bool match_char(match_t* m, string* s, size_t offset, char c)
     return res != NULL;
 }
 
-// BNDM matching with up to 16-bit state masks.
+// BNDM searching with up to 16-bit state masks.
 //
 // Machine description word:
 // bits 0-15: initial state (for a forward match!)
@@ -491,7 +493,7 @@ static bool match_bndm16(match_t* dst, string* s, const size_t orig_offset, uint
     return false;
 }
 
-// BNDM matching with up to 8-bit state masks.
+// BNDM searching with up to 8-bit state masks.
 static bool match_bndm8(match_t* dst, string* s, const size_t orig_offset, uint64_t m, const uint8_t* t, const uint8_t* tr, const uint8_t* b)
 {
     const uint8_t init = m;

@@ -283,19 +283,16 @@ forceRegcomp = False
 needRegcomp (IR.RE _ s ere _) = forceRegcomp ||
     not (isCompatible (Regex.parseString ere s))
 
-useLiterals = True
-
 compileRE r@IR.RE{..} = wrapper body
   where
     ere = reERE
     s = reString
     usedTags = reUsedTags
     body | needRegexec = regexec
-         | useLiterals, Regex.Literal s <- re = literal (C.pack s)
-         | useLiterals, Regex.Char c    <- re = literalChar c
          | otherwise   = re2asm usedTags re
     re = Regex.parseString ere s
     isLiteral | Regex.Literal _ <- re = True
+              | Regex.Char    _ <- re = True
               | otherwise             = False
     needRegexec = forceRegcomp || not (isCompatible re)
     res = C.pack $ Regex.reString re
@@ -304,17 +301,14 @@ compileRE r@IR.RE{..} = wrapper body
         comment "(match_t* m, string* s, const size_t orig_offset)" <>
         comment description <>
         comment ("Used tags: " <> showB reUsedTags) <>
-        (if isLiteral then comment ("Literal string: " <> showB re) else "") <>
         prologue <> b <> epilogue
     -- regcomp is run at start of main so we just need to forward the arguments.
     regexec = sfun "match_regexp" [already arg0, already arg1, already arg2, regex r]
-    literal s = sfun "match_literal" [already arg0, already arg1, already arg2, setCString s, setInt (C.length s)]
-    literalChar c = sfun "match_char" [already arg0, already arg1, already arg2, setInt (fromEnum c)]
 
-    description =
-        (if ere then "ERE: "  else "BRE: ") <> showB s <>
-        " -> ERE: " <> showB res <> " (using " <> engineName <> ")"
+    pattern | isLiteral = "Literal: " <> showB s
+            | ere = "ERE: " <> showB s
+            | otherwise = "BRE: " <> showB s <> " -> ERE: " <> showB res
+    description = pattern <> engineName
 
-    engineName | needRegexec = "regexec"
-               | useLiterals && isLiteral = "memmem"
-               | otherwise = "Regex2Asm"
+    engineName | needRegexec = " (using regexec)"
+               | otherwise = mempty

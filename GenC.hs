@@ -4,10 +4,11 @@
 module GenC where
 
 import qualified Compiler.Hoopl as H
+
+import qualified Data.Array.IArray as A
 import qualified Data.ByteString.Char8 as C
 import qualified Data.ByteString.Lazy.Char8 as L
 import qualified Data.ByteString.Builder as B
-import qualified Data.Array.IArray as A
 import Data.ByteString.Builder as B hiding (Builder, string8, intDec, byteString)
 import Data.Semigroup
 import Data.Word
@@ -94,3 +95,4 @@ cArray tp name array | fst (A.bounds array) == 0 =
   "static const " <> tp <> " " <> name <> "[] = {" <>
   intercalateB ", " (map showB (A.elems array)) <>
   "};\n"
+  | otherwise = error "Array lower bound must be 0"
